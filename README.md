@@ -6,11 +6,6 @@
 
 Mapas de ações, vínculos visuais entre etapas e um painel lateral que se acopla à sua tela.
 
-<!-- Substitua pelo seu screenshot principal -->
-<img src="docs/images/hero.png" alt="TODOCompanion" width="720" />
-
-</div>
-
 ---
 
 ## Visão geral
@@ -24,13 +19,12 @@ A janela vive recolhida na borda da tela e se expande quando você precisa dela.
 
 <div align="center">
 
-<!-- Substitua: vista do canva com cards e conexões -->
-<img src="docs/images/canva.png" alt="Modo Canva" width="640" />
+
+<img src="docs/canva.png" alt="Modo Canva" width="640" />
 
 <br /><br />
 
-<!-- Substitua: vista da lista hierárquica -->
-<img src="docs/images/lista.png" alt="Modo Lista" width="640" />
+<img src="docs/lista.png" alt="Modo Lista" width="640" />
 
 </div>
 
@@ -43,13 +37,6 @@ A janela vive recolhida na borda da tela e se expande quando você precisa dela.
 - Datas de início/fim e barra de metadados centralizada
 - Anexos por main task
 - Persistência local via SQLite (Tauri) com fallback em `localStorage`
-
-<div align="center">
-
-<!-- Substitua: detalhe da barra de meta / criticidade -->
-<img src="docs/images/meta.png" alt="Barra de metadados" width="520" />
-
-</div>
 
 ## Stack
 
@@ -80,21 +67,6 @@ src-tauri/        Backend Rust + configuração Tauri
 assets/           Recursos estáticos
 scripts/          Scripts auxiliares
 ```
-
-## Galeria
-
-<div align="center">
-
-<!-- Espaços para imagens adicionais -->
-<img src="docs/images/screen-1.png" alt="" width="420" />
-<img src="docs/images/screen-2.png" alt="" width="420" />
-
-<br /><br />
-
-<img src="docs/images/screen-3.png" alt="" width="420" />
-<img src="docs/images/screen-4.png" alt="" width="420" />
-
-</div>
 
 ## Status
 

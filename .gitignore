@@ -44,3 +44,6 @@ assets/fonts/SFProFonts/
 *.pkg
 Payload
 Payload~
+
+# Release artifacts produced by scripts/release.ps1
+TodoApp-*.exe

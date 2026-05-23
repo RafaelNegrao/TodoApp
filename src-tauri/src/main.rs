@@ -26,6 +26,10 @@ const DB_FILE: &str = "data.sqlite";
 const GITHUB_API_LATEST: &str =
     "https://api.github.com/repos/RafaelNegrao/TodoApp/releases/latest";
 const USER_AGENT: &str = "TodoApp-Updater";
+#[cfg(target_os = "windows")]
+const AUTOSTART_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+#[cfg(target_os = "windows")]
+const AUTOSTART_VALUE: &str = "TODOCompanion";
 
 struct DbState(Mutex<Connection>);
 
@@ -170,6 +174,83 @@ fn attachment_open(
         return Err("Arquivo nao encontrado".to_string());
     }
     open_path(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
+fn get_autostart_enabled() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        match hkcu.open_subkey(AUTOSTART_KEY) {
+            Ok(key) => Ok(key.get_value::<String, _>(AUTOSTART_VALUE).is_ok()),
+            Err(_) => Ok(false),
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+fn set_autostart_enabled(enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        write_autostart(enabled).map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = enabled;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn write_autostart(enabled: bool) -> std::io::Result<()> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = hkcu.create_subkey(AUTOSTART_KEY)?;
+    if enabled {
+        let exe = env::current_exe()?;
+        let value = format!("\"{}\"", exe.to_string_lossy());
+        key.set_value(AUTOSTART_VALUE, &value)?;
+    } else {
+        let _ = key.delete_value(AUTOSTART_VALUE);
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn refresh_autostart_path_if_needed() {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok(key) = hkcu.open_subkey_with_flags(AUTOSTART_KEY, KEY_READ | KEY_WRITE) else {
+        return;
+    };
+    let Ok(current_value): Result<String, _> = key.get_value(AUTOSTART_VALUE) else {
+        return;
+    };
+    let Ok(exe) = env::current_exe() else {
+        return;
+    };
+    let expected = format!("\"{}\"", exe.to_string_lossy());
+    if current_value != expected {
+        let _ = key.set_value(AUTOSTART_VALUE, &expected);
+    }
 }
 
 #[tauri::command]
@@ -582,6 +663,9 @@ fn main() {
         cleanup_old_executable(Path::new(&args[2]));
     }
 
+    #[cfg(target_os = "windows")]
+    refresh_autostart_path_if_needed();
+
     tauri::Builder::default()
         .setup(|app| {
             let conn = init_db(app.handle()).map_err(|e| {
@@ -624,6 +708,10 @@ fn main() {
             attachment_open,
             check_for_update,
             download_and_apply_update,
+            get_app_version,
+            quit_app,
+            get_autostart_enabled,
+            set_autostart_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TODOCompanion");

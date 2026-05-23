@@ -19,3 +19,6 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 ico = "0.3"
 ureq = { version = "2", features = ["json", "tls"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.52"

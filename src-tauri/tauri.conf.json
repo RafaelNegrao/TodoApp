@@ -31,7 +31,7 @@
     "active": false,
     "targets": [],
     "icon": [
-      "icons/icon.ico",
+      "../assets/icon.ico",
       "icons/icon.png"
     ]
   }

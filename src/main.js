@@ -1,6 +1,6 @@
 const STORAGE_KEY = "todocompanion.state.v4";
 const LEGACY_STORAGE_KEYS = ["todocompanion.state.v3", "todocompanion.state.v2", "todocompanion.state.v1"];
-const MIN_ZOOM = 0.45;
+const MIN_ZOOM = 0.15;
 const MAX_ZOOM = 1.8;
 
 const STATUS_ORDER = ["ongoing", "stopped", "complete"];
@@ -137,6 +137,9 @@ async function init() {
   setupFileDrop().catch(err => console.warn("Drag-and-drop indisponivel", err));
 
   edgeToggle.addEventListener("click", togglePanel);
+  window.addEventListener("app:collapse", () => {
+    if (expanded) togglePanel();
+  });
   centerCanvasButton.addEventListener("click", centerCanvasOnTasks);
   organizeCanvasButton.addEventListener("click", organizeCanvasCards);
   canvasAttachButton.addEventListener("click", handleAttachButtonClick);
@@ -233,6 +236,7 @@ async function init() {
   });
 
   scheduleUpdaterCheck();
+  initSettingsModule();
 }
 
 function scheduleUpdaterCheck() {
@@ -241,6 +245,12 @@ function scheduleUpdaterCheck() {
       .then(({ runUpdaterFlow }) => runUpdaterFlow())
       .catch(error => console.warn("[updater] failed to load", error));
   }, 600);
+}
+
+function initSettingsModule() {
+  import("./settings/index.js")
+    .then(({ initSettings }) => initSettings())
+    .catch(error => console.warn("[settings] failed to load", error));
 }
 
 async function initializePanel() {
@@ -860,7 +870,7 @@ function renderNodes() {
       <button class="port port-out${pendingLink?.from === node.id || (linkDragState?.nodeId === node.id && linkDragState?.port === "out") ? " pending" : ""}" data-port="out" type="button" aria-label="Saida"></button>
       <div class="card-top">
         <button class="card-check" type="button" aria-label="Concluir" title="Concluir">${status === "complete" ? icons.check : ""}</button>
-        <input class="card-title" value="${escapeAttr(node.title)}" placeholder="Acao" />
+        <input class="card-title" value="${escapeAttr(node.title)}" />
         <div class="crit-wrap crit-${node.criticality ?? 0}">
           <div class="crit-track">
             <span class="crit-dot"></span>
@@ -874,7 +884,7 @@ function renderNodes() {
       <div class="card-status-row">
         <button class="status-chip status-${status}" type="button" aria-label="Status" title="Status">${STATUS_META[status].label}</button>
       </div>
-      <textarea class="card-body" placeholder="Campo multi linha">${escapeHtml(node.body)}</textarea>
+      <textarea class="card-body">${escapeHtml(node.body)}</textarea>
       <button class="resize-handle" type="button" aria-label="Redimensionar" title="Redimensionar"></button>
     `;
 
@@ -1067,8 +1077,8 @@ function renderActionList() {
       <span class="action-list-anchor" aria-hidden="true"></span>
       <button class="action-list-check" type="button" aria-label="Concluir" title="Concluir">${status === "complete" ? icons.check : ""}</button>
       <div class="action-list-main">
-        <input class="action-list-title" value="${escapeAttr(node.title)}" placeholder="Nova acao" aria-label="Titulo da acao" />
-        <textarea class="action-list-body" rows="1" aria-label="Descricao da acao" placeholder="Descricao">${escapeHtml(node.body)}</textarea>
+        <input class="action-list-title" value="${escapeAttr(node.title)}" aria-label="Titulo da acao" />
+        <textarea class="action-list-body" rows="1" aria-label="Descricao da acao">${escapeHtml(node.body)}</textarea>
       </div>
       <span class="action-list-status" aria-label="Status">${STATUS_META[status].label}</span>
       <button class="action-list-reply" type="button" aria-label="Responder acao" title="Responder acao">+</button>
@@ -1209,12 +1219,13 @@ function renderActionListLinks() {
 
     const start = getActionListAnchorPoint(fromEl, shellRect);
     const end = getActionListAnchorPoint(toEl, shellRect);
-    const startY = start.y;
+    const ANCHOR_GAP = 6;
+    const direction = end.y >= start.y ? 1 : -1;
+    const startY = start.y + ANCHOR_GAP * direction;
     const endY = end.y;
     const startX = Math.max(16, Math.min(start.x, end.x - 34));
     const endX = end.x;
     const radius = 14;
-    const direction = endY >= startY ? 1 : -1;
     const curveY = endY - radius * direction;
     const turnX = Math.min(startX + radius, endX - 8);
     const status = normalizeStatus(toNode.status);
@@ -2368,6 +2379,29 @@ function removeMainTask(taskId) {
   render();
 }
 
+function findSnapTarget(drag, cursorWorld) {
+  const board = activeBoard();
+  const zoom = board.view?.zoom || 1;
+  const snapRadiusWorld = 32 / zoom;
+
+  const candidatePort = isOutputPort(drag.port) ? "in" : "out";
+
+  let best = null;
+  let bestDist = snapRadiusWorld;
+
+  for (const node of board.nodes) {
+    if (node.id === drag.nodeId) continue;
+    const point = getPortPoint(node, candidatePort);
+    const dist = Math.hypot(point.x - cursorWorld.x, point.y - cursorWorld.y);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = { nodeId: node.id, port: candidatePort, point };
+    }
+  }
+
+  return best;
+}
+
 function startLinkDrag(event, nodeId, port) {
   event.preventDefault();
   event.stopPropagation();
@@ -2400,25 +2434,31 @@ function startLinkDrag(event, nodeId, port) {
       return;
     }
 
-    const nextPoint = screenToWorld(moveEvent.clientX, moveEvent.clientY);
-    linkDragState.x = nextPoint.x;
-    linkDragState.y = nextPoint.y;
+    const cursorWorld = screenToWorld(moveEvent.clientX, moveEvent.clientY);
+    const snap = findSnapTarget(linkDragState, cursorWorld);
 
-    const el = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
-    const hoverPort = el?.closest(".port");
-    const targetCard = hoverPort?.closest(".task-card");
-    const targetNodeId = targetCard?.dataset.id;
-    const targetPortDir = hoverPort?.dataset.port;
-    const isValid = targetNodeId && targetNodeId !== linkDragState.nodeId && targetPortDir &&
-      ((isOutputPort(linkDragState.port) && isInputPort(targetPortDir)) ||
-       (isInputPort(linkDragState.port) && isOutputPort(targetPortDir)));
+    if (snap) {
+      linkDragState.x = snap.point.x;
+      linkDragState.y = snap.point.y;
+      linkDragState.snappedNodeId = snap.nodeId;
+      linkDragState.snappedPort = snap.port;
+    } else {
+      linkDragState.x = cursorWorld.x;
+      linkDragState.y = cursorWorld.y;
+      linkDragState.snappedNodeId = null;
+      linkDragState.snappedPort = null;
+    }
+
+    const hoverPort = snap
+      ? document.querySelector(`.task-card[data-id="${snap.nodeId}"] .port-${snap.port}`)
+      : null;
 
     if (linkDragState.hoverPortEl && linkDragState.hoverPortEl !== hoverPort) {
       linkDragState.hoverPortEl.classList.remove("target");
       linkDragState.hoverPortEl = null;
     }
 
-    if (isValid) {
+    if (hoverPort) {
       linkDragState.portEl.classList.add("will-connect");
       if (hoverPort !== linkDragState.hoverPortEl) {
         hoverPort.classList.add("target");
@@ -2449,11 +2489,19 @@ function finishLinkDrag(event) {
   const drag = linkDragState;
   linkDragState = null;
 
-  const target = document.elementFromPoint(event.clientX, event.clientY);
-  const portEl = target?.closest(".port");
-  const targetCard = portEl?.closest(".task-card");
-  const targetNodeId = targetCard?.dataset.id;
-  const targetPort = portEl?.dataset.port;
+  let targetNodeId = null;
+  let targetPort = null;
+
+  if (drag.snappedNodeId && drag.snappedPort) {
+    targetNodeId = drag.snappedNodeId;
+    targetPort = drag.snappedPort;
+  } else {
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    const portEl = target?.closest(".port");
+    const targetCard = portEl?.closest(".task-card");
+    targetNodeId = targetCard?.dataset.id;
+    targetPort = portEl?.dataset.port;
+  }
 
   let createdNodeId = null;
 

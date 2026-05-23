@@ -1065,22 +1065,22 @@ button {
 
 .action-list-connector {
   fill: none;
-  stroke: rgba(245, 242, 238, 0.22);
+  stroke: rgb(245, 242, 238);
   stroke-width: 1.15;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
 .action-list-connector.status-stopped {
-  stroke: rgba(245, 242, 238, 0.22);
+  stroke: rgb(245, 242, 238);
 }
 
 .action-list-connector.status-complete {
-  stroke: rgba(245, 242, 238, 0.22);
+  stroke: rgb(245, 242, 238);
 }
 
 .action-list-connector-dot {
-  fill: rgba(245, 242, 238, 0.52);
+  fill: rgb(245, 242, 238);
   stroke: var(--surface-strong);
   stroke-width: 2;
 }
@@ -2059,11 +2059,12 @@ button {
 
 .modal-backdrop {
   position: absolute;
-  inset: 0;
+  inset: 0 0 0 34px;
   z-index: 30;
   display: grid;
   place-items: center;
   padding: 24px;
+  border-radius: 10px 0 0 10px;
   background: rgba(10, 10, 12, 0.56);
   backdrop-filter: blur(10px);
   animation: backdrop-fade var(--t-mid) var(--ease-out);
@@ -2351,4 +2352,121 @@ button {
   .user-task-card {
     flex-basis: 200px;
   }
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topbar-action {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease-out),
+    color var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out);
+}
+
+.topbar-action:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.topbar-action.topbar-close:hover {
+  color: #ffb6ad;
+  background: rgba(226, 92, 79, 0.18);
+  border-color: rgba(226, 92, 79, 0.35);
+}
+
+.topbar-action svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.settings-modal {
+  width: min(380px, calc(100vw - 48px));
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.settings-row .settings-label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-row .settings-value {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 620;
+  letter-spacing: 0.02em;
+}
+
+.settings-toggle {
+  cursor: pointer;
+}
+
+.settings-toggle input[type="checkbox"] {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settings-switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  transition: background var(--t-fast) var(--ease-out);
+}
+
+.settings-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #fff;
+  transition: transform var(--t-fast) var(--ease-out);
+}
+
+.settings-toggle input:checked + .settings-switch {
+  background: var(--accent);
+}
+
+.settings-toggle input:checked + .settings-switch::after {
+  transform: translateX(16px);
+}
+
+.settings-toggle input:focus-visible + .settings-switch {
+  outline: 2px solid rgba(240, 138, 91, 0.5);
+  outline-offset: 2px;
 }

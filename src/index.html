@@ -24,7 +24,19 @@
               <small>Mapa de tarefas</small>
             </span>
           </div>
-
+          <div class="topbar-actions">
+            <button class="topbar-action" id="openSettingsButton" type="button" aria-label="Configurações" title="Configurações">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+            <button class="topbar-action topbar-close" id="closeAppButton" type="button" aria-label="Fechar" title="Fechar aplicativo">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </header>
 
         <nav class="tabs-row">
@@ -162,6 +174,27 @@
           <button class="modal-button primary" type="submit">Criar</button>
         </div>
       </form>
+
+      <div class="modal-backdrop" id="settingsModal" hidden>
+        <div class="canvas-modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+          <header>
+            <strong id="settingsModalTitle">Configurações</strong>
+            <button class="modal-icon" id="settingsCloseIcon" type="button" aria-label="Fechar" title="Fechar">x</button>
+          </header>
+          <div class="settings-row">
+            <span class="settings-label">Versão</span>
+            <span class="settings-value" id="settingsVersionValue">—</span>
+          </div>
+          <label class="settings-row settings-toggle">
+            <span class="settings-label">Iniciar com o Windows</span>
+            <input type="checkbox" id="settingsAutostartInput" />
+            <span class="settings-switch" aria-hidden="true"></span>
+          </label>
+          <footer>
+            <button class="modal-button secondary" id="settingsDoneButton" type="button">Fechar</button>
+          </footer>
+        </div>
+      </div>
 
       <div class="modal-backdrop" id="confirmDeleteModal" hidden>
         <form class="canvas-modal confirm-modal" id="confirmDeleteForm">
