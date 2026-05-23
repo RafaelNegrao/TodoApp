@@ -39,6 +39,7 @@ const icons = {
 
 const appEl = document.querySelector("#app");
 const edgeToggle = document.querySelector("#edgeToggle");
+const maximizeAppButton = document.querySelector("#maximizeAppButton");
 const tabsEl = document.querySelector("#tabs");
 const nodesLayer = document.querySelector("#nodesLayer");
 const linkLayer = document.querySelector("#linkLayer");
@@ -104,6 +105,7 @@ dockScrollRight.innerHTML = icons.chevronRight;
 
 let state = null;
 let expanded = false;
+let maximized = false;
 let linkMode = false;
 let pendingLink = null;
 let selectedNodeId = null;
@@ -137,6 +139,7 @@ async function init() {
   setupFileDrop().catch(err => console.warn("Drag-and-drop indisponivel", err));
 
   edgeToggle.addEventListener("click", togglePanel);
+  maximizeAppButton?.addEventListener("click", toggleMaximize);
   window.addEventListener("app:collapse", () => {
     if (expanded) togglePanel();
   });
@@ -267,13 +270,34 @@ async function initializePanel() {
 
 async function togglePanel() {
   expanded = !expanded;
+  if (!expanded) maximized = false;
+  await applyPanelSize();
+}
+
+async function toggleMaximize() {
+  if (!expanded) {
+    expanded = true;
+    maximized = true;
+  } else {
+    maximized = !maximized;
+  }
+  await applyPanelSize();
+}
+
+async function applyPanelSize() {
   appEl.classList.toggle("expanded", expanded);
   appEl.classList.toggle("collapsed", !expanded);
+  appEl.classList.toggle("maximized", expanded && maximized);
   edgeToggle.setAttribute("aria-label", expanded ? "Recolher painel" : "Abrir painel");
+  if (maximizeAppButton) {
+    const label = maximized ? "Restaurar" : "Maximizar";
+    maximizeAppButton.setAttribute("aria-label", label);
+    maximizeAppButton.setAttribute("title", label);
+  }
 
   if (invoke) {
     try {
-      await invoke("set_panel_expanded", { expanded });
+      await invoke("set_panel_expanded", { expanded, maximized });
     } catch (error) {
       console.warn("Could not resize side panel", error);
     }

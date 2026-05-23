@@ -64,16 +64,20 @@ fn initialize_panel(app: tauri::AppHandle) -> Result<PanelGeometry, String> {
         .get_webview_window("main")
         .ok_or_else(|| "Main window was not found".to_string())?;
 
-    position_panel(&window, false)
+    position_panel(&window, false, false)
 }
 
 #[tauri::command]
-fn set_panel_expanded(app: tauri::AppHandle, expanded: bool) -> Result<PanelGeometry, String> {
+fn set_panel_expanded(
+    app: tauri::AppHandle,
+    expanded: bool,
+    maximized: Option<bool>,
+) -> Result<PanelGeometry, String> {
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "Main window was not found".to_string())?;
 
-    let geometry = position_panel(&window, expanded)?;
+    let geometry = position_panel_animated(&window, expanded, maximized.unwrap_or(false))?;
     if expanded {
         let _ = window.set_focus();
     }
@@ -537,7 +541,11 @@ fn init_db(app: &tauri::AppHandle) -> Result<Connection, String> {
     Ok(conn)
 }
 
-fn position_panel(window: &WebviewWindow, expanded: bool) -> Result<PanelGeometry, String> {
+fn compute_panel_target(
+    window: &WebviewWindow,
+    expanded: bool,
+    maximized: bool,
+) -> Result<(PanelGeometry, PhysicalSize<u32>, PhysicalPosition<i32>), String> {
     let monitor = window
         .current_monitor()
         .map_err(|err| err.to_string())?
@@ -558,9 +566,11 @@ fn position_panel(window: &WebviewWindow, expanded: bool) -> Result<PanelGeometr
     let y = screen_pos.y + ((screen_height.saturating_sub(height)) / 2) as i32;
 
     let max_width = screen_width.saturating_sub(24).max(COLLAPSED_WIDTH);
-    let preferred_width = ((screen_width as f64) * 0.50).round() as u32;
+    let width_ratio = if maximized { 0.90 } else { 0.50 };
+    let preferred_width = ((screen_width as f64) * width_ratio).round() as u32;
     let max_panel_width = max_width.saturating_sub(HANDLE_GUTTER).max(COLLAPSED_WIDTH);
-    let panel_width = preferred_width.clamp(620, 2000).min(max_panel_width);
+    let upper_bound = if maximized { max_panel_width } else { 2000 };
+    let panel_width = preferred_width.max(620).min(upper_bound).min(max_panel_width);
     let expanded_width = panel_width + HANDLE_GUTTER;
     let width = if expanded {
         expanded_width
@@ -570,20 +580,91 @@ fn position_panel(window: &WebviewWindow, expanded: bool) -> Result<PanelGeometr
 
     let x = screen_pos.x + screen_width as i32 - width as i32 - RIGHT_MARGIN;
 
-    window
-        .set_size(PhysicalSize::new(width, height))
-        .map_err(|err| err.to_string())?;
-    window
-        .set_position(PhysicalPosition::new(x, y))
-        .map_err(|err| err.to_string())?;
+    Ok((
+        PanelGeometry {
+            collapsed_width: COLLAPSED_WIDTH,
+            expanded_width,
+            height,
+            x,
+            y,
+        },
+        PhysicalSize::new(width, height),
+        PhysicalPosition::new(x, y),
+    ))
+}
 
-    Ok(PanelGeometry {
-        collapsed_width: COLLAPSED_WIDTH,
-        expanded_width,
-        height,
-        x,
-        y,
-    })
+fn animate_window_to(window: WebviewWindow, target_size: PhysicalSize<u32>, target_pos: PhysicalPosition<i32>) {
+    let Ok(start_size) = window.outer_size() else {
+        let _ = window.set_size(target_size);
+        let _ = window.set_position(target_pos);
+        return;
+    };
+    let Ok(start_pos) = window.outer_position() else {
+        let _ = window.set_size(target_size);
+        let _ = window.set_position(target_pos);
+        return;
+    };
+
+    if start_size.width == target_size.width
+        && start_size.height == target_size.height
+        && start_pos.x == target_pos.x
+        && start_pos.y == target_pos.y
+    {
+        return;
+    }
+
+    const FRAMES: u32 = 16;
+    const TOTAL_MS: u64 = 220;
+    const FRAME_MS: u64 = TOTAL_MS / FRAMES as u64;
+    let sw = start_size.width as f64;
+    let sh = start_size.height as f64;
+    let sx = start_pos.x as f64;
+    let sy = start_pos.y as f64;
+    let tw = target_size.width as f64;
+    let th = target_size.height as f64;
+    let tx = target_pos.x as f64;
+    let ty = target_pos.y as f64;
+
+    thread::spawn(move || {
+        for i in 1..FRAMES {
+            let t = i as f64 / FRAMES as f64;
+            let eased = 1.0 - (1.0 - t).powi(3);
+            let w = (sw + (tw - sw) * eased).round().max(1.0) as u32;
+            let h = (sh + (th - sh) * eased).round().max(1.0) as u32;
+            let x = (sx + (tx - sx) * eased).round() as i32;
+            let y = (sy + (ty - sy) * eased).round() as i32;
+            let _ = window.set_size(PhysicalSize::new(w, h));
+            let _ = window.set_position(PhysicalPosition::new(x, y));
+            thread::sleep(Duration::from_millis(FRAME_MS));
+        }
+        let _ = window.set_size(target_size);
+        let _ = window.set_position(target_pos);
+    });
+}
+
+fn position_panel(
+    window: &WebviewWindow,
+    expanded: bool,
+    maximized: bool,
+) -> Result<PanelGeometry, String> {
+    let (geometry, size, pos) = compute_panel_target(window, expanded, maximized)?;
+    window
+        .set_size(size)
+        .map_err(|err| err.to_string())?;
+    window
+        .set_position(pos)
+        .map_err(|err| err.to_string())?;
+    Ok(geometry)
+}
+
+fn position_panel_animated(
+    window: &WebviewWindow,
+    expanded: bool,
+    maximized: bool,
+) -> Result<PanelGeometry, String> {
+    let (geometry, size, pos) = compute_panel_target(window, expanded, maximized)?;
+    animate_window_to(window.clone(), size, pos);
+    Ok(geometry)
 }
 
 fn tray_icon_image() -> Option<tauri::image::Image<'static>> {
@@ -623,7 +704,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "tray_show" => {
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = position_panel(&window, true);
+                    let _ = position_panel(&window, true, false);
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
@@ -646,7 +727,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             } = event
             {
                 if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    let _ = position_panel(&window, true);
+                    let _ = position_panel(&window, true, false);
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
@@ -676,7 +757,7 @@ fn main() {
 
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_always_on_top(true);
-                if let Err(err) = position_panel(&window, false) {
+                if let Err(err) = position_panel(&window, false, false) {
                     eprintln!("Failed to position TODOCompanion: {err}");
                 }
 
