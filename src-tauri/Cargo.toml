@@ -5,11 +5,17 @@ description = "A right-edge task companion built with Tauri"
 authors = ["Rafael"]
 edition = "2021"
 
+[[bin]]
+name = "TodoApp"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
+ico = "0.3"
+ureq = { version = "2", features = ["json", "tls"] }

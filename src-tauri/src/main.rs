@@ -1,12 +1,20 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::env;
 use std::fs;
+use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
+use std::thread;
+use std::time::Duration;
 
 use rusqlite::{params, Connection};
-use serde::Serialize;
-use tauri::{Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
+use serde::{Deserialize, Serialize};
+use tauri::{
+    menu::{MenuBuilder, MenuItemBuilder},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow,
+};
 
 const COLLAPSED_WIDTH: u32 = 34;
 const COLLAPSED_HEIGHT: u32 = 64;
@@ -15,6 +23,9 @@ const RIGHT_MARGIN: i32 = 5;
 const HEIGHT_RATIO: f64 = 0.90;
 const APP_FOLDER: &str = "TODOCompanion";
 const DB_FILE: &str = "data.sqlite";
+const GITHUB_API_LATEST: &str =
+    "https://api.github.com/repos/RafaelNegrao/TodoApp/releases/latest";
+const USER_AGENT: &str = "TodoApp-Updater";
 
 struct DbState(Mutex<Connection>);
 
@@ -31,6 +42,15 @@ struct PanelGeometry {
 struct AttachmentInfo {
     file: String,
     original_name: String,
+    size: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct UpdateInfo {
+    current_version: String,
+    latest_version: String,
+    download_url: String,
+    asset_name: String,
     size: u64,
 }
 
@@ -150,6 +170,204 @@ fn attachment_open(
         return Err("Arquivo nao encontrado".to_string());
     }
     open_path(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    let current = app.package_info().version.to_string();
+
+    let result: Result<Option<UpdateInfo>, String> =
+        tauri::async_runtime::spawn_blocking(move || fetch_latest_release(&current))
+            .await
+            .map_err(|e| e.to_string())?;
+
+    result
+}
+
+#[tauri::command]
+async fn download_and_apply_update(
+    window: tauri::WebviewWindow,
+    info: UpdateInfo,
+) -> Result<(), String> {
+    let current_exe = env::current_exe().map_err(|e| e.to_string())?;
+    let dir = current_exe
+        .parent()
+        .ok_or_else(|| "Diretorio do executavel nao encontrado".to_string())?
+        .to_path_buf();
+    let new_exe_path = dir.join(&info.asset_name);
+
+    if new_exe_path == current_exe {
+        return Err("O executavel atual ja possui o nome da nova versao".to_string());
+    }
+
+    let url = info.download_url.clone();
+    let dest = new_exe_path.clone();
+    let emit_window = window.clone();
+
+    tauri::async_runtime::spawn_blocking(move || download_to_file(&url, &dest, &emit_window))
+        .await
+        .map_err(|e| e.to_string())??;
+
+    // Spawn the new exe, asking it to delete the old one once we exit.
+    std::process::Command::new(&new_exe_path)
+        .arg("--cleanup-old")
+        .arg(current_exe.as_os_str())
+        .spawn()
+        .map_err(|e| format!("Falha ao iniciar o novo executavel: {e}"))?;
+
+    // Exit the current process so the file lock releases and the new exe's
+    // cleanup loop can delete the old binary.
+    window.app_handle().exit(0);
+
+    Ok(())
+}
+
+fn fetch_latest_release(current_version: &str) -> Result<Option<UpdateInfo>, String> {
+    let response = ureq::get(GITHUB_API_LATEST)
+        .set("User-Agent", USER_AGENT)
+        .set("Accept", "application/vnd.github+json")
+        .timeout(Duration::from_secs(15))
+        .call()
+        .map_err(|e| format!("Falha ao consultar GitHub: {e}"))?;
+
+    let release: serde_json::Value = response
+        .into_json()
+        .map_err(|e| format!("Resposta invalida: {e}"))?;
+
+    let tag = release["tag_name"].as_str().unwrap_or("").trim();
+    let latest = tag.trim_start_matches('v').trim_start_matches('V');
+    if latest.is_empty() {
+        return Ok(None);
+    }
+    if compare_versions(latest, current_version) <= 0 {
+        return Ok(None);
+    }
+
+    let expected_name = format!("TodoApp-{}.exe", latest);
+    let assets = release["assets"].as_array().cloned().unwrap_or_default();
+
+    let asset = assets
+        .iter()
+        .find(|a| a["name"].as_str() == Some(expected_name.as_str()))
+        .ok_or_else(|| format!("Asset '{expected_name}' nao encontrado no release"))?;
+
+    let url = asset["browser_download_url"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    if url.is_empty() {
+        return Err("URL de download ausente".to_string());
+    }
+
+    let size = asset["size"].as_u64().unwrap_or(0);
+
+    Ok(Some(UpdateInfo {
+        current_version: current_version.to_string(),
+        latest_version: latest.to_string(),
+        download_url: url,
+        asset_name: expected_name,
+        size,
+    }))
+}
+
+fn download_to_file(
+    url: &str,
+    dest: &Path,
+    window: &tauri::WebviewWindow,
+) -> Result<(), String> {
+    let response = ureq::get(url)
+        .set("User-Agent", USER_AGENT)
+        .timeout(Duration::from_secs(60))
+        .call()
+        .map_err(|e| format!("Falha no download: {e}"))?;
+
+    let total: u64 = response
+        .header("Content-Length")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+
+    let _ = window.emit(
+        "update-progress",
+        serde_json::json!({ "phase": "started", "total": total }),
+    );
+
+    let mut reader = response.into_reader();
+    let mut file = fs::File::create(dest).map_err(|e| format!("Falha ao criar arquivo: {e}"))?;
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut downloaded: u64 = 0;
+    let mut last_emit: u64 = 0;
+
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("Falha ao ler resposta: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n])
+            .map_err(|e| format!("Falha ao escrever arquivo: {e}"))?;
+        downloaded += n as u64;
+
+        if downloaded - last_emit >= 128 * 1024 {
+            last_emit = downloaded;
+            let _ = window.emit(
+                "update-progress",
+                serde_json::json!({
+                    "phase": "progress",
+                    "downloaded": downloaded,
+                    "total": total
+                }),
+            );
+        }
+    }
+    file.flush().map_err(|e| e.to_string())?;
+    drop(file);
+
+    let _ = window.emit(
+        "update-progress",
+        serde_json::json!({
+            "phase": "finished",
+            "downloaded": downloaded,
+            "total": total.max(downloaded)
+        }),
+    );
+
+    Ok(())
+}
+
+fn compare_versions(a: &str, b: &str) -> i32 {
+    let parse = |v: &str| -> Vec<u32> {
+        v.split(|c: char| c == '.' || c == '-')
+            .take(4)
+            .map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>())
+            .map(|s| s.parse::<u32>().unwrap_or(0))
+            .collect()
+    };
+    let va = parse(a);
+    let vb = parse(b);
+    for i in 0..va.len().max(vb.len()) {
+        let na = *va.get(i).unwrap_or(&0);
+        let nb = *vb.get(i).unwrap_or(&0);
+        if na > nb {
+            return 1;
+        }
+        if na < nb {
+            return -1;
+        }
+    }
+    0
+}
+
+fn cleanup_old_executable(path: &Path) {
+    for _ in 0..60 {
+        if !path.exists() {
+            return;
+        }
+        if fs::remove_file(path).is_ok() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -287,7 +505,83 @@ fn position_panel(window: &WebviewWindow, expanded: bool) -> Result<PanelGeometr
     })
 }
 
+fn tray_icon_image() -> Option<tauri::image::Image<'static>> {
+    static DATA: OnceLock<Option<(Vec<u8>, u32, u32)>> = OnceLock::new();
+    let entry = DATA.get_or_init(|| {
+        let bytes = include_bytes!("../../assets/icon.ico");
+        let dir = ico::IconDir::read(Cursor::new(bytes.as_ref())).ok()?;
+        let largest = dir.entries().iter().max_by_key(|e| e.width())?;
+        let img = largest.decode().ok()?;
+        Some((img.rgba_data().to_vec(), img.width(), img.height()))
+    });
+    entry
+        .as_ref()
+        .map(|(rgba, w, h)| tauri::image::Image::new(rgba.as_slice(), *w, *h))
+}
+
+fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let show_item = MenuItemBuilder::with_id("tray_show", "Mostrar").build(app)?;
+    let hide_item = MenuItemBuilder::with_id("tray_hide", "Ocultar").build(app)?;
+    let quit_item = MenuItemBuilder::with_id("tray_quit", "Sair").build(app)?;
+    let menu = MenuBuilder::new(app)
+        .item(&show_item)
+        .item(&hide_item)
+        .separator()
+        .item(&quit_item)
+        .build()?;
+
+    let icon = tray_icon_image()
+        .or_else(|| app.default_window_icon().cloned())
+        .expect("Tray icon could not be loaded from assets/icon.ico");
+
+    TrayIconBuilder::with_id("main-tray")
+        .tooltip("TODOCompanion")
+        .icon(icon)
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "tray_show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = position_panel(&window, true);
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "tray_hide" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+            "tray_quit" => {
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                if let Some(window) = tray.app_handle().get_webview_window("main") {
+                    let _ = position_panel(&window, true);
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        })
+        .build(app)?;
+
+    Ok(())
+}
+
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    if args.len() >= 3 && args[1] == "--cleanup-old" {
+        cleanup_old_executable(Path::new(&args[2]));
+    }
+
     tauri::Builder::default()
         .setup(|app| {
             let conn = init_db(app.handle()).map_err(|e| {
@@ -301,7 +595,22 @@ fn main() {
                 if let Err(err) = position_panel(&window, false) {
                     eprintln!("Failed to position TODOCompanion: {err}");
                 }
+
+                let app_handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        if let Some(w) = app_handle.get_webview_window("main") {
+                            let _ = w.hide();
+                        }
+                    }
+                });
             }
+
+            if let Err(err) = build_tray(app.handle()) {
+                eprintln!("Failed to build system tray: {err}");
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -313,6 +622,8 @@ fn main() {
             attachment_save_from_bytes,
             attachment_delete,
             attachment_open,
+            check_for_update,
+            download_and_apply_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TODOCompanion");

@@ -231,6 +231,16 @@ async function init() {
       }
     }
   });
+
+  scheduleUpdaterCheck();
+}
+
+function scheduleUpdaterCheck() {
+  setTimeout(() => {
+    import("./updater/index.js")
+      .then(({ runUpdaterFlow }) => runUpdaterFlow())
+      .catch(error => console.warn("[updater] failed to load", error));
+  }, 600);
 }
 
 async function initializePanel() {

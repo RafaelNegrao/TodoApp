@@ -19,7 +19,8 @@
         "transparent": true,
         "alwaysOnTop": true,
         "shadow": false,
-        "visible": true
+        "visible": true,
+        "skipTaskbar": true
       }
     ],
     "security": {
@@ -27,8 +28,8 @@
     }
   },
   "bundle": {
-    "active": true,
-    "targets": "all",
+    "active": false,
+    "targets": [],
     "icon": [
       "icons/icon.ico",
       "icons/icon.png"
