@@ -1,6 +1,6 @@
 [package]
 name = "todocompanion"
-version = "0.1.0"
+version = "0.1.1"
 description = "A right-edge task companion built with Tauri"
 authors = ["Rafael"]
 edition = "2021"
