@@ -70,8 +70,15 @@ Update-FileContent -Path 'src-tauri/Cargo.toml' `
     -Pattern '(?m)^version\s*=\s*"[^"]+"' `
     -Replacement "version = `"$Version`""
 
+# Windows PowerShell 5.1 wraps any stderr line from native exes (including
+# harmless `git add` CRLF warnings) as a NativeCommandError under
+# ErrorActionPreference=Stop, killing the script before $LASTEXITCODE is
+# checked. Switch to Continue for the git invocations below.
+$ErrorActionPreference = 'Continue'
+
 Write-Host "Committing..."
-& git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock 2>$null
+& git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & git commit -m "release: v$Version"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
