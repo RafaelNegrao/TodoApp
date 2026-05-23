@@ -1,0 +1,46 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/schemas/
+**/*.rs.bk
+*.pdb
+
+# Build / dist
+dist/
+build/
+out/
+
+# Estado local / dados
+*.sqlite
+*.sqlite-journal
+*.db
+*.db-journal
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Installer / pacotes pesados de fontes
+assets/fonts/SFProFonts/
+*.pkg
+Payload
+Payload~
