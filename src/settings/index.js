@@ -1,7 +1,3 @@
-// Wires the gear button in the topbar to the settings modal, plus the
-// close button (which collapses the panel). Loads version + autostart
-// state on open, persists autostart changes immediately.
-
 const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke || null;
 
 const openButton = document.querySelector("#openSettingsButton");
@@ -11,6 +7,32 @@ const closeIcon = document.querySelector("#settingsCloseIcon");
 const doneButton = document.querySelector("#settingsDoneButton");
 const versionEl = document.querySelector("#settingsVersionValue");
 const autostartInput = document.querySelector("#settingsAutostartInput");
+const linkStyleInput = document.querySelector("#settingsLinkStyleInput");
+const themeInput = document.querySelector("#settingsThemeInput");
+
+const LINK_STYLE_KEY = "todocompanion.settings.linkStyle";
+const THEME_KEY = "todocompanion.settings.theme";
+const THEMES = ["claude-dark", "light-claude", "dracula"];
+const DEFAULT_THEME = "claude-dark";
+
+function currentTheme() {
+  const stored = localStorage.getItem(THEME_KEY);
+  return THEMES.includes(stored) ? stored : DEFAULT_THEME;
+}
+
+function applyTheme(theme) {
+  if (theme === DEFAULT_THEME) {
+    delete document.documentElement.dataset.theme;
+  } else {
+    document.documentElement.dataset.theme = theme;
+  }
+}
+
+function persistTheme(event) {
+  const theme = THEMES.includes(event.target.value) ? event.target.value : DEFAULT_THEME;
+  localStorage.setItem(THEME_KEY, theme);
+  applyTheme(theme);
+}
 
 let autostartBusy = false;
 
@@ -30,6 +52,12 @@ async function loadSettings() {
   if (autostartInput) {
     autostartInput.checked = false;
     autostartInput.disabled = true;
+  }
+  if (linkStyleInput) {
+    linkStyleInput.checked = localStorage.getItem(LINK_STYLE_KEY) !== "bezier";
+  }
+  if (themeInput) {
+    themeInput.value = currentTheme();
   }
 
   if (!invoke) return;
@@ -73,8 +101,15 @@ async function persistAutostart(event) {
   }
 }
 
-function collapseApp() {
-  window.dispatchEvent(new CustomEvent("app:collapse"));
+function persistLinkStyle(event) {
+  localStorage.setItem(LINK_STYLE_KEY, event.target.checked ? "orthogonal" : "bezier");
+  window.dispatchEvent(new CustomEvent("app:link-style-changed"));
+}
+
+function hideApp() {
+  if (invoke) {
+    invoke("hide_window").catch(err => console.warn("[settings] hide_window failed", err));
+  }
 }
 
 export function initSettings() {
@@ -87,8 +122,11 @@ export function initSettings() {
     if (event.target === modal) close();
   });
   autostartInput?.addEventListener("change", persistAutostart);
+  linkStyleInput?.addEventListener("change", persistLinkStyle);
+  themeInput?.addEventListener("change", persistTheme);
+  applyTheme(currentTheme());
 
-  closeButton?.addEventListener("click", collapseApp);
+  closeButton?.addEventListener("click", hideApp);
 
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !modal.hidden) {

@@ -13,14 +13,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow,
+    Emitter, Manager, State,
 };
 
-const COLLAPSED_WIDTH: u32 = 34;
-const COLLAPSED_HEIGHT: u32 = 64;
-const HANDLE_GUTTER: u32 = 34;
-const RIGHT_MARGIN: i32 = 5;
-const HEIGHT_RATIO: f64 = 0.90;
 const APP_FOLDER: &str = "TODOCompanion";
 const DB_FILE: &str = "data.sqlite";
 const GITHUB_API_LATEST: &str =
@@ -32,15 +27,6 @@ const AUTOSTART_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const AUTOSTART_VALUE: &str = "TODOCompanion";
 
 struct DbState(Mutex<Connection>);
-
-#[derive(Serialize)]
-struct PanelGeometry {
-    collapsed_width: u32,
-    expanded_width: u32,
-    height: u32,
-    x: i32,
-    y: i32,
-}
 
 #[derive(Serialize)]
 struct AttachmentInfo {
@@ -59,30 +45,21 @@ struct UpdateInfo {
 }
 
 #[tauri::command]
-fn initialize_panel(app: tauri::AppHandle) -> Result<PanelGeometry, String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "Main window was not found".to_string())?;
-
-    position_panel(&window, false, false)
+fn minimize_window(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.minimize();
+    }
 }
 
 #[tauri::command]
-fn set_panel_expanded(
-    app: tauri::AppHandle,
-    expanded: bool,
-    maximized: Option<bool>,
-) -> Result<PanelGeometry, String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "Main window was not found".to_string())?;
-
-    let geometry = position_panel_animated(&window, expanded, maximized.unwrap_or(false))?;
-    if expanded {
-        let _ = window.set_focus();
+fn toggle_maximize_window(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_maximized().unwrap_or(false) {
+            let _ = window.unmaximize();
+        } else {
+            let _ = window.maximize();
+        }
     }
-
-    Ok(geometry)
 }
 
 #[tauri::command]
@@ -181,6 +158,12 @@ fn attachment_open(
 }
 
 #[tauri::command]
+fn attachment_open_folder(app: tauri::AppHandle, user_id: String) -> Result<(), String> {
+    let dir = ensure_user_dir(&app, &user_id)?;
+    open_path(&dir).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
 }
@@ -188,6 +171,13 @@ fn get_app_version(app: tauri::AppHandle) -> String {
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+#[tauri::command]
+fn hide_window(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
 }
 
 #[tauri::command]
@@ -455,11 +445,39 @@ fn cleanup_old_executable(path: &Path) {
     }
 }
 
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    open_url_in_browser(&url).map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn open_url_in_browser(url: &str) -> std::io::Result<()> {
+    use std::process::Command;
+    use std::os::windows::process::CommandExt;
+    Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .creation_flags(0x08000000)
+        .spawn()
+        .map(|_| ())
+}
+
+#[cfg(target_os = "macos")]
+fn open_url_in_browser(url: &str) -> std::io::Result<()> {
+    std::process::Command::new("open").arg(url).spawn().map(|_| ())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_url_in_browser(url: &str) -> std::io::Result<()> {
+    std::process::Command::new("xdg-open").arg(url).spawn().map(|_| ())
+}
+
 #[cfg(target_os = "windows")]
 fn open_path(path: &Path) -> std::io::Result<()> {
     use std::process::Command;
+    use std::os::windows::process::CommandExt;
     Command::new("cmd")
         .args(["/C", "start", "", &path.to_string_lossy()])
+        .creation_flags(0x08000000)
         .spawn()
         .map(|_| ())
 }
@@ -541,132 +559,6 @@ fn init_db(app: &tauri::AppHandle) -> Result<Connection, String> {
     Ok(conn)
 }
 
-fn compute_panel_target(
-    window: &WebviewWindow,
-    expanded: bool,
-    maximized: bool,
-) -> Result<(PanelGeometry, PhysicalSize<u32>, PhysicalPosition<i32>), String> {
-    let monitor = window
-        .current_monitor()
-        .map_err(|err| err.to_string())?
-        .or_else(|| window.primary_monitor().ok().flatten())
-        .ok_or_else(|| "No monitor is available".to_string())?;
-
-    let screen_size = monitor.size();
-    let screen_pos = monitor.position();
-    let screen_width = screen_size.width;
-    let screen_height = screen_size.height;
-
-    let expanded_height = ((screen_height as f64) * HEIGHT_RATIO).round() as u32;
-    let height = if expanded {
-        expanded_height
-    } else {
-        COLLAPSED_HEIGHT
-    };
-    let y = screen_pos.y + ((screen_height.saturating_sub(height)) / 2) as i32;
-
-    let max_width = screen_width.saturating_sub(24).max(COLLAPSED_WIDTH);
-    let width_ratio = if maximized { 0.90 } else { 0.50 };
-    let preferred_width = ((screen_width as f64) * width_ratio).round() as u32;
-    let max_panel_width = max_width.saturating_sub(HANDLE_GUTTER).max(COLLAPSED_WIDTH);
-    let upper_bound = if maximized { max_panel_width } else { 2000 };
-    let panel_width = preferred_width.max(620).min(upper_bound).min(max_panel_width);
-    let expanded_width = panel_width + HANDLE_GUTTER;
-    let width = if expanded {
-        expanded_width
-    } else {
-        COLLAPSED_WIDTH
-    };
-
-    let x = screen_pos.x + screen_width as i32 - width as i32 - RIGHT_MARGIN;
-
-    Ok((
-        PanelGeometry {
-            collapsed_width: COLLAPSED_WIDTH,
-            expanded_width,
-            height,
-            x,
-            y,
-        },
-        PhysicalSize::new(width, height),
-        PhysicalPosition::new(x, y),
-    ))
-}
-
-fn animate_window_to(window: WebviewWindow, target_size: PhysicalSize<u32>, target_pos: PhysicalPosition<i32>) {
-    let Ok(start_size) = window.outer_size() else {
-        let _ = window.set_size(target_size);
-        let _ = window.set_position(target_pos);
-        return;
-    };
-    let Ok(start_pos) = window.outer_position() else {
-        let _ = window.set_size(target_size);
-        let _ = window.set_position(target_pos);
-        return;
-    };
-
-    if start_size.width == target_size.width
-        && start_size.height == target_size.height
-        && start_pos.x == target_pos.x
-        && start_pos.y == target_pos.y
-    {
-        return;
-    }
-
-    const FRAMES: u32 = 16;
-    const TOTAL_MS: u64 = 220;
-    const FRAME_MS: u64 = TOTAL_MS / FRAMES as u64;
-    let sw = start_size.width as f64;
-    let sh = start_size.height as f64;
-    let sx = start_pos.x as f64;
-    let sy = start_pos.y as f64;
-    let tw = target_size.width as f64;
-    let th = target_size.height as f64;
-    let tx = target_pos.x as f64;
-    let ty = target_pos.y as f64;
-
-    thread::spawn(move || {
-        for i in 1..FRAMES {
-            let t = i as f64 / FRAMES as f64;
-            let eased = 1.0 - (1.0 - t).powi(3);
-            let w = (sw + (tw - sw) * eased).round().max(1.0) as u32;
-            let h = (sh + (th - sh) * eased).round().max(1.0) as u32;
-            let x = (sx + (tx - sx) * eased).round() as i32;
-            let y = (sy + (ty - sy) * eased).round() as i32;
-            let _ = window.set_size(PhysicalSize::new(w, h));
-            let _ = window.set_position(PhysicalPosition::new(x, y));
-            thread::sleep(Duration::from_millis(FRAME_MS));
-        }
-        let _ = window.set_size(target_size);
-        let _ = window.set_position(target_pos);
-    });
-}
-
-fn position_panel(
-    window: &WebviewWindow,
-    expanded: bool,
-    maximized: bool,
-) -> Result<PanelGeometry, String> {
-    let (geometry, size, pos) = compute_panel_target(window, expanded, maximized)?;
-    window
-        .set_size(size)
-        .map_err(|err| err.to_string())?;
-    window
-        .set_position(pos)
-        .map_err(|err| err.to_string())?;
-    Ok(geometry)
-}
-
-fn position_panel_animated(
-    window: &WebviewWindow,
-    expanded: bool,
-    maximized: bool,
-) -> Result<PanelGeometry, String> {
-    let (geometry, size, pos) = compute_panel_target(window, expanded, maximized)?;
-    animate_window_to(window.clone(), size, pos);
-    Ok(geometry)
-}
-
 fn tray_icon_image() -> Option<tauri::image::Image<'static>> {
     static DATA: OnceLock<Option<(Vec<u8>, u32, u32)>> = OnceLock::new();
     let entry = DATA.get_or_init(|| {
@@ -704,7 +596,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "tray_show" => {
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = position_panel(&window, true, false);
+                    let _ = window.unminimize();
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
@@ -727,7 +619,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             } = event
             {
                 if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    let _ = position_panel(&window, true, false);
+                    let _ = window.unminimize();
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
@@ -756,11 +648,6 @@ fn main() {
             app.manage(DbState(Mutex::new(conn)));
 
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_always_on_top(true);
-                if let Err(err) = position_panel(&window, false, false) {
-                    eprintln!("Failed to position TODOCompanion: {err}");
-                }
-
                 let app_handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -779,20 +666,23 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            initialize_panel,
-            set_panel_expanded,
+            minimize_window,
+            toggle_maximize_window,
             state_load,
             state_save,
             attachment_save_from_path,
             attachment_save_from_bytes,
             attachment_delete,
             attachment_open,
+            attachment_open_folder,
             check_for_update,
             download_and_apply_update,
             get_app_version,
             quit_app,
             get_autostart_enabled,
             set_autostart_enabled,
+            open_url,
+            hide_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TODOCompanion");

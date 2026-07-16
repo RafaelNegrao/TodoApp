@@ -12,15 +12,19 @@
       {
         "label": "main",
         "title": "TODOCompanion",
-        "width": 34,
-        "height": 64,
-        "resizable": false,
+        "width": 1180,
+        "height": 760,
+        "minWidth": 820,
+        "minHeight": 540,
+        "resizable": true,
+        "maximizable": true,
         "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "shadow": false,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "shadow": true,
+        "center": true,
         "visible": true,
-        "skipTaskbar": true
+        "skipTaskbar": false
       }
     ],
     "security": {

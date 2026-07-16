@@ -6,15 +6,20 @@
     <title>TODOCompanion</title>
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./updater/updater.css" />
+    <script>
+      // Aplica o tema salvo antes da primeira pintura para evitar flash.
+      (function () {
+        try {
+          var theme = localStorage.getItem("todocompanion.settings.theme");
+          if (theme && theme !== "claude-dark") {
+            document.documentElement.dataset.theme = theme;
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
-    <div id="app" class="collapsed">
-      <button class="edge-toggle" id="edgeToggle" type="button" aria-label="Abrir painel">
-        <svg class="edge-symbol" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M15 6 9 12l6 6" />
-        </svg>
-      </button>
-
+    <div id="app">
       <section class="panel" aria-label="TODOCompanion">
         <header class="topbar" data-tauri-drag-region>
           <div class="brand" data-tauri-drag-region>
@@ -25,15 +30,27 @@
             </span>
           </div>
           <div class="topbar-actions">
-            <button class="topbar-action" id="maximizeAppButton" type="button" aria-label="Maximizar" title="Maximizar">
+            <button class="topbar-action" id="openSearchButton" type="button" aria-label="Buscar" title="Buscar">
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 14v6h6M20 10V4h-6M20 4l-7 7M4 20l7-7" />
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
               </svg>
             </button>
             <button class="topbar-action" id="openSettingsButton" type="button" aria-label="Configurações" title="Configurações">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+            <span class="topbar-divider" aria-hidden="true"></span>
+            <button class="topbar-action" id="minimizeAppButton" type="button" aria-label="Minimizar" title="Minimizar">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 18h12" />
+              </svg>
+            </button>
+            <button class="topbar-action" id="maximizeAppButton" type="button" aria-label="Maximizar" title="Maximizar / Restaurar">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="5" y="5" width="14" height="14" rx="1.5" />
               </svg>
             </button>
             <button class="topbar-action topbar-close" id="closeAppButton" type="button" aria-label="Fechar" title="Fechar aplicativo">
@@ -53,6 +70,30 @@
           <button class="tab-add" id="addBoardButton" type="button" aria-label="Novo usuario" title="Novo usuario">+</button>
         </nav>
 
+        <div class="workspace">
+          <aside class="tasks-sidebar" id="tasksSidebar" aria-label="Tasks por usuario">
+            <div class="tasks-sidebar-head">
+              <button class="tasks-sidebar-toggle" id="tasksSidebarToggle" type="button" aria-label="Recolher painel de tasks" title="Recolher painel"></button>
+              <strong class="tasks-sidebar-title">Tasks</strong>
+              <button class="tasks-sidebar-sort" id="tasksSortButton" type="button" aria-label="Organizar tasks" title="Organizar tasks"></button>
+              <div class="tasks-sort-menu" id="tasksSortMenu" role="menu" hidden>
+                <button type="button" role="menuitem" data-sort="criticality">Criticidade</button>
+                <button type="button" role="menuitem" data-sort="priority">Prioridade</button>
+                <button type="button" role="menuitem" data-sort="status">Status</button>
+                <button type="button" role="menuitem" data-sort="start">Data de início</button>
+                <button type="button" role="menuitem" data-sort="end">Data de fim</button>
+                <button type="button" role="menuitem" data-sort="title">Título (A–Z)</button>
+              </div>
+            </div>
+            <div class="tasks-status-filter" id="tasksStatusFilter" role="tablist" aria-label="Filtro de status">
+              <button class="tasks-status-pill" type="button" role="tab" data-filter="all">All</button>
+              <button class="tasks-status-pill active" type="button" role="tab" data-filter="ongoing" aria-selected="true">Ongoing</button>
+              <button class="tasks-status-pill" type="button" role="tab" data-filter="stopped">Stopped</button>
+              <button class="tasks-status-pill" type="button" role="tab" data-filter="complete">Complete</button>
+            </div>
+            <div class="user-task-list" id="userTaskList"></div>
+            <button class="dock-add" id="addUserTaskButton" type="button" aria-label="Nova main task" title="Nova main task">+ Nova task</button>
+          </aside>
         <main class="board-shell">
           <div class="canvas-meta-overlay" id="canvasMetaOverlay" aria-label="Detalhes da main task">
             <label>
@@ -89,11 +130,19 @@
           </div>
           <button class="canvas-center-button" id="centerCanvasButton" type="button" aria-label="Centralizar tasks" title="Centralizar tasks"></button>
           <button class="canvas-organize-button" id="organizeCanvasButton" type="button" aria-label="Organizar cards" title="Organizar cards"></button>
+          <button class="canvas-record-button" id="recordButton" type="button" aria-label="Gravar tela" title="Gravar tela"></button>
           <button class="canvas-attach-button" id="canvasAttachButton" type="button" aria-label="Anexar arquivo" title="Anexar arquivo"></button>
           <input class="canvas-attach-input" id="canvasAttachInput" type="file" multiple hidden />
+          <div class="recording-indicator" id="recordingIndicator" hidden></div>
           <div class="attachments-popup" id="attachmentsPopup" hidden>
             <div class="attachments-list" id="attachmentsList"></div>
-            <button class="attachments-add" id="attachmentsAdd" type="button">+ Adicionar anexo</button>
+            <div class="attachments-footer">
+              <button class="attachments-add" id="attachmentsAdd" type="button">+ Adicionar anexo</button>
+              <button class="attachments-folder" id="attachmentsOpenFolder" type="button" aria-label="Abrir pasta de anexos" title="Abrir pasta de anexos"></button>
+            </div>
+          </div>
+          <div class="attachment-reference-popup" id="attachmentReferencePopup" role="dialog" aria-label="Anexos" hidden>
+            <div class="attachment-reference-list" id="attachmentReferenceList"></div>
           </div>
           <div class="canvas-drop-overlay" id="canvasDropOverlay" hidden>
             <div class="canvas-drop-inner">
@@ -106,13 +155,7 @@
             <div class="action-list" id="actionList"></div>
           </section>
         </main>
-
-        <section class="user-task-dock" aria-label="Tasks por usuario">
-          <button class="dock-scroll dock-scroll-left" id="dockScrollLeft" type="button" aria-label="Rolar tasks para esquerda" title="Rolar para esquerda" hidden></button>
-          <div class="user-task-list" id="userTaskList"></div>
-          <button class="dock-scroll dock-scroll-right" id="dockScrollRight" type="button" aria-label="Rolar tasks para direita" title="Rolar para direita" hidden></button>
-          <button class="dock-add" id="addUserTaskButton" type="button" aria-label="Nova main task" title="Nova main task">+</button>
-        </section>
+        </div>
 
       </section>
 
@@ -157,17 +200,16 @@
       </form>
 
       <form class="new-card-popup" id="newCardForm" hidden>
-        <input id="newCardTitleInput" type="text" placeholder="Titulo do card" autocomplete="off" required />
-        <select id="newCardStatusInput">
-          <option value="ongoing">Ongoing</option>
-          <option value="stopped">Stopped</option>
-          <option value="complete">Complete</option>
-        </select>
-        <div class="new-card-popup-footer">
-          <button class="modal-button secondary" id="newCardCancelButton" type="button">Cancelar</button>
-          <button class="modal-button primary" type="submit">Criar</button>
-        </div>
+        <button class="new-card-create-button" type="submit">+ Nova ação</button>
+        <button class="new-card-create-button" type="button" id="newCardImageButton">+ Nova Imagem</button>
+        <input type="file" accept="image/*" id="newCardImageInput" hidden />
+        <input type="file" accept="image/*" id="updateImageInput" hidden />
       </form>
+
+      <div class="new-card-popup" id="connectionDropMenu" hidden>
+        <button class="new-card-create-button" data-type="action">Ação</button>
+        <button class="new-card-create-button" data-type="image">Imagem</button>
+      </div>
 
       <form class="user-create-popup" id="userCreateForm" hidden>
         <label>
@@ -190,9 +232,22 @@
             <span class="settings-label">Versão</span>
             <span class="settings-value" id="settingsVersionValue">—</span>
           </div>
+          <label class="settings-row">
+            <span class="settings-label">Tema</span>
+            <select class="settings-select" id="settingsThemeInput">
+              <option value="claude-dark">Claude Dark</option>
+              <option value="light-claude">Light Claude</option>
+              <option value="dracula">Dracula</option>
+            </select>
+          </label>
           <label class="settings-row settings-toggle">
             <span class="settings-label">Iniciar com o Windows</span>
             <input type="checkbox" id="settingsAutostartInput" />
+            <span class="settings-switch" aria-hidden="true"></span>
+          </label>
+          <label class="settings-row settings-toggle">
+            <span class="settings-label">Linhas retas no canvas</span>
+            <input type="checkbox" id="settingsLinkStyleInput" />
             <span class="settings-switch" aria-hidden="true"></span>
           </label>
           <footer>
@@ -216,6 +271,44 @@
             <button class="modal-button primary" id="confirmDeleteOk" type="submit" disabled>Excluir</button>
           </footer>
         </form>
+      </div>
+
+      <div class="modal-backdrop" id="searchModal" hidden>
+        <section class="canvas-modal search-modal" role="dialog" aria-modal="true" aria-labelledby="searchModalTitle">
+          <header>
+            <strong id="searchModalTitle">Buscar</strong>
+            <button class="modal-icon" id="searchCloseIcon" type="button" aria-label="Fechar" title="Fechar">x</button>
+          </header>
+          <label class="search-field">
+            <span>Task ou acao</span>
+            <input id="searchInput" type="search" autocomplete="off" spellcheck="false" />
+          </label>
+          <div class="search-results" id="searchResults"></div>
+        </section>
+      </div>
+
+      <div class="modal-backdrop" id="clipboardAttachModal" hidden>
+        <section class="canvas-modal clipboard-attach-modal" role="dialog" aria-modal="true" aria-labelledby="clipboardAttachTitle">
+          <header>
+            <strong id="clipboardAttachTitle">Anexar da area de transferencia</strong>
+            <button class="modal-icon" id="clipboardAttachClose" type="button" aria-label="Fechar" title="Fechar">x</button>
+          </header>
+          <div class="clipboard-attach-preview" id="clipboardAttachPreview"></div>
+          <div class="clipboard-attach-info">
+            <label class="clipboard-attach-name-field">
+              <span>Nome do arquivo</span>
+              <div class="clipboard-attach-name-control">
+                <input id="clipboardAttachNameInput" type="text" autocomplete="off" spellcheck="false" maxlength="140" />
+                <span class="clipboard-attach-extension" id="clipboardAttachExtension"></span>
+              </div>
+            </label>
+            <span id="clipboardAttachMeta"></span>
+          </div>
+          <footer>
+            <button class="modal-button secondary" id="clipboardAttachCancel" type="button">Cancelar</button>
+            <button class="modal-button primary" id="clipboardAttachConfirm" type="button">Anexar</button>
+          </footer>
+        </section>
       </div>
 
       <div class="modal-backdrop" id="canvasModal" hidden>
