@@ -133,7 +133,10 @@
           <button class="canvas-record-button" id="recordButton" type="button" aria-label="Gravar tela" title="Gravar tela"></button>
           <button class="canvas-attach-button" id="canvasAttachButton" type="button" aria-label="Anexar arquivo" title="Anexar arquivo"></button>
           <input class="canvas-attach-input" id="canvasAttachInput" type="file" multiple hidden />
-          <div class="recording-indicator" id="recordingIndicator" hidden></div>
+          <div class="recording-indicator" id="recordingIndicator" hidden>
+            <span id="recordingIndicatorText"></span>
+            <button class="recording-indicator-stop" id="recordingIndicatorStop" type="button" aria-label="Parar">Parar</button>
+          </div>
           <div class="attachments-popup" id="attachmentsPopup" hidden>
             <div class="attachments-list" id="attachmentsList"></div>
             <div class="attachments-footer">

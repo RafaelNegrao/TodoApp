@@ -232,6 +232,7 @@ async function init() {
   centerCanvasButton.addEventListener("click", centerCanvasOnTasks);
   organizeCanvasButton.addEventListener("click", organizeCanvasCards);
   recordButton.addEventListener("click", toggleScreenRecording);
+  document.querySelector("#recordingIndicatorStop")?.addEventListener("click", stopScreenRecording);
   canvasAttachButton.addEventListener("pointerdown", () => preserveAttachmentReferenceTarget());
   canvasAttachButton.addEventListener("click", handleAttachButtonClick);
   canvasAttachInput.addEventListener("change", handleAttachInputChange);
@@ -5011,7 +5012,10 @@ async function startScreenRecording() {
   let displayStream;
   try {
     displayStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: 30 },
+      video: { 
+        displaySurface: "monitor",
+        frameRate: { ideal: 10, max: 15 }
+      },
       audio: true
     });
   } catch (error) {
@@ -5205,12 +5209,17 @@ function updateRecordingUi(active) {
 function startRecordingTimer() {
   if (!recordingIndicator) return;
   recordingIndicator.hidden = false;
+  const textSpan = document.getElementById("recordingIndicatorText");
   const tick = () => {
     if (!recordingState) return;
     const elapsed = Math.max(0, Math.floor((Date.now() - recordingState.startedAt) / 1000));
     const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
     const ss = String(elapsed % 60).padStart(2, "0");
-    recordingIndicator.textContent = `Gravando ${mm}:${ss}`;
+    if (textSpan) {
+      textSpan.textContent = `Gravando ${mm}:${ss}`;
+    } else {
+      recordingIndicator.textContent = `Gravando ${mm}:${ss}`;
+    }
   };
   tick();
   recordingTimerInterval = window.setInterval(tick, 1000);

@@ -947,6 +947,30 @@ button {
   display: none;
 }
 
+.recording-indicator-stop {
+  appearance: none;
+  background: rgba(226, 92, 79, 0.15);
+  border: 1px solid rgba(226, 92, 79, 0.4);
+  color: #e25c4f;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 99px;
+  cursor: pointer;
+  transition: all 0.2s var(--ease-in-out);
+  margin-left: 4px;
+}
+
+.recording-indicator-stop:hover {
+  background: rgba(226, 92, 79, 0.25);
+  border-color: rgba(226, 92, 79, 0.6);
+  transform: scale(1.05);
+}
+
+.recording-indicator-stop:active {
+  transform: scale(0.95);
+}
+
 .canvas-center-button[hidden],
 .canvas-organize-button[hidden],
 .canvas-record-button[hidden],
