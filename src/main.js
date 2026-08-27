@@ -11,10 +11,10 @@ const ALIGN_SNAP_SCREEN_PX = 7;
 // Folga (px no canvas) mantida entre as linhas e os cards ao contornar.
 const LINK_MARGIN = 18;
 const LINK_ARROW_END_GAP = 3;
-const LINK_ARROW_LENGTH = 11;
-const LINK_ARROW_HALF_WIDTH = 5;
-const ACTION_LIST_ARROW_LENGTH = 7;
-const ACTION_LIST_ARROW_HALF_WIDTH = 3.5;
+const LINK_ARROW_LENGTH = 8;
+const LINK_ARROW_HALF_WIDTH = 8;
+const ACTION_LIST_ARROW_LENGTH = 5;
+const ACTION_LIST_ARROW_HALF_WIDTH = 5;
 
 const STATUS_ORDER = ["ongoing", "stopped", "complete"];
 const STATUS_META = {
@@ -24,15 +24,15 @@ const STATUS_META = {
 };
 const PRIORITY_ORDER = ["low", "normal", "high", "urgent"];
 const PRIORITY_META = {
-  low: { label: "Baixa" },
+  low: { label: "Low" },
   normal: { label: "Normal" },
-  high: { label: "Alta" },
-  urgent: { label: "Urgente" }
+  high: { label: "High" },
+  urgent: { label: "Urgent" }
 };
 const CRITICALITY_META = [
-  { label: "Baixa" },
-  { label: "Media" },
-  { label: "Alta" }
+  { label: "Low" },
+  { label: "Medium" },
+  { label: "High" }
 ];
 
 const icons = {
@@ -58,22 +58,32 @@ const icons = {
   sort: `<svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h5"/></svg>`,
   record: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.6" fill="currentColor" stroke="none"/></svg>`,
   folder: `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`,
+  user: `<svg class="icon" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
+  board: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>`,
   formatBold: `<svg class="icon" viewBox="0 0 24 24"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg>`,
   formatItalic: `<svg class="icon" viewBox="0 0 24 24"><path d="M10 4h8M6 20h8M14.5 4 9.5 20"/></svg>`,
   formatUnderline: `<svg class="icon" viewBox="0 0 24 24"><path d="M6 4v6a6 6 0 0 0 12 0V4"/><path d="M4 20h16"/></svg>`,
-  formatStrikethrough: `<svg class="icon" viewBox="0 0 24 24"><path d="M16 4c-1.5-1-3.2-1.5-5-1.5C7.7 2.5 5 5 5 8s2 4.5 6 6"/><path d="M4 12h16"/><path d="M19 16c0 3-2.7 5.5-6 5.5-1.8 0-3.5-.5-5-1.5"/></svg>`,
+  formatStrikethrough: `<svg class="icon" viewBox="0 0 24 24"><path d="M16 4c-1.1-.7-2.7-1-4-1-3.3 0-5.5 1.5-5.5 4 0 1.2.5 2.2 1.5 3"/><path d="M4 12h16"/><path d="M18 16c0 2.5-2.7 4.5-6 4.5-1.8 0-3.5-.5-5-1.5"/></svg>`,
   formatListBulleted: `<svg class="icon" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>`,
   formatListNumbered: `<svg class="icon" viewBox="0 0 24 24"><path d="M10 6h11M10 12h11M10 18h11"/><text x="3" y="7" font-size="6" fill="currentColor">1</text><text x="3" y="13" font-size="6" fill="currentColor">2</text><text x="3" y="19" font-size="6" fill="currentColor">3</text></svg>`,
-  formatClear: `<svg class="icon" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m13.3 9 5.5 5.5"/></svg>`
+  checkbox: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  formatClear: `<svg class="icon" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m13.3 9 5.5 5.5"/></svg>`,
+  menu: `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`
 };
 
 const maximizeAppButton = document.querySelector("#maximizeAppButton");
 const minimizeAppButton = document.querySelector("#minimizeAppButton");
 const openSearchButton = document.querySelector("#openSearchButton");
-const tabsEl = document.querySelector("#tabs");
+const usersRail = document.querySelector("#usersRail");
+const usersRailList = document.querySelector("#usersRailList");
+const usersRailToggle = document.querySelector("#usersRailToggle");
 const nodesLayer = document.querySelector("#nodesLayer");
 const linkLayer = document.querySelector("#linkLayer");
 const boardSurface = document.querySelector("#boardSurface");
+const boardEmpty = document.querySelector("#boardEmpty");
+const boardEmptyIcon = document.querySelector("#boardEmptyIcon");
+const boardEmptyTitle = document.querySelector("#boardEmptyTitle");
+const boardEmptyHint = document.querySelector("#boardEmptyHint");
 const boardShell = document.querySelector(".board-shell");
 const canvasMetaOverlay = document.querySelector("#canvasMetaOverlay");
 const overlayStartInput = document.querySelector("#overlayStartInput");
@@ -81,10 +91,6 @@ const overlayEndInput = document.querySelector("#overlayEndInput");
 const overlayStatusInput = document.querySelector("#overlayStatusInput");
 const overlayCriticalityControl = document.querySelector("#overlayCriticalityControl");
 const overlayCriticalityInput = document.querySelector("#overlayCriticalityInput");
-const actionListShell = document.querySelector("#actionListShell");
-const actionListLinks = document.querySelector("#actionListLinks");
-const actionList = document.querySelector("#actionList");
-const viewSwitch = document.querySelector("#viewSwitch");
 const centerCanvasButton = document.querySelector("#centerCanvasButton");
 const organizeCanvasButton = document.querySelector("#organizeCanvasButton");
 const recordButton = document.querySelector("#recordButton");
@@ -131,10 +137,8 @@ const canvasStatusInput = document.querySelector("#canvasStatusInput");
 const canvasCancelButton = document.querySelector("#canvasCancelButton");
 const canvasCancelIcon = document.querySelector("#canvasCancelIcon");
 const newCardForm = document.querySelector("#newCardForm");
-const newCardImageButton = document.querySelector("#newCardImageButton");
-const newCardImageInput = document.querySelector("#newCardImageInput");
+const inlineImageInput = document.querySelector("#inlineImageInput");
 const updateImageInput = document.querySelector("#updateImageInput");
-const connectionDropMenu = document.querySelector("#connectionDropMenu");
 const userCreateForm = document.querySelector("#userCreateForm");
 const userCreateNameInput = document.querySelector("#userCreateNameInput");
 const userCreateCancelButton = document.querySelector("#userCreateCancelButton");
@@ -155,9 +159,6 @@ recordButton.innerHTML = icons.record;
 attachmentsOpenFolder.innerHTML = icons.folder;
 
 let state = null;
-let collapsedListNodes = new Set();
-let dragListNodeId = null;
-let listPointerDrag = null;
 let linkMode = false;
 let pendingLink = null;
 let selectedNodeId = null;
@@ -173,7 +174,6 @@ let tabPointerDrag = null;
 let lineageHoverTimer = null;
 let lineageState = null;
 const pendingCardPop = new Set();
-const pendingListPop = new Set();
 // Altura real (renderizada) de cada card, medida em renderNodes. Cards de altura
 // automatica (node.h === 0) variam conforme o conteudo; usar essa medida garante
 // que linhas, snap e organize usem o centro real onde o port aparece.
@@ -195,12 +195,14 @@ const invoke =
   null;
 
 init().catch(error => console.error("Falha na inicializacao", error));
-let pendingConnectionDrop = null;
+let inlineImageEditorTarget = null;
+let inlineImageNodeTarget = null;
 let nodeToUpdateImage = null;
 
 async function init() {
   state = await initState();
   render();
+  initUsersRail();
   initTasksSidebar();
   initTasksStatusFilter();
   setupFileDrop().catch(err => console.warn("Drag-and-drop indisponivel", err));
@@ -242,6 +244,7 @@ async function init() {
   attachmentReferencePopup?.addEventListener("pointerdown", event => event.preventDefault());
   addBoardButton.addEventListener("click", openUserCreatePopup);
   addUserTaskButton.addEventListener("click", () => openTaskDialog("create-task"));
+  usersRailToggle.addEventListener("click", toggleUsersRail);
   tasksSidebarToggle.addEventListener("click", toggleTasksSidebar);
   tasksSortButton.addEventListener("click", toggleSortMenu);
   tasksSortMenu.addEventListener("click", event => {
@@ -265,14 +268,6 @@ async function init() {
       closeTaskDialog();
     }
   });
-  viewSwitch.addEventListener("click", event => {
-    const button = event.target.closest("[data-view-mode]");
-    if (!button) {
-      return;
-    }
-    setViewMode(button.dataset.viewMode);
-  });
-
   document.querySelector("#taskEditPopup").addEventListener("submit", saveTaskEditPopup);
   document.querySelector("#tepCancelButton").addEventListener("click", closeTaskEditPopup);
 
@@ -285,12 +280,26 @@ async function init() {
   };
   
   newCardForm.addEventListener("submit", saveNewCard);
-  newCardImageButton?.addEventListener("click", () => newCardImageInput.click());
-  newCardImageInput?.addEventListener("change", handleNewCardImage);
   updateImageInput?.addEventListener("change", handleUpdateImage);
-  
-  const dropMenuBtns = connectionDropMenu?.querySelectorAll(".new-card-create-button") || [];
-  dropMenuBtns.forEach(btn => btn.addEventListener("click", handleConnectionDropMenuClick));
+  inlineImageInput?.addEventListener("change", event => {
+    const file = event.target.files[0];
+    if (!file || !window.inlineImageEditorTarget || !window.inlineImageNodeTarget) return;
+
+    const reader = new FileReader();
+    reader.onload = e => {
+      const dataUrl = e.target.result;
+      window.inlineImageEditorTarget.focus();
+      document.execCommand("insertImage", false, dataUrl);
+      document.execCommand("insertHTML", false, "<br>&#8203;");
+      setNodeContent(window.inlineImageNodeTarget, serializeEditableContent(window.inlineImageEditorTarget));
+      saveState();
+      
+      window.inlineImageEditorTarget = null;
+      window.inlineImageNodeTarget = null;
+    };
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  });
 
   userCreateForm.addEventListener("submit", saveUserCreatePopup);
   userCreateCancelButton.addEventListener("click", closeUserCreatePopup);
@@ -303,10 +312,6 @@ async function init() {
     if (!attachmentReferencePopup.hidden && !attachmentReferencePopup.contains(event.target) && !attachmentReferenceState?.editor?.contains(event.target)) {
       closeAttachmentReferencePicker();
     }
-    if (!connectionDropMenu.hidden && !connectionDropMenu.contains(event.target)) {
-      connectionDropMenu.hidden = true;
-      pendingConnectionDrop = null;
-    }
     if (!tasksSortMenu.hidden && !tasksSortMenu.contains(event.target) && !tasksSortButton.contains(event.target)) {
       closeSortMenu();
     }
@@ -314,13 +319,10 @@ async function init() {
   window.addEventListener("resize", () => {
     applyViewport();
     renderLinks();
-    renderActionListLinks();
   });
-  actionListShell.addEventListener("scroll", scheduleActionListLinks, { passive: true });
 
   window.addEventListener("app:link-style-changed", () => {
     renderLinks();
-    renderActionListLinks();
   });
 
   window.addEventListener("keydown", event => {
@@ -469,12 +471,11 @@ async function initState() {
 function defaultState() {
   return {
     activeUserId: "user-rafael",
-    viewMode: "canvas",
     users: [
-      createUser("Rafael", [createMainTask({ id: "task-rafael-tauri", title: "Criar app Tauri todo", status: "ongoing", priority: "high" }, 0)]),
-      createUser("Ana", [createMainTask({ id: "task-ana-flow", title: "Revisar fluxo dos cards", status: "stopped", priority: "normal" }, 1)]),
-      createUser("Kelvin", [createMainTask({ id: "task-kelvin-links", title: "Validar ligacoes", status: "complete", priority: "normal" }, 2)]),
-      createUser("UI", [createMainTask({ id: "task-ui-polish", title: "Polir painel lateral", status: "ongoing", priority: "urgent" }, 3)])
+      createUser("Rafael", [createMainTask({ id: "task-rafael-tauri", title: "Build Tauri todo app", status: "ongoing", priority: "high" }, 0)]),
+      createUser("Ana", [createMainTask({ id: "task-ana-flow", title: "Review card flow", status: "stopped", priority: "normal" }, 1)]),
+      createUser("Kelvin", [createMainTask({ id: "task-kelvin-links", title: "Validate connections", status: "complete", priority: "normal" }, 2)]),
+      createUser("UI", [createMainTask({ id: "task-ui-polish", title: "Polish sidebar panel", status: "ongoing", priority: "urgent" }, 3)])
     ]
   };
 }
@@ -484,7 +485,7 @@ function createUser(name, tasks = []) {
   return {
     id: name === "Rafael" ? "user-rafael" : id,
     name,
-    activeTaskId: tasks[0]?.id,
+    activeTaskId: null,
     tasks
   };
 }
@@ -497,24 +498,23 @@ function createMainTask(data = {}, index = 0) {
 
   return normalizeMainTask({
     id,
-    title: data.title || "Nova main task",
+    title: data.title || "New main task",
     status,
     priority: normalizePriority(data.priority),
     criticality: normalizeCriticality(data.criticality),
     startDate: dates.startDate,
     endDate: dates.endDate,
-    viewMode: data.viewMode || "canvas",
     view: data.view || { zoom: 0.92, panX: 44 + index * 16, panY: 68 + index * 12 },
     nodes: data.nodes || [
       {
         id: firstId,
-        title: data.title || "Nova main task",
+        title: data.title || "New main task",
         body: "",
         status,
-        x: 130,
-        y: 150,
-        w: 232,
-        h: 154
+        x: 120,
+        y: 144,
+        w: 288,
+        h: 144
       }
     ],
     links: data.links || []
@@ -542,7 +542,6 @@ function migrateState(value) {
         criticality: board.criticality,
         startDate: board.startDate,
         endDate: board.endDate,
-        viewMode: board.viewMode,
         view: board.view,
         nodes: board.nodes,
         links: board.links
@@ -558,7 +557,6 @@ function migrateState(value) {
 
     return {
       activeUserId: activeUser?.id || users[0]?.id,
-      viewMode: normalizeViewMode(activeBoard?.viewMode),
       users
     };
   }
@@ -568,17 +566,37 @@ function migrateState(value) {
 
 function normalizeState(value) {
   value.users = (value.users?.length ? value.users : defaultState().users).map(normalizeUser);
-  if (!value.users.some(user => user.id === value.activeUserId)) {
-    value.activeUserId = value.users[0].id;
+
+  const usedNumbers = new Set();
+  let maxNumber = 0;
+  value.users.forEach(user => {
+    user.tasks.forEach(task => {
+      if (task.number && !usedNumbers.has(task.number)) {
+        usedNumbers.add(task.number);
+        if (task.number > maxNumber) maxNumber = task.number;
+      } else {
+        task.number = null;
+      }
+    });
+  });
+  value.users.forEach(user => {
+    user.tasks.forEach(task => {
+      if (!task.number) {
+        maxNumber++;
+        task.number = maxNumber;
+        usedNumbers.add(task.number);
+      }
+    });
+  });
+
+  if (value.activeUserId !== null && !value.users.some(user => user.id === value.activeUserId)) {
+    value.activeUserId = value.users[0]?.id ?? null;
   }
   value.users.forEach(user => {
-    if (!user.tasks.some(task => task.id === user.activeTaskId)) {
+    if (user.activeTaskId !== null && !user.tasks.some(task => task.id === user.activeTaskId)) {
       user.activeTaskId = user.tasks[0]?.id;
     }
   });
-  const activeUser = value.users.find(user => user.id === value.activeUserId) || value.users[0];
-  const activeTask = activeUser?.tasks.find(task => task.id === activeUser.activeTaskId) || activeUser?.tasks[0];
-  value.viewMode = normalizeViewMode(value.viewMode || activeTask?.viewMode);
   return value;
 }
 
@@ -587,21 +605,23 @@ function normalizeUser(user, index = 0) {
   return {
     id: user.id || makeId("user"),
     name: user.name || user.owner || `User ${index + 1}`,
-    activeTaskId: user.activeTaskId || tasks[0]?.id,
+    activeTaskId: user.activeTaskId === null ? null : (user.activeTaskId || tasks[0]?.id),
     tasks
   };
 }
 
 function normalizeMainTask(task, index = 0) {
   const dates = normalizeDateRange(task.startDate, task.endDate);
-  task.id ||= makeId("main-task");
+  task.id = task.id || makeId("main-task");
+  if (!task.number) {
+    task.number = state ? getNextGlobalTaskNumber() : (index + 1);
+  }
   task.title ||= task.name || `Main task ${index + 1}`;
   task.status = normalizeStatus(task.status);
   task.priority = normalizePriority(task.priority);
   task.criticality = normalizeCriticality(task.criticality);
   task.startDate = dates.startDate;
   task.endDate = dates.endDate;
-  task.viewMode = normalizeViewMode(task.viewMode);
   task.view ||= { zoom: 1, panX: 44, panY: 68 };
   task.view.zoom = clamp(Number(task.view.zoom) || 1, MIN_ZOOM, MAX_ZOOM);
   task.view.panX = Number(task.view.panX) || 0;
@@ -614,6 +634,10 @@ function normalizeMainTask(task, index = 0) {
     task.nodes.some(node => node.id === link.to) &&
     !isRootNode(task, link.to)
   );
+  task.links.forEach(link => {
+    if (link.fromPort === "top" || link.fromPort === "bottom") link.fromPort = "out";
+    if (link.toPort === "top" || link.toPort === "bottom") link.toPort = "in";
+  });
   return task;
 }
 
@@ -621,18 +645,38 @@ function isDefaultNextStep(node) {
   return node.title === "Proxima etapa" && node.body === "Criar subtasks e ligar dependencias.";
 }
 
+function getNextGlobalTaskNumber() {
+  let max = 0;
+  if (state && state.users) {
+    state.users.forEach(user => {
+      if (user.tasks) {
+        user.tasks.forEach(task => {
+          if (task.number > max) max = task.number;
+        });
+      }
+    });
+  }
+  return max + 1;
+}
+
 function normalizeNode(node) {
   const body = node.body || "";
   const title = typeof node.title === "string" ? node.title : "";
+  const GRID = 24;
+  const rawX = Number(node.x) || 0;
+  const rawY = Number(node.y) || 0;
+  const rawW = Math.max(288, Number(node.w) || 288);
+  const rawH = Number(node.h) || 0;
+
   const normalized = {
     id: node.id || makeId("action"),
     title: title === "Nova acao" && !String(body).trim() ? "" : title,
     body,
     status: normalizeStatus(node.status || (node.done ? "complete" : "ongoing")),
-    x: Number(node.x) || 0,
-    y: Number(node.y) || 0,
-    w: Number(node.w) || 232,
-    h: Number(node.h) || 0
+    x: Math.round(rawX / GRID) * GRID,
+    y: Math.round(rawY / GRID) * GRID,
+    w: Math.round(rawW / GRID) * GRID,
+    h: rawH > 0 ? Math.round(rawH / GRID) * GRID : 0
   };
   if (node.createdAt) normalized.createdAt = node.createdAt;
   if (node.type) normalized.type = node.type;
@@ -682,20 +726,6 @@ function normalizeCriticality(value) {
     return 0;
   }
   return clamp(Math.round(number), 0, 2);
-}
-
-function normalizeViewMode(mode) {
-  return mode === "list" ? "list" : "canvas";
-}
-
-function currentViewMode() {
-  return normalizeViewMode(state?.viewMode);
-}
-
-function formatShortDate(value) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return "";
-  const [y, m, d] = value.split("-");
-  return `${d}/${m}/${y.slice(2)}`;
 }
 
 function normalizeDate(value, offsetDays = 0) {
@@ -757,56 +787,69 @@ function saveState() {
 }
 
 function activeUser() {
+  if (state.activeUserId === null) {
+    return null;
+  }
   let user = state.users.find(item => item.id === state.activeUserId);
   if (!user) {
     user = state.users[0];
-    state.activeUserId = user.id;
+    state.activeUserId = user?.id ?? null;
   }
-  return user;
+  return user || null;
 }
 
 function activeBoard() {
   const user = activeUser();
+  if (!user || user.activeTaskId === null) {
+    return null;
+  }
   let task = user.tasks.find(item => item.id === user.activeTaskId);
   if (!task) {
     task = user.tasks[0];
-    user.activeTaskId = task.id;
+    user.activeTaskId = task?.id ?? null;
   }
-  return task;
+  return task || null;
 }
 
 function activeView() {
-  return activeBoard().view;
+  return activeBoard()?.view || null;
 }
 
-function activateUser(userId) {
-  if (!userId || userId === state.activeUserId) {
-    return;
-  }
-
-  state.activeUserId = userId;
-  clearSelection();
-  collapsedListNodes.clear();
-  saveState();
+function closeContextPopups() {
   if (attachmentsPopup && !attachmentsPopup.hidden) closeAttachmentsPopup();
   if (attachmentReferencePopup && !attachmentReferencePopup.hidden) closeAttachmentReferencePicker();
   if (clipboardAttachModal && !clipboardAttachModal.hidden) closeClipboardAttachModal();
+}
+
+function activateUser(userId) {
+  if (!userId) {
+    return;
+  }
+
+  const isDifferentUser = userId !== state.activeUserId;
+  state.activeUserId = userId === state.activeUserId ? null : userId;
+  if (isDifferentUser && state.activeUserId) {
+    const user = state.users.find(item => item.id === state.activeUserId);
+    if (user) {
+      user.activeTaskId = null;
+    }
+  }
+  clearSelection();
+  saveState();
+  closeContextPopups();
   render();
 }
 
 function activateTask(taskId) {
   const user = activeUser();
-  if (!taskId || taskId === user.activeTaskId) {
+  if (!user || !taskId) {
     return;
   }
 
-  user.activeTaskId = taskId;
+  user.activeTaskId = taskId === user.activeTaskId ? null : taskId;
   clearSelection();
-  collapsedListNodes.clear();
   saveState();
-  if (attachmentsPopup && !attachmentsPopup.hidden) closeAttachmentsPopup();
-  if (attachmentReferencePopup && !attachmentReferencePopup.hidden) closeAttachmentReferencePicker();
-  if (clipboardAttachModal && !clipboardAttachModal.hidden) closeClipboardAttachModal();
+  closeContextPopups();
   render();
 }
 
@@ -819,56 +862,74 @@ function clearSelection() {
 }
 
 function render() {
-  renderToolbar();
-  renderTabs();
-  renderViewMode();
+  renderUsersRail();
+  renderUserTasks();
+
+  const board = activeBoard();
+  renderBoardEmptyState(board);
+
+  if (!board) {
+    nodesLayer.innerHTML = "";
+    linkLayer.innerHTML = "";
+    renderedHeights.clear();
+    return;
+  }
+
   renderCanvasMetaOverlay();
   ensureCanvasPositions();
   applyViewport();
   renderNodes();
   renderLinks();
-  renderActionList();
-  renderUserTasks();
   updateAttachButtonState();
 }
 
-function renderToolbar() {
-  const isListMode = currentViewMode() === "list";
-  centerCanvasButton.disabled = isListMode;
-  organizeCanvasButton.disabled = isListMode;
-}
+// Sem user (ou sem task) o canvas nao tem o que desenhar: some com a superficie
+// e com os controles flutuantes e mostra um placeholder central explicando o
+// que falta selecionar.
+function renderBoardEmptyState(board) {
+  const hasBoard = Boolean(board);
+  const hasUser = Boolean(activeUser());
 
-function renderViewMode() {
-  const mode = currentViewMode();
-  boardSurface.hidden = mode !== "canvas";
-  canvasMetaOverlay.hidden = false;
-  actionListShell.hidden = mode !== "list";
-  centerCanvasButton.hidden = mode !== "canvas";
-  organizeCanvasButton.hidden = mode !== "canvas";
-  recordButton.hidden = mode !== "canvas" && mode !== "list";
-  canvasAttachButton.hidden = mode !== "canvas" && mode !== "list";
-  boardShell.classList.toggle("list-mode", mode === "list");
+  boardEmpty.hidden = hasBoard;
+  boardSurface.hidden = !hasBoard;
+  canvasMetaOverlay.hidden = !hasBoard;
+  centerCanvasButton.hidden = !hasBoard;
+  organizeCanvasButton.hidden = !hasBoard;
+  recordButton.hidden = !hasBoard;
+  canvasAttachButton.hidden = !hasBoard;
+  addUserTaskButton.disabled = !hasUser;
 
-  viewSwitch.querySelectorAll("[data-view-mode]").forEach(button => {
-    const active = button.dataset.viewMode === mode;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", String(active));
-  });
-}
-
-function setViewMode(mode) {
-  state.viewMode = normalizeViewMode(mode);
-  clearSelection();
-  closeAttachmentReferencePicker();
-  if (state.viewMode === "list") {
-    linkMode = false;
+  if (hasBoard) {
+    return;
   }
-  saveState();
-  render();
+
+  boardEmptyIcon.innerHTML = hasUser ? icons.board : icons.user;
+  boardEmptyTitle.textContent = hasUser ? "No task selected" : "No user selected";
+  boardEmptyHint.textContent = hasUser
+    ? "Select a task from the sidebar to open the canvas."
+    : "Select a user from the left panel to view tasks.";
 }
 
 function renderCanvasMetaOverlay() {
+  const user = activeUser();
   const task = activeBoard();
+  if (!task || !user) return;
+
+  const overlayUserNameEl = document.getElementById("overlayUserName");
+  if (overlayUserNameEl) overlayUserNameEl.textContent = user.name || "User";
+
+  const overlayUserAvatarEl = document.getElementById("overlayUserAvatar");
+  if (overlayUserAvatarEl) overlayUserAvatarEl.textContent = initialsFor(user.name);
+
+  const overlayIdEl = document.getElementById("overlayTaskId");
+  if (overlayIdEl) overlayIdEl.textContent = `#${task.number || ""}`;
+
+  const overlayTaskTitleEl = document.getElementById("overlayTaskTitle");
+  if (overlayTaskTitleEl) {
+    overlayTaskTitleEl.textContent = task.title || "";
+    overlayTaskTitleEl.title = task.title || "";
+  }
+
   const dates = normalizeDateRange(task.startDate, task.endDate);
   task.startDate = dates.startDate;
   task.endDate = dates.endDate;
@@ -879,7 +940,7 @@ function renderCanvasMetaOverlay() {
   const criticality = normalizeCriticality(task.criticality);
   overlayCriticalityInput.value = String(criticality);
   overlayCriticalityControl.className = `overlay-criticality crit-${criticality}`;
-  overlayCriticalityInput.title = `Criticidade ${CRITICALITY_META[criticality].label}`;
+  overlayCriticalityInput.title = `Criticality ${CRITICALITY_META[criticality].label}`;
 }
 
 function updateActiveTaskMetaFromOverlay() {
@@ -891,33 +952,56 @@ function updateActiveTaskMetaFromOverlay() {
   task.criticality = normalizeCriticality(overlayCriticalityInput.value);
   saveState();
   renderUserTasks();
+  renderNodes();
+  renderLinks();
   renderCanvasMetaOverlay();
 }
 
-function renderTabs() {
-  const user = activeUser();
-  tabsEl.innerHTML = "";
+// Iniciais do nome do user, usadas no avatar do rail lateral.
+function initialsFor(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  const first = parts[0][0] || "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
+  return (first + last).toUpperCase();
+}
+
+function renderUsersRail() {
+  const activeId = activeUser()?.id ?? null;
+  usersRailList.innerHTML = "";
 
   state.users.forEach(item => {
+    const taskCount = item.tasks?.length || 0;
     const tab = document.createElement("div");
-    tab.className = `tab${item.id === user.id ? " active" : ""}${item.id === tabDragId ? " dragging" : ""}`;
+    tab.className = `user-rail-item${item.id === activeId ? " active" : ""}${item.id === tabDragId ? " dragging" : ""}`;
     tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(item.id === activeId));
     tab.tabIndex = 0;
     tab.title = item.name;
     tab.dataset.userId = item.id;
 
+    const avatar = document.createElement("span");
+    avatar.className = "user-rail-avatar";
+    avatar.setAttribute("aria-hidden", "true");
+    avatar.textContent = initialsFor(item.name);
+
     const label = document.createElement("span");
-    label.className = "tab-label";
+    label.className = "user-rail-label";
     label.textContent = item.name;
 
+    const count = document.createElement("span");
+    count.className = "user-rail-count";
+    count.title = `${taskCount} task(s)`;
+    count.textContent = String(taskCount);
+
     const actions = document.createElement("div");
-    actions.className = "tab-actions";
+    actions.className = "user-rail-actions";
 
     const editBtn = document.createElement("button");
     editBtn.type = "button";
-    editBtn.className = "tab-action";
-    editBtn.setAttribute("aria-label", "Renomear");
-    editBtn.title = "Renomear";
+    editBtn.className = "user-rail-action";
+    editBtn.setAttribute("aria-label", "Rename");
+    editBtn.title = "Rename";
     editBtn.innerHTML = icons.edit;
     editBtn.addEventListener("click", event => {
       event.stopPropagation();
@@ -926,9 +1010,9 @@ function renderTabs() {
 
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
-    deleteBtn.className = "tab-action tab-action-danger";
-    deleteBtn.setAttribute("aria-label", "Excluir");
-    deleteBtn.title = "Excluir";
+    deleteBtn.className = "user-rail-action user-rail-action-danger";
+    deleteBtn.setAttribute("aria-label", "Delete");
+    deleteBtn.title = "Delete";
     deleteBtn.innerHTML = icons.trash;
     deleteBtn.addEventListener("click", async event => {
       event.stopPropagation();
@@ -936,8 +1020,8 @@ function renderTabs() {
         return;
       }
       const ok = await openConfirmDelete({
-        title: `Excluir "${item.name}"`,
-        message: "Esta acao removera a aba e todas as suas tasks. Nao pode ser desfeita."
+        title: `Delete "${item.name}"`,
+        message: "This action will remove the user and all their tasks. It cannot be undone."
       });
       if (ok) {
         removeUser(item.id);
@@ -946,12 +1030,11 @@ function renderTabs() {
 
     actions.appendChild(editBtn);
     actions.appendChild(deleteBtn);
-    tab.appendChild(label);
-    tab.appendChild(actions);
+    tab.append(avatar, label, count, actions);
 
     tab.addEventListener("pointerdown", event => startTabDrag(event, item.id));
     tab.addEventListener("dblclick", event => {
-      if (event.target.closest(".tab-action")) return;
+      if (event.target.closest(".user-rail-action")) return;
       startTabRename(tab, label, item);
     });
     tab.addEventListener("keydown", event => {
@@ -961,7 +1044,7 @@ function renderTabs() {
       }
     });
 
-    tabsEl.appendChild(tab);
+    usersRailList.appendChild(tab);
   });
 }
 
@@ -1008,11 +1091,11 @@ function startTabDrag(event, userId) {
       tabPointerDrag.didDrag = true;
       tabDragId = userId;
       createTabDragGhost(moveEvent);
-      renderTabs();
+      renderUsersRail();
     }
 
     positionTabDragGhost(moveEvent);
-    const beforeId = getTabInsertionId(moveEvent.clientX);
+    const beforeId = getTabInsertionId(moveEvent.clientY);
     moveUserBefore(userId, beforeId);
   };
 
@@ -1025,7 +1108,7 @@ function startTabDrag(event, userId) {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", stop);
     if (didDrag) {
-      renderTabs();
+      renderUsersRail();
     } else {
       activateUser(userId);
     }
@@ -1038,7 +1121,7 @@ function startTabDrag(event, userId) {
 function createTabDragGhost(event) {
   if (!tabPointerDrag?.sourceTab || tabPointerDrag.ghost) return;
   const ghost = tabPointerDrag.sourceTab.cloneNode(true);
-  ghost.classList.add("tab-drag-ghost");
+  ghost.classList.add("user-rail-drag-ghost");
   ghost.classList.remove("dragging");
   ghost.style.width = `${tabPointerDrag.width}px`;
   ghost.style.height = `${tabPointerDrag.height}px`;
@@ -1058,12 +1141,13 @@ function removeTabDragGhost() {
   tabPointerDrag?.ghost?.remove();
 }
 
-function getTabInsertionId(clientX) {
-  const tabs = [...tabsEl.querySelectorAll(".tab")]
+// O rail e vertical: a insercao e decidida pelo meio da altura de cada item.
+function getTabInsertionId(clientY) {
+  const tabs = [...usersRailList.querySelectorAll(".user-rail-item")]
     .filter(tab => tab.dataset.userId !== tabDragId);
   for (const tab of tabs) {
     const rect = tab.getBoundingClientRect();
-    if (clientX < rect.left + rect.width / 2) {
+    if (clientY < rect.top + rect.height / 2) {
       return tab.dataset.userId;
     }
   }
@@ -1081,7 +1165,7 @@ function moveUserBefore(sourceId, beforeId) {
   const insertionIndex = toIndex < 0 ? state.users.length : toIndex;
   state.users.splice(insertionIndex, 0, item);
   saveState();
-  renderTabs();
+  renderUsersRail();
 }
 
 let confirmDeleteResolve = null;
@@ -1096,7 +1180,7 @@ function generateCaptcha(len = 3) {
   return s;
 }
 
-function openConfirmDelete({ title, message, requireCode = true, confirmLabel = "Excluir" }) {
+function openConfirmDelete({ title, message, requireCode = true, confirmLabel = "Delete" }) {
   return new Promise(resolve => {
     confirmDeleteRequireCode = requireCode;
     confirmDeleteCodeStr = requireCode ? generateCaptcha(3) : "";
@@ -1136,15 +1220,15 @@ confirmDeleteModal.addEventListener("pointerdown", event => {
 });
 
 function startTabRename(tabEl, labelEl, userItem) {
-  if (tabEl.querySelector(".tab-rename-input")) return;
+  if (tabEl.querySelector(".user-rail-rename-input")) return;
   const input = document.createElement("input");
   input.type = "text";
-  input.className = "tab-rename-input";
+  input.className = "user-rail-rename-input";
   input.value = userItem.name;
   input.maxLength = 28;
   input.spellcheck = false;
   input.autocomplete = "off";
-  input.setAttribute("aria-label", "Renomear aba");
+  input.setAttribute("aria-label", "Rename user");
 
   labelEl.replaceWith(input);
   requestAnimationFrame(() => {
@@ -1161,7 +1245,7 @@ function startTabRename(tabEl, labelEl, userItem) {
       userItem.name = next;
       saveState();
     }
-    renderTabs();
+    renderUsersRail();
   };
 
   input.addEventListener("pointerdown", e => e.stopPropagation());
@@ -1189,9 +1273,23 @@ function setNodeContent(node, value) {
   node.body = nl === -1 ? "" : value.slice(nl + 1);
 }
 
+const FORMAT_COMMANDS = ["bold", "italic", "underline", "strikethrough", "insertUnorderedList", "insertOrderedList"];
+
+function updateFormatButtonStates(card) {
+  const bar = card.querySelector(".card-format-bar");
+  if (!bar) return;
+  bar.querySelectorAll(".card-format-btn[data-command]").forEach(btn => {
+    const cmd = btn.dataset.command;
+    if (FORMAT_COMMANDS.includes(cmd)) {
+      btn.classList.toggle("active", document.queryCommandState(cmd));
+    }
+  });
+}
+
 function renderNodes() {
   const board = activeBoard();
   nodesLayer.innerHTML = "";
+  if (!board) return;
   const lineageNodeIds = lineageState?.nodeIds || null;
   boardShell.classList.toggle("lineage-mode", Boolean(lineageState));
 
@@ -1220,8 +1318,9 @@ function renderNodes() {
     card.dataset.status = status;
     card.style.left = `${node.x}px`;
     card.style.top = `${node.y}px`;
-    card.style.width = `${node.w || 232}px`;
-    card.style.height = hasFixedHeight ? `${node.h}px` : "auto";
+    card.style.width = `${Math.max(288, node.w || 288)}px`;
+    card.style.minHeight = hasFixedHeight ? `${node.h}px` : "80px";
+    card.style.height = "auto";
 
     const createdAtHtml = (!rootCard && node.createdAt && node.type !== "image")
       ? `<div class="card-footer">
@@ -1234,58 +1333,60 @@ function renderNodes() {
          </div>`
       : "";
     card.innerHTML = `
-      ${rootCard ? "" : `<button class="port port-in${linkDragState?.nodeId === node.id && linkDragState?.port === "in" ? " pending" : ""}" data-port="in" type="button" aria-label="Entrada"></button>`}
-      <button class="port port-out${pendingLink?.from === node.id || (linkDragState?.nodeId === node.id && linkDragState?.port === "out") ? " pending" : ""}" data-port="out" type="button" aria-label="Saida"></button>
+      ${rootCard ? "" : `<button class="port port-in${linkDragState?.nodeId === node.id && linkDragState?.port === "in" ? " pending" : ""}" data-port="in" type="button" aria-label="Input"></button>`}
+      <button class="port port-out${pendingLink?.from === node.id || (linkDragState?.nodeId === node.id && linkDragState?.port === "out") ? " pending" : ""}" data-port="out" type="button" aria-label="Output"></button>
       ${rootCard ? "" : node.type === "image" ? `
         <div class="image-card-top">
-          <button class="card-action" type="button" aria-label="Remover" title="Remover">${icons.close}</button>
+          <button class="card-action" type="button" aria-label="Remove" title="Remove">${icons.close}</button>
         </div>
       ` : `
         <div class="card-top">
-          <button class="card-check" type="button" aria-label="Concluir" title="Concluir">${status === "complete" ? icons.check : ""}</button>
+          <button class="card-check" type="button" aria-label="Complete" title="Complete">${status === "complete" ? icons.check : ""}</button>
           <div class="crit-wrap crit-${node.criticality ?? 0}">
             <div class="crit-track">
               <span class="crit-dot"></span>
               <span class="crit-dot"></span>
               <span class="crit-dot"></span>
             </div>
-            <input class="crit-range" type="range" min="0" max="2" step="1" value="${node.criticality ?? 0}" title="Criticidade" />
+            <input class="crit-range" type="range" min="0" max="2" step="1" value="${node.criticality ?? 0}" title="Criticality" />
           </div>
-          <button class="card-action" type="button" aria-label="Remover" title="Remover">${icons.close}</button>
+          <button class="card-action" type="button" aria-label="Remove" title="Remove">${icons.close}</button>
         </div>
       `}
       <div class="card-body-wrap">
         ${rootCard
           ? `<div class="root-card-header">
-               <strong class="root-card-title" contenteditable="true" spellcheck="false" role="textbox" aria-label="Titulo do Board">${escapeHtml(board.title)}</strong>
-               <button class="root-card-edit" type="button" aria-label="Editar" title="Editar">${icons.edit}</button>
+               <strong class="root-card-title" contenteditable="true" spellcheck="false" role="textbox" aria-label="Board Title">${escapeHtml(board.title)}</strong>
+               <button class="root-card-edit" type="button" aria-label="Edit" title="Edit">${icons.edit}</button>
              </div>`
           : node.type === "image"
             ? node.imageUrl
-                ? `<div class="card-body image-card-body" role="img" aria-label="Imagem anexada"><img src="${node.imageUrl}" alt="Imagem do card" draggable="false" /></div>`
-                : `<div class="card-body image-card-body empty-image-card" role="button" aria-label="Adicionar imagem" title="Adicionar imagem" onclick="document.getElementById('updateImageInput').click(); window.nodeToUpdateImage = '${node.id}';">${icons.image}</div>`
-            : `<div class="card-body" contenteditable="true" role="textbox" aria-label="Conteudo do card">${renderBodyHtml(getNodeContent(node))}</div>`}
+                ? `<div class="card-body image-card-body" role="img" aria-label="Attached image"><img src="${node.imageUrl}" alt="Card image" draggable="false" /></div>`
+                : `<div class="card-body image-card-body empty-image-card" role="button" aria-label="Add image" title="Add image" onclick="document.getElementById('updateImageInput').click(); window.nodeToUpdateImage = '${node.id}';">${icons.image}</div>`
+            : `<div class="card-body" contenteditable="true" role="textbox" aria-label="Card content">${renderBodyHtml(getNodeContent(node))}</div>`}
       </div>
       ${createdAtHtml}
       ${rootCard ? "" : node.type === "image" && node.imageUrl ? `
         <div class="image-card-bottom" contenteditable="false">
-          <button class="image-card-btn" type="button" data-command="changeImage" title="Alterar Imagem">${icons.image}</button>
-          <button class="image-card-btn" type="button" data-command="clearImage" title="Limpar Imagem">${icons.close}</button>
+          <button class="image-card-btn" type="button" data-command="changeImage" title="Change Image">${icons.image}</button>
+          <button class="image-card-btn" type="button" data-command="clearImage" title="Remove Image">${icons.close}</button>
         </div>
       ` : node.type === "image" ? "" : `
         <div class="card-format-bar" contenteditable="false">
-          <button class="card-format-btn" type="button" data-command="bold" title="Negrito (Ctrl+B)">${icons.formatBold}</button>
-          <button class="card-format-btn" type="button" data-command="italic" title="Itálico (Ctrl+I)">${icons.formatItalic}</button>
-          <button class="card-format-btn" type="button" data-command="underline" title="Sublinhado (Ctrl+U)">${icons.formatUnderline}</button>
-          <button class="card-format-btn" type="button" data-command="strikethrough" title="Riscado">${icons.formatStrikethrough}</button>
+          <button class="card-format-btn" type="button" data-command="bold" title="Bold (Ctrl+B)">${icons.formatBold}</button>
+          <button class="card-format-btn" type="button" data-command="italic" title="Italic (Ctrl+I)">${icons.formatItalic}</button>
+          <button class="card-format-btn" type="button" data-command="underline" title="Underline (Ctrl+U)">${icons.formatUnderline}</button>
+          <button class="card-format-btn" type="button" data-command="strikethrough" title="Strikethrough">${icons.formatStrikethrough}</button>
           <div style="width: 1px; background: rgba(var(--hi-rgb),0.15); margin: 2px 2px;"></div>
-          <button class="card-format-btn" type="button" data-command="insertUnorderedList" title="Lista">${icons.formatListBulleted}</button>
-          <button class="card-format-btn" type="button" data-command="insertOrderedList" title="Lista Numérica">${icons.formatListNumbered}</button>
+          <button class="card-format-btn" type="button" data-command="insertUnorderedList" title="Bulleted List">${icons.formatListBulleted}</button>
+          <button class="card-format-btn" type="button" data-command="insertOrderedList" title="Numbered List">${icons.formatListNumbered}</button>
+          <button class="card-format-btn" type="button" data-command="insertCheckbox" title="Checkbox">${icons.checkbox}</button>
           <div style="width: 1px; background: rgba(var(--hi-rgb),0.15); margin: 2px 2px;"></div>
-          <button class="card-format-btn" type="button" data-command="removeFormat" title="Limpar Formatação">${icons.formatClear}</button>
+          <button class="card-format-btn" type="button" data-command="insertImageInline" title="Insert Image">${icons.image}</button>
+          <button class="card-format-btn" type="button" data-command="removeFormat" title="Clear Formatting">${icons.formatClear}</button>
         </div>
       `}
-      <button class="resize-handle" type="button" aria-label="Redimensionar" title="Redimensionar"></button>
+      <button class="resize-handle" type="button" aria-label="Resize" title="Resize"></button>
     `;
 
     card.addEventListener("pointerdown", () => {
@@ -1295,6 +1396,16 @@ function renderNodes() {
       removeLineageClasses();
       renderLinks();
       refreshSelectionClasses();
+    });
+
+    card.addEventListener("change", event => {
+      if (event.target.classList.contains("card-todo-checkbox")) {
+        const editor = card.querySelector(".card-body");
+        if (editor) {
+          setNodeContent(node, serializeEditableContent(editor));
+          saveState();
+        }
+      }
     });
 
     card.addEventListener("mouseenter", () => scheduleLineagePreview(node.id));
@@ -1329,10 +1440,16 @@ function renderNodes() {
 
       card.querySelector(".card-check")?.addEventListener("click", event => {
         event.stopPropagation();
-        node.status = status === "complete" ? "ongoing" : "complete";
+        const currentStatus = node.status || "ongoing";
+        const newStatus = currentStatus === "complete" ? "ongoing" : "complete";
+        node.status = newStatus;
         saveState();
-        renderNodes();
-        renderLinks();
+        
+        card.classList.remove(`status-${currentStatus}`);
+        card.classList.add(`status-${newStatus}`);
+        event.currentTarget.innerHTML = newStatus === "complete" ? icons.check : "";
+        
+        renderUserTasks();
       });
 
       card.querySelector(".card-action")?.addEventListener("click", event => {
@@ -1344,7 +1461,28 @@ function renderNodes() {
     const bodyEditor = card.querySelector(".card-body");
 
     if (bodyEditor) {
+      bodyEditor.addEventListener("pointerdown", event => {
+        if (event.target.closest(".card-todo-btn") || event.target.closest(".card-todo-wrap")) {
+          event.stopPropagation();
+        }
+      });
+
       bodyEditor.addEventListener("click", event => {
+        const todoWrap = event.target.closest(".card-todo-wrap");
+        const todoBtn = event.target.closest(".card-todo-btn") || todoWrap?.querySelector(".card-todo-btn");
+        if (todoBtn && todoWrap) {
+          event.preventDefault();
+          event.stopPropagation();
+          const nowChecked = todoWrap.dataset.checked !== "true";
+          todoWrap.dataset.checked = String(nowChecked);
+          todoBtn.classList.toggle("checked", nowChecked);
+          todoBtn.setAttribute("aria-checked", String(nowChecked));
+          todoBtn.innerHTML = nowChecked ? icons.check : "";
+          setNodeContent(node, serializeEditableContent(bodyEditor));
+          saveState();
+          return;
+        }
+
         const removeBtn = event.target.closest(".card-attachment-remove");
         if (removeBtn) {
           event.preventDefault();
@@ -1377,11 +1515,16 @@ function renderNodes() {
         closeAttachmentReferencePicker(bodyEditor);
       });
 
-      bodyEditor.addEventListener("keydown", handleAttachmentReferenceKeydown);
+      bodyEditor.addEventListener("keydown", event => {
+        handleAttachmentReferenceKeydown(event);
+        if (event.defaultPrevented) return;
+        handleTodoKeydown(event, bodyEditor, node);
+      });
       bodyEditor.addEventListener("input", () => {
         setNodeContent(node, serializeEditableContent(bodyEditor));
         saveState();
         syncAttachmentReferencePicker(bodyEditor);
+        scheduleNodeHeightSync(node.id, card);
       });
     }
 
@@ -1420,13 +1563,59 @@ function renderNodes() {
         }
         const editor = card.querySelector(".card-body");
         if (editor) {
+          if (command === "insertImageInline") {
+            window.inlineImageEditorTarget = editor;
+            window.inlineImageNodeTarget = node;
+            document.getElementById('inlineImageInput').click();
+            return;
+          }
+          if (command === "insertCheckbox") {
+            editor.focus();
+            const sel = window.getSelection();
+            const html = `<span class="card-todo-wrap" contenteditable="false" data-checked="false"><button type="button" class="card-todo-btn" role="checkbox" aria-checked="false"></button></span> `;
+            if (sel && sel.rangeCount > 0) {
+              const range = sel.getRangeAt(0);
+              range.deleteContents();
+              const temp = document.createElement("div");
+              temp.innerHTML = html;
+              const frag = document.createDocumentFragment();
+              let lastNode = null;
+              while (temp.firstChild) {
+                lastNode = temp.firstChild;
+                frag.appendChild(lastNode);
+              }
+              range.insertNode(frag);
+              if (lastNode) {
+                range.setStartAfter(lastNode);
+                range.setEndAfter(lastNode);
+                sel.removeAllRanges();
+                sel.addRange(range);
+              }
+            } else {
+              document.execCommand("insertHTML", false, html);
+            }
+            setNodeContent(node, serializeEditableContent(editor));
+            saveState();
+            return;
+          }
           editor.focus();
           document.execCommand(command, false, null);
           setNodeContent(node, serializeEditableContent(editor));
           saveState();
+          updateFormatButtonStates(card);
         }
       });
     });
+
+    const formatBar = card.querySelector(".card-format-bar");
+    if (formatBar) {
+      document.addEventListener("selectionchange", () => {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount && card.contains(sel.anchorNode)) {
+          updateFormatButtonStates(card);
+        }
+      });
+    }
 
     if (rootCard) {
       const titleEl = card.querySelector(".root-card-title");
@@ -1476,23 +1665,43 @@ function renderNodes() {
 }
 
 // Altura usada para posicionar ports/linhas: altura fixa quando o card foi
-// redimensionado, senao a altura real renderizada, com fallback de 154.
+// redimensionado, senao a altura real renderizada, com fallback de 144.
 function nodeHeight(node) {
-  return node.h || renderedHeights.get(node.id) || 154;
+  return renderedHeights.get(node.id) || node.h || 144;
+}
+
+// O card cresce/encolhe com o texto digitado. Sem re-medir, os ports (e as setas
+// que apontam para eles) continuam na altura antiga ate o proximo render()
+// completo. Coalescido por frame para nao forcar reflow a cada tecla.
+let nodeHeightSyncFrame = null;
+function scheduleNodeHeightSync(nodeId, card) {
+  if (nodeHeightSyncFrame) return;
+  nodeHeightSyncFrame = requestAnimationFrame(() => {
+    nodeHeightSyncFrame = null;
+    if (!card.isConnected) return;
+    const measured = card.offsetHeight;
+    if (renderedHeights.get(nodeId) === measured) return;
+    renderedHeights.set(nodeId, measured);
+    renderLinks();
+  });
 }
 
 function scheduleLineagePreview(nodeId) {
-  if (currentViewMode() !== "canvas") {
+  if (localStorage.getItem("todocompanion.settings.lineageHover") === "false") {
     return;
   }
 
   window.clearTimeout(lineageHoverTimer);
   lineageHoverTimer = window.setTimeout(() => {
     showLineagePreview(nodeId);
-  }, 4000);
+  }, 600);
 }
 
 function showLineagePreview(nodeId) {
+  if (localStorage.getItem("todocompanion.settings.lineageHover") === "false") {
+    return;
+  }
+  
   const board = activeBoard();
   const lineage = getNodeLineage(board, nodeId);
   if (!lineage.nodeIds.size) {
@@ -1574,467 +1783,10 @@ function getNodeLineage(board, nodeId) {
   return { nodeIds, linkIds };
 }
 
-function startListNodeDrag(event, nodeId, sourceItem) {
-  if (event.button !== 0) return;
-  event.preventDefault();
-  event.stopPropagation();
-
-  const rect = sourceItem.getBoundingClientRect();
-  listPointerDrag = {
-    nodeId,
-    pointerId: event.pointerId,
-    startX: event.clientX,
-    startY: event.clientY,
-    offsetX: event.clientX - rect.left,
-    offsetY: event.clientY - rect.top,
-    width: rect.width,
-    height: rect.height,
-    sourceItem,
-    ghost: null,
-    didDrag: false
-  };
-
-  const move = moveEvent => {
-    if (!listPointerDrag || moveEvent.pointerId !== listPointerDrag.pointerId) return;
-
-    const distance = Math.hypot(moveEvent.clientX - listPointerDrag.startX, moveEvent.clientY - listPointerDrag.startY);
-    if (!listPointerDrag.didDrag && distance < 6) return;
-
-    if (!listPointerDrag.didDrag) {
-      listPointerDrag.didDrag = true;
-      dragListNodeId = nodeId;
-      createListDragGhost(moveEvent);
-      renderActionList();
-    }
-
-    positionListDragGhost(moveEvent);
-    const beforeId = getListInsertionId(moveEvent.clientY);
-    moveListNodeBefore(nodeId, beforeId);
-  };
-
-  const stop = upEvent => {
-    if (!listPointerDrag || upEvent.pointerId !== listPointerDrag.pointerId) return;
-    window.removeEventListener("pointermove", move);
-    window.removeEventListener("pointerup", stop);
-    removeListDragGhost();
-    listPointerDrag = null;
-    dragListNodeId = null;
-    renderActionList();
-  };
-
-  window.addEventListener("pointermove", move);
-  window.addEventListener("pointerup", stop);
-}
-
-function createListDragGhost(event) {
-  if (!listPointerDrag?.sourceItem || listPointerDrag.ghost) return;
-  const ghost = listPointerDrag.sourceItem.cloneNode(true);
-  ghost.classList.add("list-drag-ghost");
-  ghost.classList.remove("list-dragging");
-  ghost.style.width = `${listPointerDrag.width}px`;
-  ghost.style.height = `${listPointerDrag.height}px`;
-  document.body.appendChild(ghost);
-  listPointerDrag.ghost = ghost;
-  positionListDragGhost(event);
-}
-
-function positionListDragGhost(event) {
-  const ghost = listPointerDrag?.ghost;
-  if (!ghost) return;
-  ghost.style.left = `${event.clientX - listPointerDrag.offsetX}px`;
-  ghost.style.top = `${event.clientY - listPointerDrag.offsetY}px`;
-}
-
-function removeListDragGhost() {
-  listPointerDrag?.ghost?.remove();
-}
-
-function getListInsertionId(clientY) {
-  const items = [...actionList.querySelectorAll(".action-list-item")]
-    .filter(el => el.dataset.id !== dragListNodeId);
-
-  for (const el of items) {
-    const rect = el.getBoundingClientRect();
-    if (clientY < rect.top + rect.height / 2) {
-      return el.dataset.id;
-    }
-  }
-
-  return null;
-}
-
-function moveListNodeBefore(sourceId, beforeId) {
-  if (!sourceId || sourceId === beforeId) return;
-  const board = activeBoard();
-  const entries = getActionListEntries(board, collapsedListNodes);
-  const ids = entries.map(e => e.node.id);
-  const fromIndex = ids.indexOf(sourceId);
-  if (fromIndex < 0) return;
-
-  const currentBeforeId = ids[fromIndex + 1] || null;
-  if (currentBeforeId === beforeId) return;
-
-  const previousRects = captureListItemRects();
-  ids.splice(fromIndex, 1);
-  const toIndex = beforeId ? ids.indexOf(beforeId) : ids.length;
-  const insertionIndex = toIndex < 0 ? ids.length : toIndex;
-  ids.splice(insertionIndex, 0, sourceId);
-
-  const nodesById = new Map(board.nodes.map(n => [n.id, n]));
-  ids.forEach((id, i) => {
-    const node = nodesById.get(id);
-    if (node) node.y = i * 150;
-  });
-  saveState();
-  renderNodes();
-  renderActionList();
-  animateListReorder(previousRects);
-}
-
-function captureListItemRects() {
-  const rects = new Map();
-  actionList.querySelectorAll(".action-list-item").forEach(el => {
-    const rect = el.getBoundingClientRect();
-    rects.set(el.dataset.id, { left: rect.left, top: rect.top });
-  });
-  return rects;
-}
-
-function animateListReorder(previousRects) {
-  requestAnimationFrame(() => {
-    actionList.querySelectorAll(".action-list-item").forEach(el => {
-      if (el.dataset.id === dragListNodeId) return;
-      const previous = previousRects.get(el.dataset.id);
-      if (!previous) return;
-      const current = el.getBoundingClientRect();
-      const dy = previous.top - current.top;
-      if (Math.abs(dy) < 1) return;
-      el.animate(
-        [{ transform: `translateY(${dy}px)` }, { transform: "translateY(0)" }],
-        { duration: 200, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" }
-      );
-    });
-  });
-}
-
-function renderActionList() {
-  const board = activeBoard();
-  const listMode = currentViewMode() === "list";
-  // Devolve o overlay de meta ao seu lugar flutuante antes de limpar a lista,
-  // para que innerHTML="" nunca o destrua e o modo canva o mostre flutuando.
-  canvasMetaOverlay.classList.remove("in-list-card");
-  if (canvasMetaOverlay.parentElement !== boardShell) {
-    boardShell.appendChild(canvasMetaOverlay);
-  }
-  const entries = getActionListEntries(board, collapsedListNodes);
-  const incomingIds = new Set(board.links.map(link => link.to));
-  actionList.innerHTML = "";
-  actionListLinks.innerHTML = "";
-  actionListShell.querySelector(".action-list-add")?.remove();
-
-  if (!board.nodes.length) {
-    const empty = document.createElement("div");
-    empty.className = "action-list-empty";
-    empty.textContent = "Nenhuma acao";
-    actionList.appendChild(empty);
-  }
-
-  entries.forEach(({ node, depth, hasChildren }) => {
-    const status = normalizeStatus(node.status);
-    const rootItem = isRootNode(board, node.id);
-    const justCreated = pendingListPop.has(node.id);
-    if (justCreated) {
-      pendingListPop.delete(node.id);
-    }
-    const isCollapsed = collapsedListNodes.has(node.id);
-    const item = document.createElement("article");
-    item.className = `action-list-item status-${status}${incomingIds.has(node.id) ? " has-incoming" : ""}${hasChildren ? " has-children" : ""}${node.id === selectedNodeId ? " selected" : ""}${justCreated ? " list-created" : ""}${rootItem ? " root-action" : ""}${node.id === dragListNodeId ? " list-dragging" : ""}`;
-    item.dataset.id = node.id;
-    item.dataset.depth = String(depth);
-    item.style.setProperty("--list-depth", depth);
-    item.style.setProperty("--list-indent", `${depth * 34}px`);
-    item.innerHTML = `
-      <span class="action-list-anchor${rootItem ? " action-list-anchor-hidden" : ""}" aria-hidden="true"></span>
-      ${rootItem
-        ? `
-          <div class="action-list-root-card">
-            <div class="action-list-root-meta"></div>
-            <div class="action-list-root-divider" aria-hidden="true"></div>
-            <strong class="action-list-root-title">${escapeHtml(board.title)}</strong>
-          </div>
-          <div class="action-list-actions action-list-root-actions">
-            <button class="action-list-reply" type="button" aria-label="Responder acao" title="Responder acao">+</button>
-          </div>
-        `
-        : `
-          <span class="action-list-drag" aria-hidden="true">${icons.grip}</span>
-          <button class="action-list-check" type="button" aria-label="Concluir" title="Concluir">${status === "complete" ? icons.check : ""}</button>
-          <div class="action-list-main">
-            <div class="action-list-body" contenteditable="plaintext-only" role="textbox" aria-label="Descricao da acao">${renderBodyHtml(getNodeContent(node))}</div>
-            ${node.createdAt ? `<span class="action-list-created-at">${formatCreatedAt(node.createdAt)}</span>` : ""}
-          </div>
-          <div class="action-list-actions">
-            <button class="action-list-reply" type="button" aria-label="Responder acao" title="Responder acao">+</button>
-            <button class="action-list-remove" type="button" aria-label="Remover acao" title="Remover acao">${icons.close}</button>
-            <button class="action-list-toggle${isCollapsed ? " collapsed" : ""}${!hasChildren ? " inert" : ""}" type="button" aria-label="${isCollapsed ? "Mostrar filhos" : "Ocultar filhos"}" title="${isCollapsed ? "Mostrar filhos" : "Ocultar filhos"}">${icons.chevronDown}</button>
-          </div>
-        `}
-    `;
-
-    item.addEventListener("pointerdown", event => {
-      if (event.target.closest("input, textarea, button, .action-list-drag, .action-list-body, [contenteditable]")) {
-        return;
-      }
-      selectedNodeId = node.id;
-      selectedLinkId = null;
-      renderActionList();
-    });
-
-    if (!rootItem) {
-      item.querySelector(".action-list-drag")?.addEventListener("pointerdown", event => {
-        startListNodeDrag(event, node.id, item);
-      });
-    }
-
-    item.querySelector(".action-list-check")?.addEventListener("click", event => {
-      event.stopPropagation();
-      node.status = status === "complete" ? "ongoing" : "complete";
-      saveState();
-      renderNodes();
-      renderLinks();
-      renderActionList();
-    });
-
-    const listBodyEditor = item.querySelector(".action-list-body");
-
-    listBodyEditor?.addEventListener("click", event => {
-      const removeBtn = event.target.closest(".card-attachment-remove");
-      if (removeBtn) {
-        event.preventDefault();
-        event.stopPropagation();
-        const chip = removeBtn.closest(".card-attachment-link");
-        removeChipFromEditable(listBodyEditor, chip);
-        return;
-      }
-
-      const attachmentLink = event.target.closest(".card-attachment-link");
-      if (attachmentLink) {
-        event.preventDefault();
-        event.stopPropagation();
-        const att = findActiveAttachmentById(attachmentLink.dataset.attachmentId);
-        if (att) {
-          openAttachment(att);
-        }
-        return;
-      }
-
-      const link = event.target.closest(".card-body-link");
-      if (link) {
-        event.preventDefault();
-        event.stopPropagation();
-        openExternalUrl(toAbsoluteUrl(link.getAttribute("href")));
-      }
-    });
-
-    listBodyEditor?.addEventListener("input", () => {
-      setNodeContent(node, serializeEditableContent(listBodyEditor));
-      saveState();
-      renderNodes();
-      scheduleActionListLinks();
-      syncAttachmentReferencePicker(listBodyEditor);
-    });
-
-    listBodyEditor?.addEventListener("keydown", handleAttachmentReferenceKeydown);
-    listBodyEditor?.addEventListener("blur", () => closeAttachmentReferencePicker(listBodyEditor));
-
-    if (justCreated && listBodyEditor) {
-      requestAnimationFrame(() => listBodyEditor.focus());
-    }
-
-    item.querySelector(".action-list-toggle:not(.inert)")?.addEventListener("click", event => {
-      event.stopPropagation();
-      if (collapsedListNodes.has(node.id)) {
-        collapsedListNodes.delete(node.id);
-      } else {
-        collapsedListNodes.add(node.id);
-      }
-      renderActionList();
-    });
-
-    item.querySelector(".action-list-reply").addEventListener("click", event => {
-      event.stopPropagation();
-      addAction(node.id);
-    });
-
-    item.querySelector(".action-list-remove")?.addEventListener("click", () => removeNode(node.id));
-
-    actionList.appendChild(item);
-  });
-
-  // No modo lista, os dados de data/status/criticidade ficam dentro do card raiz
-  // (2a linha), em vez de flutuando no topo.
-  if (listMode) {
-    const metaSlot = actionList.querySelector(".root-action .action-list-root-meta");
-    if (metaSlot) {
-      canvasMetaOverlay.classList.add("in-list-card");
-      metaSlot.appendChild(canvasMetaOverlay);
-    }
-  }
-  const rootCard = actionList.querySelector(".root-action");
-  actionListShell.style.setProperty("--action-list-root-mask-height", `${rootCard?.offsetHeight || 0}px`);
-
-  const addButton = document.createElement("button");
-  addButton.className = "action-list-add";
-  addButton.type = "button";
-  addButton.textContent = "+";
-  addButton.setAttribute("aria-label", "Nova acao");
-  addButton.setAttribute("title", "Nova acao");
-  addButton.addEventListener("click", () => addAction());
-  actionList.appendChild(addButton);
-  scheduleActionListLinks();
-}
-
-function getActionListEntries(board, collapsed = new Set()) {
-  const nodesById = new Map(board.nodes.map(node => [node.id, node]));
-  const originalOrder = new Map(board.nodes.map((node, index) => [node.id, index]));
-  const children = new Map(board.nodes.map(node => [node.id, []]));
-  const parentById = new Map();
-
-  board.links.forEach(link => {
-    if (!nodesById.has(link.from) || !nodesById.has(link.to) || link.from === link.to || parentById.has(link.to)) {
-      return;
-    }
-
-    parentById.set(link.to, link.from);
-    children.get(link.from)?.push(link.to);
-  });
-
-  const byCanvasPosition = (firstId, secondId) => {
-    const first = nodesById.get(firstId);
-    const second = nodesById.get(secondId);
-    return ((first?.y ?? 0) - (second?.y ?? 0)) ||
-      ((first?.x ?? 0) - (second?.x ?? 0)) ||
-      ((originalOrder.get(firstId) ?? 0) - (originalOrder.get(secondId) ?? 0));
-  };
-
-  children.forEach(items => items.sort(byCanvasPosition));
-
-  // O card principal (raiz) fica sempre como primeiro item: nada pode aparecer
-  // acima dele na lista, independentemente da posicao Y no canvas.
-  const mainRootId = board.nodes[0]?.id;
-  const roots = board.nodes
-    .map(node => node.id)
-    .filter(id => !parentById.has(id))
-    .sort((a, b) => {
-      if (a === mainRootId) return -1;
-      if (b === mainRootId) return 1;
-      return byCanvasPosition(a, b);
-    });
-  const entries = [];
-  const visited = new Set();
-
-  const skipSubtree = (nodeId) => {
-    if (visited.has(nodeId)) return;
-    visited.add(nodeId);
-    (children.get(nodeId) || []).forEach(skipSubtree);
-  };
-
-  const visit = (nodeId, depth) => {
-    const node = nodesById.get(nodeId);
-    if (!node || visited.has(nodeId)) {
-      return;
-    }
-
-    visited.add(nodeId);
-    const nodeChildren = children.get(nodeId) || [];
-    const hasChildren = nodeChildren.length > 0;
-    entries.push({ node, depth, hasChildren });
-    if (collapsed.has(nodeId)) {
-      nodeChildren.forEach(skipSubtree);
-    } else {
-      nodeChildren.forEach(childId => visit(childId, depth + 1));
-    }
-  };
-
-  roots.forEach(rootId => visit(rootId, 0));
-  board.nodes.forEach(node => visit(node.id, 0));
-
-  return entries;
-}
-
-function scheduleActionListLinks() {
-  requestAnimationFrame(renderActionListLinks);
-}
-
-function renderActionListLinks() {
-  actionListLinks.innerHTML = "";
-  if (true) return;
-
-  const nodesById = new Map(board.nodes.map(node => [node.id, node]));
-  const elementsById = new Map([...actionList.querySelectorAll(".action-list-item")].map(item => [item.dataset.id, item]));
-  const shellRect = actionListShell.getBoundingClientRect();
-  const width = actionListShell.clientWidth;
-  const height = Math.max(actionListShell.scrollHeight, actionListShell.clientHeight);
-
-  actionListLinks.innerHTML = "";
-  actionListLinks.style.width = `${width}px`;
-  actionListLinks.style.height = `${height}px`;
-  actionListLinks.setAttribute("viewBox", `0 0 ${width} ${height}`);
-
-  board.links.forEach(link => {
-    const fromNode = nodesById.get(link.from);
-    const toNode = nodesById.get(link.to);
-    const fromEl = elementsById.get(link.from);
-    const toEl = elementsById.get(link.to);
-    if (!fromNode || !toNode || !fromEl || !toEl) {
-      return;
-    }
-
-    const start = getActionListAnchorPoint(fromEl, shellRect);
-    const end = getActionListAnchorPoint(toEl, shellRect);
-    const DOT_GAP = 5;
-    const direction = end.y >= start.y ? 1 : -1;
-    const startX = start.x;
-    const startY = start.y + DOT_GAP * direction;
-    const verticalApproach = end.x <= start.x;
-
-    let pathD;
-    if (verticalApproach) {
-      const endY = end.y - DOT_GAP * direction;
-      pathD = `M ${startX} ${startY} V ${endY}`;
-    } else {
-      const endX = end.x - DOT_GAP;
-      const endY = end.y;
-      const radius = Math.max(0, Math.min(14, Math.abs(endY - startY) / 2));
-      const curveY = endY - radius * direction;
-      const turnX = Math.min(startX + radius, endX);
-      pathD = `M ${startX} ${startY} V ${curveY} Q ${startX} ${endY} ${turnX} ${endY} H ${endX}`;
-    }
-
-    const status = normalizeStatus(toNode.status);
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("class", `action-list-connector status-${status}`);
-    path.setAttribute("d", pathD);
-
-    actionListLinks.append(path);
-  });
-}
-
-function getActionListAnchorPoint(itemEl, shellRect) {
-  const anchor = itemEl.querySelector(".action-list-anchor");
-  const anchorRect = anchor?.getBoundingClientRect();
-  const itemRect = itemEl.getBoundingClientRect();
-  return {
-    x: anchorRect
-      ? anchorRect.left - shellRect.left + actionListShell.scrollLeft + anchorRect.width / 2
-      : itemRect.left - shellRect.left + actionListShell.scrollLeft - 10,
-    y: itemRect.top - shellRect.top + actionListShell.scrollTop + itemRect.height / 2
-  };
-}
-
 function renderLinks() {
   const board = activeBoard();
   linkLayer.innerHTML = "";
+  if (!board) return;
 
   const nodesById = new Map(board.nodes.map(node => [node.id, node]));
   board.links = board.links.filter(link => nodesById.has(link.from) && nodesById.has(link.to));
@@ -2050,10 +1802,17 @@ function renderLinks() {
   board.links.forEach(link => {
     const from = nodesById.get(link.from);
     const to = nodesById.get(link.to);
-    const fromPort = link.fromPort || "out";
-    const toPort = link.toPort || "in";
+    const fromPort = link.fromPort === "top" || link.fromPort === "bottom" ? "out" : (link.fromPort || "out");
+    const toPort = link.toPort === "top" || link.toPort === "bottom" ? "in" : (link.toPort || "in");
     const start = getPortPoint(from, fromPort);
+    // O ponto de destino tem que ser sempre o centro real do port: e dele que sai
+    // a ponta da seta. Qualquer "endireitamento" da linha aqui (ex.: forcar
+    // end.y = start.y quando os ports estao quase alinhados) desloca a seta da
+    // bolinha. O desnivel pequeno fica por conta do roteador, que resolve com um
+    // degrau curto antes da entrada.
     const end = getPortPoint(to, toPort);
+
+    const linkObstacles = obstacles.filter(o => o.id !== link.from && o.id !== link.to);
     const arrowTip = insetLinkEndpoint(end, toPort, LINK_ARROW_END_GAP);
     const lineEnd = getArrowBasePoint(arrowTip, toPort, LINK_ARROW_LENGTH);
     const linkStatus = normalizeStatus(to.status);
@@ -2070,7 +1829,7 @@ function renderLinks() {
       lineageActive ? "lineage-link" : "",
       lineageDim ? "lineage-dim" : ""
     ].filter(Boolean).join(" "));
-    path.setAttribute("d", createLinkPath(start, lineEnd, fromPort, toPort, obstacles));
+    path.setAttribute("d", createLinkPath(start, lineEnd, fromPort, toPort, linkObstacles));
     path.addEventListener("click", event => {
       event.stopPropagation();
       selectedLinkId = link.id;
@@ -2088,9 +1847,8 @@ function renderLinks() {
     });
 
     const lineageDotClass = lineageActive ? "lineage-link" : lineageDim ? "lineage-dim" : "";
-    const startDot = createSvgDot(start, startStatus, lineageDotClass);
     const arrow = createSvgArrowHead(arrowTip, toPort, linkStatus, lineageDotClass);
-    linkLayer.append(path, startDot, arrow);
+    linkLayer.append(path, arrow);
   });
 
   if (dragState?.snap) {
@@ -2112,14 +1870,33 @@ function renderLinks() {
       const isOut = isOutputPort(dragPort);
       const fromPoint = isOut ? sourcePoint : cursorPoint;
       const toPoint = isOut ? cursorPoint : sourcePoint;
-      const fromPort = isOut ? dragPort : "in";
-      const toPort = isOut ? "in" : dragPort;
+
+      let previewToPort = "in";
+      let previewFromPort = "out";
+
+      if (isOut) {
+        if (linkDragState.snap) {
+          previewToPort = linkDragState.snap.port;
+        } else {
+          previewToPort = cursorPoint.x >= sourcePoint.x ? "in" : "out";
+        }
+      } else {
+        if (linkDragState.snap) {
+          previewFromPort = linkDragState.snap.port;
+        } else {
+          previewFromPort = cursorPoint.x <= sourcePoint.x ? "out" : "in";
+        }
+      }
+
+      const fromPort = isOut ? dragPort : previewFromPort;
+      const toPort = isOut ? previewToPort : dragPort;
       const previewStatus = normalizeStatus(source.status);
       const previewPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
       const previewArrowTip = toPoint;
       const previewLineEnd = getArrowBasePoint(previewArrowTip, toPort, LINK_ARROW_LENGTH);
       previewPath.setAttribute("class", `link-path link-preview status-${previewStatus}`);
-      previewPath.setAttribute("d", createLinkPath(fromPoint, previewLineEnd, fromPort, toPort, obstacles));
+      const previewObstacles = obstacles.filter(o => o.id !== source.id && o.id !== linkDragState.snappedNodeId);
+      previewPath.setAttribute("d", createLinkPath(fromPoint, previewLineEnd, fromPort, toPort, previewObstacles));
       const previewArrow = createSvgArrowHead(previewArrowTip, toPort, previewStatus);
       linkLayer.append(previewPath, previewArrow);
     }
@@ -2131,8 +1908,8 @@ function getSvgBounds(nodes, drag) {
   const ys = [];
 
   nodes.forEach(node => {
-    xs.push(node.x, node.x + (node.w || 232));
-    ys.push(node.y, node.y + (node.h || 154));
+    xs.push(node.x, node.x + (node.w || 288));
+    ys.push(node.y, node.y + (node.h || 144));
   });
 
   if (drag) {
@@ -2174,11 +1951,11 @@ function createSvgArrowHead(point, port, status = "ongoing", extraClass = "", le
   const px = -dy;
   const py = dx;
   const points = [
-    `${point.x},${point.y}`,
     `${base.x + px * halfWidth},${base.y + py * halfWidth}`,
+    `${point.x},${point.y}`,
     `${base.x - px * halfWidth},${base.y - py * halfWidth}`
   ].join(" ");
-  const arrow = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+  const arrow = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
   arrow.setAttribute("class", [baseClass, `status-${normalizeStatus(status)}`, extraClass].filter(Boolean).join(" "));
   arrow.setAttribute("points", points);
   return arrow;
@@ -2224,7 +2001,7 @@ function createSnapGuide(orientation, coord, bounds) {
 }
 
 function getPortPoint(node, port) {
-  const width = node.w || 232;
+  const width = node.w || 288;
   const height = nodeHeight(node);
   if (port === "top") return { x: node.x + width / 2, y: node.y };
   if (port === "bottom") return { x: node.x + width / 2, y: node.y + height };
@@ -2249,8 +2026,8 @@ function insetLinkEndpoint(point, port, gap = LINK_ARROW_END_GAP) {
   }
 }
 
-function isOutputPort(port) { return port === "out" || port === "bottom"; }
-function isInputPort(port) { return port === "in" || port === "top"; }
+function isOutputPort(port) { return port === "out" || port === "bottom" || port === "top"; }
+function isInputPort(port) { return port === "in" || port === "top" || port === "bottom"; }
 
 function isOrthogonalLinks() {
   return localStorage.getItem("todocompanion.settings.linkStyle") !== "bezier";
@@ -2259,9 +2036,10 @@ function isOrthogonalLinks() {
 // Retangulos dos cards inflados pela margem, usados pelo roteador para desviar.
 function buildLinkObstacles(nodes) {
   return nodes.map(node => {
-    const w = node.w || 232;
+    const w = node.w || 288;
     const h = nodeHeight(node);
     return {
+      id: node.id,
       x1: Math.round(node.x - LINK_MARGIN),
       y1: Math.round(node.y - LINK_MARGIN),
       x2: Math.round(node.x + w + LINK_MARGIN),
@@ -2284,8 +2062,13 @@ function createLinkPath(start, end, startPort = "out", endPort = "in", obstacles
 
 function renderUserTasks() {
   const user = activeUser();
-  const activeId = activeBoard().id;
+  const activeId = activeBoard()?.id ?? null;
+  tasksSidebar.hidden = !user;
   userTaskList.innerHTML = "";
+
+  if (!user) {
+    return;
+  }
 
   user.tasks.forEach(task => {
     const status = normalizeStatus(task.status);
@@ -2297,19 +2080,15 @@ function renderUserTasks() {
     const card = document.createElement("article");
     card.className = `user-task-card status-${status} priority-${priority} crit-${criticality}${task.id === activeId ? " active" : ""}${task.id === dockDragId ? " dragging" : ""}`;
     card.dataset.id = task.id;
-    const hasAttachment = task.attachments?.length > 0;
+    // Card enxuto: so o titulo. Numero, datas, criticidade e anexos continuam
+    // acessiveis pelo popup de info (botao "i") e pelo overlay do canvas.
+    card.title = task.title;
     card.innerHTML = `
-      <div class="user-task-head">
-        ${renderCriticalityBadge(criticality)}
-        <button class="user-task-info" type="button" aria-label="Informacoes" title="Informacoes">${icons.info}</button>
-        <button class="user-task-remove" type="button" aria-label="Remover main task" title="Remover main task">${icons.close}</button>
-      </div>
-      <strong class="user-task-title">${escapeHtml(task.title)}</strong>
-      <div class="user-task-meta">
-        ${task.startDate ? `<span>${formatShortDate(task.startDate)}</span>` : ""}
-        ${task.startDate && task.endDate ? `<span class="user-task-meta-sep">→</span>` : ""}
-        ${task.endDate ? `<span>${formatShortDate(task.endDate)}</span>` : ""}
-        ${hasAttachment ? `<span class="user-task-meta-attach" title="${task.attachments.length} anexo(s)"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>${task.attachments.length}</span>` : ""}
+      <span class="user-task-id">#${task.number || ""}</span>
+      <span class="user-task-title">${escapeHtml(task.title)}</span>
+      <div class="user-task-actions">
+        <button class="user-task-info" type="button" aria-label="Information" title="Information">${icons.info}</button>
+        <button class="user-task-remove" type="button" aria-label="Remove main task" title="Remove main task">${icons.close}</button>
       </div>
     `;
 
@@ -2345,18 +2124,57 @@ function renderUserTasks() {
   });
 }
 
+const USERS_RAIL_KEY = "todocompanion.settings.usersRailCollapsed";
+
+function initUsersRail() {
+  applyUsersRailCollapsed(localStorage.getItem(USERS_RAIL_KEY) === "1");
+}
+
+function applyUsersRailCollapsed(collapsed) {
+  usersRail.classList.toggle("collapsed", collapsed);
+  usersRailToggle.innerHTML = icons.menu;
+  usersRailToggle.title = collapsed ? "Expand panel" : "Collapse panel";
+  usersRailToggle.setAttribute("aria-label", collapsed ? "Expand users panel" : "Collapse users panel");
+}
+
+function toggleUsersRail() {
+  const collapsed = !usersRail.classList.contains("collapsed");
+  localStorage.setItem(USERS_RAIL_KEY, collapsed ? "1" : "0");
+  applyUsersRailCollapsed(collapsed);
+  requestAnimationFrame(() => {
+    applyViewport();
+    renderLinks();
+  });
+}
+
 const TASKS_SIDEBAR_KEY = "todocompanion.settings.tasksSidebarCollapsed";
+const TASKS_SIDEBAR_WIDTH_KEY = "todocompanion.settings.tasksSidebarWidth";
+const TASKS_SIDEBAR_DEFAULT_WIDTH = 264;
+const TASKS_SIDEBAR_MIN_WIDTH = 180;
+const TASKS_SIDEBAR_MAX_WIDTH = 600;
+
+function getStoredTasksSidebarWidth() {
+  const stored = parseInt(localStorage.getItem(TASKS_SIDEBAR_WIDTH_KEY), 10);
+  return Number.isFinite(stored) ? Math.min(Math.max(stored, TASKS_SIDEBAR_MIN_WIDTH), TASKS_SIDEBAR_MAX_WIDTH) : TASKS_SIDEBAR_DEFAULT_WIDTH;
+}
 
 function initTasksSidebar() {
   const collapsed = localStorage.getItem(TASKS_SIDEBAR_KEY) === "1";
   applyTasksSidebarCollapsed(collapsed);
+  initTasksSidebarResizer();
 }
 
 function applyTasksSidebarCollapsed(collapsed) {
   tasksSidebar.classList.toggle("collapsed", collapsed);
-  tasksSidebarToggle.innerHTML = collapsed ? icons.chevronRight : icons.chevronLeft;
-  tasksSidebarToggle.title = collapsed ? "Expandir painel" : "Recolher painel";
-  tasksSidebarToggle.setAttribute("aria-label", collapsed ? "Expandir painel de tasks" : "Recolher painel de tasks");
+  tasksSidebarToggle.innerHTML = icons.menu;
+  tasksSidebarToggle.title = collapsed ? "Expand panel" : "Collapse panel";
+  tasksSidebarToggle.setAttribute("aria-label", collapsed ? "Expand tasks panel" : "Collapse tasks panel");
+
+  if (collapsed) {
+    tasksSidebar.style.width = "";
+  } else {
+    tasksSidebar.style.width = `${getStoredTasksSidebarWidth()}px`;
+  }
 }
 
 function toggleTasksSidebar() {
@@ -2364,6 +2182,58 @@ function toggleTasksSidebar() {
   localStorage.setItem(TASKS_SIDEBAR_KEY, collapsed ? "1" : "0");
   applyTasksSidebarCollapsed(collapsed);
   requestAnimationFrame(() => {
+    applyViewport();
+    renderLinks();
+  });
+}
+
+function initTasksSidebarResizer() {
+  const resizer = document.getElementById("tasksSidebarResizer");
+  if (!resizer) return;
+
+  resizer.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || tasksSidebar.classList.contains("collapsed")) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+    const startWidth = tasksSidebar.getBoundingClientRect().width;
+    let currentWidth = startWidth;
+
+    tasksSidebar.classList.add("resizing");
+    tasksSidebar.style.transition = "none";
+    resizer.setPointerCapture(event.pointerId);
+
+    const onPointerMove = moveEvent => {
+      const deltaX = moveEvent.clientX - startX;
+      currentWidth = Math.min(Math.max(startWidth + deltaX, TASKS_SIDEBAR_MIN_WIDTH), TASKS_SIDEBAR_MAX_WIDTH);
+      tasksSidebar.style.width = `${currentWidth}px`;
+      applyViewport();
+      renderLinks();
+    };
+
+    const onPointerUp = upEvent => {
+      resizer.releasePointerCapture(upEvent.pointerId);
+      resizer.removeEventListener("pointermove", onPointerMove);
+      resizer.removeEventListener("pointerup", onPointerUp);
+      resizer.removeEventListener("pointercancel", onPointerUp);
+
+      tasksSidebar.classList.remove("resizing");
+      tasksSidebar.style.transition = "";
+      localStorage.setItem(TASKS_SIDEBAR_WIDTH_KEY, String(Math.round(currentWidth)));
+      applyViewport();
+      renderLinks();
+    };
+
+    resizer.addEventListener("pointermove", onPointerMove);
+    resizer.addEventListener("pointerup", onPointerUp);
+    resizer.addEventListener("pointercancel", onPointerUp);
+  });
+
+  resizer.addEventListener("dblclick", () => {
+    if (tasksSidebar.classList.contains("collapsed")) return;
+    localStorage.setItem(TASKS_SIDEBAR_WIDTH_KEY, String(TASKS_SIDEBAR_DEFAULT_WIDTH));
+    tasksSidebar.style.width = `${TASKS_SIDEBAR_DEFAULT_WIDTH}px`;
     applyViewport();
     renderLinks();
   });
@@ -2413,6 +2283,7 @@ function closeSortMenu() {
 
 function sortUserTasks(criterion) {
   const user = activeUser();
+  if (!user) return;
   const comparator = taskSortComparator(criterion);
   if (!comparator) return;
   // Ordenação estável com índice de desempate para manter a ordem atual em empates.
@@ -2473,7 +2344,7 @@ function renderSearchResults() {
   if (!query) {
     const empty = document.createElement("p");
     empty.className = "search-empty";
-    empty.textContent = "Digite para buscar em todos os users.";
+    empty.textContent = "Type to search across all users.";
     searchResults.appendChild(empty);
     return;
   }
@@ -2481,7 +2352,7 @@ function renderSearchResults() {
   if (!results.length) {
     const empty = document.createElement("p");
     empty.className = "search-empty";
-    empty.textContent = "Nenhum resultado encontrado.";
+    empty.textContent = "No results found.";
     searchResults.appendChild(empty);
     return;
   }
@@ -2491,7 +2362,10 @@ function renderSearchResults() {
     row.className = `search-result status-${result.status}`;
     row.innerHTML = `
       <div class="search-result-main">
-        <span class="search-result-kind">${result.kindLabel}</span>
+        <div class="search-result-badges">
+          <span class="search-result-kind">${result.kindLabel}</span>
+          ${result.userName ? `<span class="search-result-user">${icons.user} <span>${escapeHtml(result.userName)}</span></span>` : ""}
+        </div>
         <strong class="search-result-title">${escapeHtml(result.title)}</strong>
         <span class="search-result-context">${escapeHtml(result.context)}</span>
       </div>
@@ -2524,6 +2398,7 @@ function getSearchResults(query) {
           type: "task",
           kindLabel: "Task",
           userId: user.id,
+          userName: user.name,
           taskId: task.id,
           title: task.title,
           status: normalizeStatus(task.status),
@@ -2545,6 +2420,7 @@ function getSearchResults(query) {
             type: "action",
             kindLabel: "Acao",
             userId: user.id,
+            userName: user.name,
             taskId: task.id,
             nodeId: node.id,
             title: node.title || node.body || "Acao sem titulo",
@@ -2587,17 +2463,6 @@ function normalizeSearchText(value) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-}
-
-function renderCriticalityBadge(criticality) {
-  const value = normalizeCriticality(criticality);
-  return `
-    <span class="task-criticality crit-${value}" title="Criticidade ${CRITICALITY_META[value].label}" aria-label="Criticidade ${CRITICALITY_META[value].label}">
-      <span></span>
-      <span></span>
-      <span></span>
-    </span>
-  `;
 }
 
 function startDockTaskDrag(event, taskId) {
@@ -2791,7 +2656,13 @@ function animateDockReorder(previousRects) {
 
 function applyViewport() {
   const view = activeView();
-  const gridSize = Math.max(14, 24 * view.zoom);
+  if (!view) return;
+  // Mantem o quadrado visivel sempre como um multiplo exato de 24 unidades de mundo
+  // (o mesmo grid usado para posicionar/redimensionar cards e rotear links), so
+  // dobrando o passo quando ficaria pequeno demais para nao desalinhar a grade.
+  let gridUnit = 24;
+  while (gridUnit * view.zoom < 14) gridUnit *= 2;
+  const gridSize = gridUnit * view.zoom;
   boardShell.style.setProperty("--grid-size", `${gridSize}px`);
   boardShell.style.setProperty("--grid-x", `${view.panX}px`);
   boardShell.style.setProperty("--grid-y", `${view.panY}px`);
@@ -2800,8 +2671,10 @@ function applyViewport() {
 
 function ensureCanvasPositions() {
   const board = activeBoard();
+  if (!board) return;
   let changed = false;
   const placed = [];
+  const GRID = 24;
 
   board.nodes.forEach((node, index) => {
     if (!Number.isFinite(node.x) || !Number.isFinite(node.y) || (isDefaultNewAction(node) && overlapsPlacedNodes(node, placed))) {
@@ -2810,6 +2683,20 @@ function ensureCanvasPositions() {
       node.y = position.y;
       changed = true;
     }
+
+    const snappedX = Math.round(node.x / GRID) * GRID;
+    const snappedY = Math.round(node.y / GRID) * GRID;
+    const snappedW = Math.max(288, Math.round((node.w || 288) / GRID) * GRID);
+    const snappedH = node.h > 0 ? Math.round(node.h / GRID) * GRID : 0;
+
+    if (node.x !== snappedX || node.y !== snappedY || node.w !== snappedW || node.h !== snappedH) {
+      node.x = snappedX;
+      node.y = snappedY;
+      node.w = snappedW;
+      node.h = snappedH;
+      changed = true;
+    }
+
     placed.push(node);
   });
 
@@ -2824,35 +2711,40 @@ function isDefaultNewAction(node) {
 
 function overlapsPlacedNodes(node, placed) {
   return placed.some(other => {
-    const overlapX = Math.max(0, Math.min(node.x + (node.w || 232), other.x + (other.w || 232)) - Math.max(node.x, other.x));
-    const overlapY = Math.max(0, Math.min(node.y + (node.h || 154), other.y + (other.h || 154)) - Math.max(node.y, other.y));
+    const overlapX = Math.max(0, Math.min(node.x + (node.w || 288), other.x + (other.w || 288)) - Math.max(node.x, other.x));
+    const overlapY = Math.max(0, Math.min(node.y + (node.h || 144), other.y + (other.h || 144)) - Math.max(node.y, other.y));
     const overlapArea = overlapX * overlapY;
-    const nodeArea = (node.w || 232) * (node.h || 154);
+    const nodeArea = (node.w || 288) * (node.h || 144);
     return overlapArea / nodeArea > 0.65;
   });
 }
 
 function getNextActionPosition(board, indexOverride = null) {
-  const width = 232;
-  const height = 154;
+  const GRID = 24;
+  const GAP = -24;
+  const width = 288;
+  const height = 144;
   const nodes = indexOverride == null ? board.nodes : board.nodes.slice(0, indexOverride);
 
   if (!nodes.length) {
     const rect = boardShell.getBoundingClientRect();
     const center = screenToWorld(rect.left + boardShell.clientWidth / 2, rect.top + boardShell.clientHeight / 2);
-    return { x: center.x - width / 2, y: center.y - height / 2 };
+    return {
+      x: Math.round((center.x - width / 2) / GRID) * GRID,
+      y: Math.round((center.y - height / 2) / GRID) * GRID
+    };
   }
 
   const last = nodes[nodes.length - 1];
   return {
-    x: last.x + (last.w || width) + 120,
-    y: last.y
+    x: Math.round((last.x + (last.w || width) + GAP) / GRID) * GRID,
+    y: Math.round(last.y / GRID) * GRID
   };
 }
 
 function centerCanvasOnTasks() {
   const board = activeBoard();
-  if (!board.nodes.length) {
+  if (!board?.nodes.length) {
     const view = activeView();
     view.zoom = 1;
     view.panX = boardShell.clientWidth / 2;
@@ -2865,8 +2757,8 @@ function centerCanvasOnTasks() {
 
   const minX = Math.min(...board.nodes.map(node => node.x));
   const minY = Math.min(...board.nodes.map(node => node.y));
-  const maxX = Math.max(...board.nodes.map(node => node.x + (node.w || 232)));
-  const maxY = Math.max(...board.nodes.map(node => node.y + (node.h || 154)));
+  const maxX = Math.max(...board.nodes.map(node => node.x + (node.w || 288)));
+  const maxY = Math.max(...board.nodes.map(node => node.y + (node.h || 144)));
   const contentWidth = Math.max(1, maxX - minX);
   const contentHeight = Math.max(1, maxY - minY);
   const padding = 96;
@@ -2894,11 +2786,11 @@ function centerCanvasOnTasks() {
 
 function focusCardOnNode(nodeId) {
   const board = activeBoard();
-  const node = board.nodes.find(n => n.id === nodeId);
+  const node = board?.nodes.find(n => n.id === nodeId);
   if (!node) return;
 
-  const cardWidth = node.w || 232;
-  const cardHeight = node.h || 154;
+  const cardWidth = node.w || 288;
+  const cardHeight = node.h || 144;
   const padding = 96;
   const zoom = clamp(
     Math.min(
@@ -2928,7 +2820,7 @@ function focusCardOnNode(nodeId) {
 
 function organizeCanvasCards() {
   const board = activeBoard();
-  if (currentViewMode() !== "canvas" || !board.nodes.length) {
+  if (!board.nodes.length) {
     return;
   }
 
@@ -2961,13 +2853,13 @@ function organizeCanvasCards() {
     .filter(id => !parentById.has(id))
     .sort(canvasOrder);
   const orderedRoots = roots.length ? roots : [board.nodes[0].id];
-  const maxWidth = Math.max(...board.nodes.map(node => node.w || 232));
+  const maxWidth = Math.max(...board.nodes.map(node => node.w || 288));
   const minX = Math.min(...board.nodes.map(node => Number.isFinite(node.x) ? node.x : 0));
   const minY = Math.min(...board.nodes.map(node => Number.isFinite(node.y) ? node.y : 0));
   const originX = Number.isFinite(minX) ? minX : 80;
   const originY = Number.isFinite(minY) ? minY : 80;
-  const columnGap = maxWidth + 120;
-  const rowGap = 56;
+  const columnGap = maxWidth + 60;
+  const rowGap = 24;
   const columnBottom = [];
   const visited = new Set();
   const positions = new Map();
@@ -3076,12 +2968,9 @@ function stepZoomAnim() {
 }
 
 function handleZoom(event) {
-  if (currentViewMode() === "list") {
-    return;
-  }
-
-  event.preventDefault();
   const view = activeView();
+  if (!view) return;
+  event.preventDefault();
   const before = screenToWorld(event.clientX, event.clientY);
   const delta = Math.max(-120, Math.min(120, event.deltaY));
   const baseZoom = zoomTarget && zoomTarget.view === view ? zoomTarget.zoom : view.zoom;
@@ -3105,11 +2994,13 @@ function handleBoardPointerDown(event) {
     return;
   }
 
+  const view = activeView();
+  if (!view) return;
+
   finalizeZoomAnim();
   clearSelection();
   refreshSelectionClasses();
 
-  const view = activeView();
   panState = {
     pointerId: event.pointerId,
     startX: event.clientX,
@@ -3153,6 +3044,7 @@ function isBoardBackground(target) {
 
 function screenToWorld(clientX, clientY) {
   const view = activeView();
+  if (!view) return { x: 0, y: 0 };
   const rect = boardShell.getBoundingClientRect();
   return {
     x: (clientX - rect.left - view.panX) / view.zoom,
@@ -3168,24 +3060,23 @@ function refreshSelectionClasses() {
 
 function addAction(parentId = null) {
   const board = activeBoard();
+  if (!board) return;
   const id = makeId("action");
-  const listMode = currentViewMode() === "list";
-  const replyParentId = listMode && board.nodes.some(node => node.id === parentId) ? parentId : null;
+  const replyParentId = board.nodes.some(node => node.id === parentId) ? parentId : null;
   const position = replyParentId
     ? getReplyActionPosition(board, replyParentId)
-    : listMode
-      ? getListBottomPosition(board)
-      : getViewportActionPosition();
+    : getViewportActionPosition();
+  const GRID = 24;
   const node = {
     id,
     title: "",
     body: "",
     status: "ongoing",
     createdAt: new Date().toISOString(),
-    x: position.x,
-    y: position.y,
-    w: 232,
-    h: 154
+    x: Math.round(position.x / GRID) * GRID,
+    y: Math.round(position.y / GRID) * GRID,
+    w: 288,
+    h: 144
   };
 
   if (replyParentId) {
@@ -3195,28 +3086,11 @@ function addAction(parentId = null) {
     board.nodes.push(node);
   }
 
-  if (listMode) {
-    pendingListPop.add(id);
-  }
   pendingCardPop.add(id);
   selectedNodeId = id;
   selectedLinkId = null;
   saveState();
   render();
-}
-
-// Posiciona uma nova task de topo abaixo de todas as outras: como a lista ordena
-// por Y (com o card principal fixado no topo), o maior Y garante o fim da lista.
-function getListBottomPosition(board) {
-  if (!board.nodes.length) {
-    return getNextActionPosition(board);
-  }
-  const root = board.nodes[0];
-  const maxY = Math.max(...board.nodes.map(node => node.y));
-  return {
-    x: root ? root.x : 130,
-    y: maxY + 190
-  };
 }
 
 function getReplyActionPosition(board, parentId) {
@@ -3225,10 +3099,14 @@ function getReplyActionPosition(board, parentId) {
     return getNextActionPosition(board);
   }
 
-  const childCount = board.links.filter(link => link.from === parentId).length;
+  const outgoingCount = board.links.filter(link => link.from === parentId && (link.fromPort || "out") === "out").length;
+  const GRID = 24;
+  const GAP = 96;
+  const newH = 144;
+  const targetY = parent.y + outgoingCount * (newH + 24);
   return {
-    x: parent.x + (parent.w || 232) + 120,
-    y: parent.y + childCount * 190
+    x: Math.round((parent.x + (parent.w || 288) + GAP) / GRID) * GRID,
+    y: Math.round(targetY / GRID) * GRID
   };
 }
 
@@ -3276,7 +3154,7 @@ function handleBoardContextMenu(event) {
   if (!isBoardBackground(event.target)) return;
   event.preventDefault();
   const board = activeBoard();
-  if (!board || currentViewMode() !== "canvas") return;
+  if (!board) return;
   newCardPosition = screenToWorld(event.clientX, event.clientY);
 
   const margin = 8;
@@ -3303,15 +3181,16 @@ function saveNewCard(event) {
   if (!board) return;
   const pos = newCardPosition ?? getViewportActionPosition();
   const id = makeId("action");
+  const GRID = 24;
   board.nodes.push({
     id,
     title: "",
     body: "",
     status: "ongoing",
-    x: pos.x - 116,
-    y: pos.y - 77,
-    w: 232,
-    h: 154
+    x: Math.round((pos.x - 144) / GRID) * GRID,
+    y: Math.round((pos.y - 72) / GRID) * GRID,
+    w: 288,
+    h: 144
   });
   pendingCardPop.add(id);
   selectedNodeId = id;
@@ -3321,50 +3200,20 @@ function saveNewCard(event) {
   render();
 }
 
-function handleNewCardImage(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = e => {
-    const dataUrl = e.target.result;
-    const img = new Image();
-    img.onload = () => {
-      const board = activeBoard();
-      if (!board) return;
-      
-      let w = img.width;
-      let h = img.height;
-      const maxWidth = 320;
-      if (w > maxWidth) {
-        h = Math.round((maxWidth / w) * h);
-        w = maxWidth;
-      }
-      
-      const pos = newCardPosition ?? getViewportActionPosition();
-      const id = makeId("action");
-      board.nodes.push({
-        id,
-        title: "",
-        body: "",
-        status: "ongoing",
-        x: pos.x - (w / 2),
-        y: pos.y - (h / 2),
-        w: w,
-        h: h,
-        type: "image",
-        imageUrl: dataUrl,
-        createdAt: new Date().toISOString()
-      });
-      pendingCardPop.add(id);
-      saveState();
-      render();
-      closeNewCardModal();
-    };
-    img.src = dataUrl;
-  };
-  reader.readAsDataURL(file);
-  event.target.value = ""; // Reset input
+// Dimensiona um card de imagem a partir do tamanho natural do arquivo, limitando
+// a largura e arredondando para a grade — assim o card ja nasce alinhado, como
+// qualquer outro, em vez de comecar num tamanho quebrado.
+function applyImageNodeSize(node, imgWidth, imgHeight) {
+  const GRID = 24;
+  let w = imgWidth;
+  let h = imgHeight;
+  const maxWidth = Math.max(node.w || 320, 200);
+  if (w > maxWidth) {
+    h = Math.round((maxWidth / w) * h);
+    w = maxWidth;
+  }
+  node.w = Math.max(72, Math.round(w / GRID) * GRID);
+  node.h = Math.max(72, Math.round(h / GRID) * GRID);
 }
 
 function handleUpdateImage(event) {
@@ -3380,15 +3229,7 @@ function handleUpdateImage(event) {
       if (!board) return;
       const node = board.nodes.find(n => n.id === window.nodeToUpdateImage);
       if (node && node.type === "image") {
-        let w = img.width;
-        let h = img.height;
-        const maxWidth = Math.max(node.w || 320, 200); // Try to preserve current width if reasonable
-        if (w > maxWidth) {
-          h = Math.round((maxWidth / w) * h);
-          w = maxWidth;
-        }
-        node.w = w;
-        node.h = h;
+        applyImageNodeSize(node, img.width, img.height);
         node.imageUrl = dataUrl;
         saveState();
         render();
@@ -3401,40 +3242,7 @@ function handleUpdateImage(event) {
   event.target.value = ""; // Reset input
 }
 
-function promptConnectionDropType(drag, dropPoint, clickLike, clientX, clientY) {
-  pendingConnectionDrop = { drag, dropPoint, clickLike };
-  
-  const margin = 8;
-  const popupW = 150;
-  const popupH = 52;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const left = Math.min(clientX + margin, vw - popupW - margin);
-  const top = Math.min(clientY + margin, vh - popupH - margin);
-  
-  connectionDropMenu.style.left = left + "px";
-  connectionDropMenu.style.top = top + "px";
-  connectionDropMenu.hidden = false;
-}
 
-function handleConnectionDropMenuClick(event) {
-  if (!pendingConnectionDrop) return;
-  const btn = event.target.closest("button");
-  if (!btn) return;
-  
-  connectionDropMenu.hidden = true;
-  const type = btn.dataset.type;
-  
-  const { drag, dropPoint, clickLike } = pendingConnectionDrop;
-  pendingConnectionDrop = null;
-  
-  const createdNodeId = createCardFromConnection(drag, dropPoint, clickLike, type);
-  if (createdNodeId) {
-    selectedNodeId = createdNodeId;
-  }
-  saveState();
-  render();
-}
 
 function openUserCreatePopup(event) {
   event.preventDefault();
@@ -3443,14 +3251,19 @@ function openUserCreatePopup(event) {
   closeAttachmentsPopup();
 
   userCreateNameInput.value = "";
+  // O botao vive no rodape do rail lateral, entao o popup abre para cima e a
+  // direita dele; se nao couber acima, cai para baixo.
   const rect = addBoardButton.getBoundingClientRect();
   const margin = 8;
   const popupW = 220;
-  const left = Math.min(Math.max(margin, rect.right - popupW), window.innerWidth - popupW - margin);
-  const top = Math.min(rect.bottom + margin, window.innerHeight - 120);
+  const popupH = 150;
+  const left = Math.min(rect.left, window.innerWidth - popupW - margin);
+  const top = rect.top - margin - popupH >= margin
+    ? rect.top - margin - popupH
+    : Math.min(rect.bottom + margin, window.innerHeight - popupH - margin);
 
-  userCreateForm.style.left = `${left}px`;
-  userCreateForm.style.top = `${top}px`;
+  userCreateForm.style.left = `${Math.max(margin, left)}px`;
+  userCreateForm.style.top = `${Math.max(margin, top)}px`;
   userCreateForm.hidden = false;
   requestAnimationFrame(() => userCreateNameInput.focus());
 }
@@ -3463,6 +3276,7 @@ function saveUserCreatePopup(event) {
   event.preventDefault();
   const name = (userCreateNameInput.value.trim() || `User ${state.users.length + 1}`).slice(0, 28);
   const user = createUser(name, [createMainTask({ title: "Main task 1" }, 0)]);
+  user.activeTaskId = null;
   state.users.push(user);
   state.activeUserId = user.id;
   clearSelection();
@@ -3474,9 +3288,10 @@ function saveUserCreatePopup(event) {
 function getViewportActionPosition() {
   const rect = boardShell.getBoundingClientRect();
   const center = screenToWorld(rect.left + boardShell.clientWidth / 2, rect.top + boardShell.clientHeight / 2);
+  const GRID = 24;
   return {
-    x: center.x - 116,
-    y: center.y - 77
+    x: Math.round((center.x - 144) / GRID) * GRID,
+    y: Math.round((center.y - 72) / GRID) * GRID
   };
 }
 
@@ -3490,24 +3305,24 @@ function openTaskDialog(mode = "create-task", userId = null, taskId = null) {
   const task = taskId ? user?.tasks.find(item => item.id === taskId) : activeBoard();
 
   canvasModalTitle.textContent = mode === "create-user"
-    ? "Novo usuario"
+    ? "New user"
     : mode === "edit-user"
-      ? "Editar usuario"
+      ? "Edit user"
       : mode === "edit-task"
-        ? "Editar main task"
-        : "Nova main task";
+        ? "Edit main task"
+        : "New main task";
   canvasForm.classList.toggle("user-only", userOnlyMode);
-  canvasOwnerLabel.textContent = userOnlyMode ? "Nome" : "Usuario";
+  canvasOwnerLabel.textContent = userOnlyMode ? "Name" : "User";
   canvasOwnerInput.disabled = mode === "create-task" || mode === "edit-task";
   canvasNameInput.required = !userOnlyMode;
   canvasOwnerInput.value = mode === "create-user" ? "" : user?.name || "";
   canvasNameInput.value = mode === "create-task" ? `Main task ${((user?.tasks.length || 0) + 1)}` : mode === "create-user" ? "" : task?.title || "";
-  const dates = normalizeDateRange(task?.startDate, task?.endDate);
+  const dates = normalizeDateRange(mode === "create-task" ? null : task?.startDate, mode === "create-task" ? null : task?.endDate);
   canvasStartInput.value = dates.startDate;
   canvasEndInput.min = dates.startDate;
   canvasEndInput.value = dates.endDate;
-  canvasPriorityInput.value = normalizePriority(task?.priority);
-  canvasStatusInput.value = normalizeStatus(task?.status);
+  canvasPriorityInput.value = mode === "create-task" ? "normal" : normalizePriority(task?.priority);
+  canvasStatusInput.value = mode === "create-task" ? "ongoing" : normalizeStatus(task?.status);
   canvasModal.hidden = false;
   requestAnimationFrame(() => (mode.includes("user") ? canvasOwnerInput : canvasNameInput).focus());
 }
@@ -3526,6 +3341,7 @@ function saveTaskDialog(event) {
   if (dialogMode === "create-user") {
     const userName = (canvasOwnerInput.value.trim() || `User ${state.users.length + 1}`).slice(0, 28);
     const user = createUser(userName, [createMainTask({ title: "Main task 1" }, 0)]);
+    user.activeTaskId = null;
     state.users.push(user);
     state.activeUserId = user.id;
     clearSelection();
@@ -3537,7 +3353,7 @@ function saveTaskDialog(event) {
 
   const dates = enforceDateRangeInputs(canvasStartInput, canvasEndInput);
   const data = {
-    title: (canvasNameInput.value.trim() || "Nova main task").slice(0, 56),
+    title: (canvasNameInput.value.trim() || "New main task").slice(0, 56),
     status: normalizeStatus(canvasStatusInput.value),
     priority: normalizePriority(canvasPriorityInput.value),
     startDate: dates.startDate,
@@ -3560,6 +3376,7 @@ function saveTaskDialog(event) {
     }
   } else {
     const user = activeUser();
+    if (!user) return;
     const task = createMainTask(data, user.tasks.length);
     user.tasks.push(task);
     user.activeTaskId = task.id;
@@ -3645,8 +3462,8 @@ async function removeMainTask(taskId, userId = state.activeUserId) {
 
   const task = user.tasks[index];
   const ok = await openConfirmDelete({
-    title: `Excluir "${task.title || "main task"}"`,
-    message: "Esta acao removera esta main task. Nao pode ser desfeita.",
+    title: `Delete "${task.title || "main task"}"`,
+    message: "This action will remove this main task. It cannot be undone.",
     requireCode: true
   });
   if (!ok) {
@@ -3658,7 +3475,7 @@ async function removeMainTask(taskId, userId = state.activeUserId) {
   closeTaskEditPopup();
 
   if (!user.tasks.length) {
-    const fallbackTask = createMainTask({ title: "Nova main task" }, 0);
+    const fallbackTask = createMainTask({ title: "New main task" }, 0);
     user.tasks.push(fallbackTask);
     user.activeTaskId = fallbackTask.id;
     clearSelection();
@@ -3676,19 +3493,25 @@ function findSnapTarget(drag, cursorWorld) {
   const zoom = board.view?.zoom || 1;
   const snapRadiusWorld = 32 / zoom;
 
-  const candidatePort = isOutputPort(drag.port) ? "in" : "out";
+  const candidatePorts = isOutputPort(drag.port)
+    ? ["in"]
+    : ["out"];
 
   let best = null;
   let bestDist = snapRadiusWorld;
 
   for (const node of board.nodes) {
     if (node.id === drag.nodeId) continue;
-    if (isRootNode(board, node.id) && isInputPort(candidatePort)) continue;
-    const point = getPortPoint(node, candidatePort);
-    const dist = Math.hypot(point.x - cursorWorld.x, point.y - cursorWorld.y);
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = { nodeId: node.id, port: candidatePort, point };
+    
+    for (const port of candidatePorts) {
+      if (isRootNode(board, node.id) && isInputPort(port)) continue;
+      
+      const point = getPortPoint(node, port);
+      const dist = Math.hypot(point.x - cursorWorld.x, point.y - cursorWorld.y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = { nodeId: node.id, port, point };
+      }
     }
   }
 
@@ -3698,6 +3521,8 @@ function findSnapTarget(drag, cursorWorld) {
 function startLinkDrag(event, nodeId, port) {
   event.preventDefault();
   event.stopPropagation();
+
+  clearLineagePreview(false);
 
   const point = screenToWorld(event.clientX, event.clientY);
   linkMode = true;
@@ -3719,7 +3544,6 @@ function startLinkDrag(event, nodeId, port) {
   event.currentTarget.classList.add("pending");
   event.currentTarget.setPointerCapture(event.pointerId);
   boardShell.classList.add("linking");
-  renderToolbar();
   refreshSelectionClasses();
   renderLinks();
 
@@ -3812,8 +3636,7 @@ function finishLinkDrag(event) {
     }
   } else if (isPointInsideBoard(event.clientX, event.clientY)) {
     const clickLike = Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY) < 6;
-    promptConnectionDropType(drag, screenToWorld(event.clientX, event.clientY), clickLike, event.clientX, event.clientY);
-    return; // Wait for user choice
+    createdNodeId = createCardFromConnection(drag, screenToWorld(event.clientX, event.clientY), clickLike, "action");
   }
 
   if (createdNodeId) {
@@ -3827,22 +3650,26 @@ function finishLinkDrag(event) {
 function createCardFromConnection(drag, dropPoint, useReplySpacing = false, type = "action") {
   const board = activeBoard();
   const id = makeId("action");
-  const width = 232;
-  const height = 154;
+  const GRID = 24;
+  const width = 288;
+  const height = 144;
 
   const position = useReplySpacing
     ? getConnectionClickPosition(board, drag, width, height)
     : null;
   const xOffset = drag.port === "in" ? -width : drag.port === "top" || drag.port === "bottom" ? -width / 2 : 0;
   const yOffset = drag.port === "top" ? -height : drag.port === "bottom" ? 0 : -height / 2;
+  const posX = Math.round((position ? position.x : dropPoint.x + xOffset) / GRID) * GRID;
+  const posY = Math.round((position ? position.y : dropPoint.y + yOffset) / GRID) * GRID;
+
   board.nodes.push({
     id,
     title: "",
     body: "",
     status: "ongoing",
     createdAt: new Date().toISOString(),
-    x: position ? position.x : dropPoint.x + xOffset,
-    y: position ? position.y : dropPoint.y + yOffset,
+    x: posX,
+    y: posY,
     w: width,
     h: height,
     type: type === "image" ? "image" : undefined,
@@ -3850,16 +3677,22 @@ function createCardFromConnection(drag, dropPoint, useReplySpacing = false, type
   });
   pendingCardPop.add(id);
 
-  if (isOutputPort(drag.port)) {
-    addLink(drag.nodeId, id, drag.port, drag.port === "bottom" ? "top" : "in");
+  if (drag.port === "top") {
+    addLink(drag.nodeId, id, "top", "bottom");
+  } else if (drag.port === "bottom") {
+    addLink(drag.nodeId, id, "bottom", "top");
+  } else if (drag.port === "in") {
+    addLink(drag.nodeId, id, "in", "out");
   } else {
-    addLink(id, drag.nodeId, drag.port === "top" ? "bottom" : "out", drag.port);
+    addLink(drag.nodeId, id, "out", "in");
   }
 
   return id;
 }
 
 function getConnectionClickPosition(board, drag, width, height) {
+  const GRID = 24;
+  const GAP = 96;
   const source = board.nodes.find(node => node.id === drag.nodeId);
   if (!source) {
     return getNextActionPosition(board);
@@ -3870,25 +3703,25 @@ function getConnectionClickPosition(board, drag, width, height) {
   }
 
   if (drag.port === "in") {
-    const incomingCount = board.links.filter(link => link.to === drag.nodeId).length;
+    const incomingCount = board.links.filter(link => link.to === drag.nodeId && (link.toPort || "in") === "in").length;
     return {
-      x: source.x - width - 120,
-      y: source.y + incomingCount * 190
+      x: Math.round((source.x - width - GAP) / GRID) * GRID,
+      y: Math.round((source.y + incomingCount * (height + 24)) / GRID) * GRID
     };
   }
 
   if (drag.port === "bottom") {
-    const childCount = board.links.filter(link => link.from === drag.nodeId).length;
+    const bottomChildCount = board.links.filter(link => link.from === drag.nodeId && link.fromPort === "bottom").length;
     return {
-      x: source.x,
-      y: source.y + (source.h || height) + 120 + childCount * 190
+      x: Math.round(source.x / GRID) * GRID,
+      y: Math.round((source.y + (source.h || height) + GAP + bottomChildCount * (height + 24)) / GRID) * GRID
     };
   }
 
-  const incomingCount = board.links.filter(link => link.to === drag.nodeId).length;
+  const topIncomingCount = board.links.filter(link => link.to === drag.nodeId && link.toPort === "top").length;
   return {
-    x: source.x,
-    y: source.y - height - 120 - incomingCount * 190
+    x: Math.round(source.x / GRID) * GRID,
+    y: Math.round((source.y - height - GAP - topIncomingCount * (height + 24)) / GRID) * GRID
   };
 }
 
@@ -3923,6 +3756,7 @@ function removeSelection() {
 
   if (selectedLinkId) {
     const board = activeBoard();
+    if (!board) return;
     board.links = board.links.filter(link => link.id !== selectedLinkId);
     selectedLinkId = null;
     saveState();
@@ -3932,80 +3766,20 @@ function removeSelection() {
 
 async function removeNode(nodeId) {
   const board = activeBoard();
-  if (isRootNode(board, nodeId)) {
+  if (!board || isRootNode(board, nodeId)) {
     return;
   }
 
-  const listMode = currentViewMode() === "list";
-  const removingIds = listMode
-    ? getActionThreadIds(board, nodeId)
-    : new Set([nodeId]);
-
-  if (!listMode) {
-    const ok = await openConfirmDelete({
-      title: "Excluir card",
-      message: "Este card sera removido do canva. Nao pode ser desfeita.",
-      requireCode: false
-    });
-    if (!ok) {
-      return;
-    }
+  const ok = await openConfirmDelete({
+    title: "Delete card",
+    message: "This card will be removed from the canvas. It cannot be undone.",
+    requireCode: false
+  });
+  if (!ok) {
+    return;
   }
 
-  if (listMode) {
-    const childCount = removingIds.size - 1;
-    const message = childCount > 0
-      ? `Esta ação removerá esta ação e suas ${childCount === 1 ? "1 sub-ação vinculada" : `${childCount} sub-ações vinculadas`}. Não pode ser desfeita.`
-      : "Esta ação será removida. Não pode ser desfeita.";
-    const ok = await openConfirmDelete({
-      title: childCount > 0 ? "Excluir cadeia de ações" : "Excluir ação",
-      message,
-      requireCode: false
-    });
-    if (!ok) {
-      return;
-    }
-  }
-
-  if (listMode) {
-    const items = [...actionList.querySelectorAll(".action-list-item")]
-      .filter(element => removingIds.has(element.dataset.id));
-
-    if (items.length && items.every(item => !item.classList.contains("list-removing"))) {
-      let remaining = items.length;
-      let finished = false;
-      const finish = () => {
-        if (finished) {
-          return;
-        }
-        finished = true;
-        actionListLinks.style.opacity = "";
-        removeNodesImmediately(removingIds);
-      };
-
-      actionListLinks.style.opacity = "0";
-      items.forEach(item => {
-      item.style.setProperty("--remove-height", `${item.offsetHeight}px`);
-      item.classList.add("list-removing");
-      item.addEventListener("animationend", () => {
-        remaining -= 1;
-        if (remaining <= 0) {
-          finish();
-        }
-      }, { once: true });
-      });
-      window.setTimeout(finish, 360);
-      return;
-    }
-  }
-
-  removeNodesImmediately(removingIds);
-}
-
-function getActionThreadIds(board, nodeId) {
-  const ids = getDescendantActionIds(board, nodeId);
-  ids.add(nodeId);
-  return ids;
+  removeNodesImmediately(new Set([nodeId]));
 }
 
 function removeNodesImmediately(nodeIds) {
@@ -4053,8 +3827,8 @@ function startResize(event, nodeId) {
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
-    width: node.w || 232,
-    height: node.h || (card ? card.offsetHeight : 154)
+    width: node.w || 288,
+    height: node.h || (card ? card.offsetHeight : 144)
   };
 
   card?.classList.add("resizing", "selected", "fixed-height");
@@ -4068,28 +3842,25 @@ function startResize(event, nodeId) {
     const dx = (moveEvent.clientX - resizeState.startX) / zoom;
     const dy = (moveEvent.clientY - resizeState.startY) / zoom;
     
-    if (node.type === "image") {
-      const aspect = resizeState.width / resizeState.height;
-      let w = resizeState.width + dx;
-      let h = resizeState.height + dy;
-      if (Math.abs(dx) > Math.abs(dy)) {
-        h = w / aspect;
-      } else {
-        w = h * aspect;
-      }
-      if (w < 80) { w = 80; h = w / aspect; }
-      if (h < 80) { h = 80; w = h * aspect; }
-      node.w = w;
-      node.h = h;
-    } else {
-      node.w = clamp(resizeState.width + dx, 210, 420);
-      node.h = Math.max(80, resizeState.height + dy);
-    }
+    const GRID = 24;
+    // Os dois eixos sao arredondados para a grade de forma independente, igual ao
+    // card de texto. A trava de proporcao antiga derivava um dos lados do outro
+    // (h = w / aspect) sem arredondar, e por isso o card de imagem parava em
+    // tamanhos fora da grade. Imagens aceitam largura menor que o card de texto,
+    // que so tem minimo de 288px por causa da barra de formatacao.
+    const minW = node.type === "image" ? 72 : 288;
+    node.w = Math.max(minW, Math.round((resizeState.width + dx) / GRID) * GRID);
+    node.h = Math.max(72, Math.round((resizeState.height + dy) / GRID) * GRID);
 
     if (card) {
       card.style.width = `${node.w}px`;
-      card.style.height = `${node.h}px`;
+      card.style.minHeight = `${node.h}px`;
+      card.style.height = "auto";
       card.classList.add("fixed-height");
+      // Sem isso nodeHeight() continua usando a altura em cache de antes do
+      // resize (renderedHeights tem prioridade sobre node.h), e os ports/arrows
+      // ficam parados enquanto o card e arrastado.
+      renderedHeights.set(node.id, card.offsetHeight);
     }
     renderLinks();
   };
@@ -4118,7 +3889,7 @@ function startResize(event, nodeId) {
 function computeAlignmentSnap(board, node, zoom) {
   const threshold = ALIGN_SNAP_SCREEN_PX / Math.max(zoom, 0.0001);
 
-  const halfW = (node.w || 232) / 2;
+  const halfW = (node.w || 288) / 2;
   const halfH = nodeHeight(node) / 2;
   let x = node.x;
   let y = node.y;
@@ -4129,7 +3900,7 @@ function computeAlignmentSnap(board, node, zoom) {
 
   board.nodes.forEach(other => {
     if (other.id === node.id) return;
-    const otherCenterX = other.x + (other.w || 232) / 2;
+    const otherCenterX = other.x + (other.w || 288) / 2;
     const otherCenterY = other.y + nodeHeight(other) / 2;
 
     const dy = Math.abs(node.y + halfH - otherCenterY);
@@ -4186,6 +3957,10 @@ function startDrag(event, nodeId) {
     node.y = dragState.nodeY + (moveEvent.clientY - dragState.startY) / zoom;
 
     const snap = computeAlignmentSnap(board, node, zoom);
+    const GRID = 24;
+    if (snap.guideX === null) snap.x = Math.round(snap.x / GRID) * GRID;
+    if (snap.guideY === null) snap.y = Math.round(snap.y / GRID) * GRID;
+
     node.x = snap.x;
     node.y = snap.y;
     dragState.snap = snap;
@@ -4249,7 +4024,7 @@ function makeId(prefix) {
 }
 
 const URL_PATTERN = /(?:https?:\/\/|www\.)[^\s<>"]+/g;
-const BODY_TOKEN_PATTERN = /@\[([^\]\r\n]+)\]\(attachment:([^)]+)\)|(?:https?:\/\/|www\.)(?:(?!@\[)[^\s<>"])+/g;
+const BODY_TOKEN_PATTERN = /!\[image\]\(([^)]+)\)|@\[([^\]\r\n]+)\]\(attachment:([^)]+)\)|\[([ xX])\] |(?:https?:\/\/|www\.)(?:(?!@\[)[^\s<>"])+/g;
 
 function extractUrl(text) {
   const match = String(text || "").match(URL_PATTERN);
@@ -4277,8 +4052,13 @@ function renderBodyHtml(text) {
     const index = match.index ?? 0;
     html += preserveFormatTags(escapeHtmlPreservingFormats(source.slice(lastIndex, index)));
 
-    if (match[2]) {
-      html += renderAttachmentReferenceHtml(match[1], match[2], match[0]);
+    if (match[0].startsWith("![image](")) {
+      html += `<img src="${escapeAttr(match[1])}" style="max-width: 100%; border-radius: 4px; margin: 4px 0;" />`;
+    } else if (match[3]) {
+      html += renderAttachmentReferenceHtml(match[2], match[3], match[0]);
+    } else if (match[4] !== undefined) {
+      const isChecked = match[4].toLowerCase() === "x";
+      html += `<span class="card-todo-wrap" contenteditable="false" data-checked="${isChecked}"><button type="button" class="card-todo-btn${isChecked ? " checked" : ""}" role="checkbox" aria-checked="${isChecked}">${isChecked ? icons.check : ""}</button></span> `;
     } else {
       const url = match[0];
       html += `<a class="card-body-link" href="${escapeAttr(toAbsoluteUrl(url))}">${escapeHtml(url)}</a>`;
@@ -4305,14 +4085,14 @@ function preserveFormatTags(escaped) {
 
 function renderAttachmentReferenceHtml(label, attachmentId, rawToken = "") {
   const att = findActiveAttachmentById(attachmentId);
-  const displayName = att?.name || label || "anexo";
+  const displayName = att?.name || label || "attachment";
   const image = isImageAttachment(att || { name: displayName });
   const kindLabel = image ? "@image" : "@document";
   const kindClass = image ? " image" : " document";
   const icon = image ? icons.image : icons.file;
   const missingClass = att ? "" : " missing";
   const token = rawToken || `@[${label}](attachment:${attachmentId})`;
-  return `<span class="card-attachment-link${kindClass}${missingClass}" contenteditable="false" data-attachment-id="${escapeAttr(attachmentId)}" data-attachment-token="${escapeAttr(token)}" title="${escapeAttr(displayName)}" role="link" tabindex="-1">${icon}<strong>${kindLabel}</strong><button type="button" class="card-attachment-remove" aria-label="Remover anexo" tabindex="-1" contenteditable="false">×</button></span>`;
+  return `<span class="card-attachment-link${kindClass}${missingClass}" contenteditable="false" data-attachment-id="${escapeAttr(attachmentId)}" data-attachment-token="${escapeAttr(token)}" title="${escapeAttr(displayName)}" role="link" tabindex="-1">${icon}<strong>${kindLabel}</strong><button type="button" class="card-attachment-remove" aria-label="Remove attachment" tabindex="-1" contenteditable="false">×</button></span>`;
 }
 
 function serializeEditableContent(el) {
@@ -4324,8 +4104,14 @@ function serializeEditableContent(el) {
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       if (node.matches?.(".card-attachment-link")) {
         result += node.dataset.attachmentToken || "";
+      } else if (node.matches?.(".card-todo-wrap") || node.matches?.(".card-todo-btn")) {
+        const wrap = node.matches?.(".card-todo-wrap") ? node : node.closest(".card-todo-wrap");
+        const isChecked = wrap?.dataset?.checked === "true" || wrap?.querySelector(".card-todo-btn.checked") !== null || node.classList?.contains("checked");
+        result += isChecked ? "[x] " : "[ ] ";
       } else if (node.tagName === "BR") {
         result += "\n";
+      } else if (node.tagName === "IMG") {
+        result += `![image](${node.getAttribute("src")})`;
       } else {
         const tag = node.tagName;
         const formatTag = getFormatTag(tag);
@@ -4458,9 +4244,11 @@ function escapeAttr(value = "") {
   return escapeHtml(value).replaceAll('"', "&quot;");
 }
 
+// Mesma regra de activeBoard: com activeTaskId em null nao ha task alvo, senao os
+// anexos passariam a mirar a primeira task mesmo com nada selecionado.
 function activeMainTask() {
   const user = activeUser();
-  if (!user) return null;
+  if (!user || user.activeTaskId === null) return null;
   return user.tasks.find(t => t.id === user.activeTaskId) || user.tasks[0] || null;
 }
 
@@ -4630,14 +4418,14 @@ function openClipboardAttachModal(file) {
   } else {
     const preview = document.createElement("div");
     preview.className = "clipboard-file-preview";
-    preview.innerHTML = `${icons.file}<span>Arquivo</span>`;
+    preview.innerHTML = `${icons.file}<span>File</span>`;
     clipboardAttachPreview.appendChild(preview);
   }
 
   clipboardAttachNameInput.value = nameParts.stem;
   clipboardAttachExtension.textContent = nameParts.extension;
   clipboardAttachExtension.hidden = !nameParts.extension;
-  clipboardAttachMeta.textContent = [file.type || "Arquivo", formatFileSize(file.size)].filter(Boolean).join(" - ");
+  clipboardAttachMeta.textContent = [file.type || "File", formatFileSize(file.size)].filter(Boolean).join(" - ");
   clipboardAttachConfirm.disabled = false;
   clipboardAttachModal.hidden = false;
   requestAnimationFrame(() => {
@@ -4784,7 +4572,7 @@ function renderAttachmentReferencePicker() {
   if (!items.length) {
     const empty = document.createElement("div");
     empty.className = "attachment-reference-empty";
-    empty.textContent = "Nenhum anexo";
+    empty.textContent = "No attachments";
     attachmentReferenceList.appendChild(empty);
     return;
   }
@@ -4873,6 +4661,104 @@ function handleAttachmentReferenceKeydown(event) {
   }
 }
 
+function findCurrentLineTodoWrap(bodyEditor, range) {
+  let cur = range.startContainer;
+  while (cur && cur !== bodyEditor) {
+    if (cur.nodeType === Node.ELEMENT_NODE && cur.classList.contains("card-todo-wrap")) {
+      return cur;
+    }
+    let prev = cur.previousSibling;
+    while (prev) {
+      if (prev.nodeType === Node.ELEMENT_NODE) {
+        if (prev.classList.contains("card-todo-wrap")) {
+          return prev;
+        }
+        if (prev.tagName === "BR" || prev.tagName === "DIV" || prev.tagName === "P" || prev.tagName === "LI") {
+          return null;
+        }
+        const inside = prev.querySelector?.(".card-todo-wrap");
+        if (inside) return inside;
+      }
+      prev = prev.previousSibling;
+    }
+    if (cur.tagName === "DIV" || cur.tagName === "P" || cur.tagName === "LI") {
+      const firstTodo = cur.querySelector(".card-todo-wrap");
+      if (firstTodo) return firstTodo;
+      break;
+    }
+    cur = cur.parentNode;
+  }
+  return null;
+}
+
+function handleTodoKeydown(event, bodyEditor, node) {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) {
+    return false;
+  }
+
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return false;
+  const range = sel.getRangeAt(0);
+  if (!bodyEditor.contains(range.startContainer)) return false;
+
+  const todoWrap = findCurrentLineTodoWrap(bodyEditor, range);
+  if (!todoWrap || !bodyEditor.contains(todoWrap)) return false;
+
+  event.preventDefault();
+
+  let next = todoWrap.nextSibling;
+  let textAfter = "";
+  while (next) {
+    if (next.nodeType === Node.TEXT_NODE) {
+      textAfter += next.textContent;
+    } else if (next.nodeType === Node.ELEMENT_NODE) {
+      if (next.tagName === "BR" || next.tagName === "DIV" || next.tagName === "P") {
+        break;
+      }
+      textAfter += next.textContent;
+    }
+    next = next.nextSibling;
+  }
+
+  if (textAfter.replace(/[\s\u00A0]+/g, "") === "") {
+    todoWrap.remove();
+    setNodeContent(node, serializeEditableContent(bodyEditor));
+    saveState();
+    return true;
+  }
+
+  range.deleteContents();
+  const br = document.createElement("br");
+  const todoSpan = document.createElement("span");
+  todoSpan.className = "card-todo-wrap";
+  todoSpan.contentEditable = "false";
+  todoSpan.dataset.checked = "false";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "card-todo-btn";
+  btn.setAttribute("role", "checkbox");
+  btn.setAttribute("aria-checked", "false");
+  todoSpan.appendChild(btn);
+
+  const space = document.createTextNode("\u00A0");
+  const frag = document.createDocumentFragment();
+  frag.appendChild(br);
+  frag.appendChild(todoSpan);
+  frag.appendChild(space);
+
+  range.insertNode(frag);
+
+  const newRange = document.createRange();
+  newRange.setStartAfter(space);
+  newRange.setEndAfter(space);
+  sel.removeAllRanges();
+  sel.addRange(newRange);
+
+  setNodeContent(node, serializeEditableContent(bodyEditor));
+  saveState();
+  return true;
+}
+
 function moveAttachmentReferenceSelection(delta) {
   const items = attachmentReferenceState?.items || [];
   if (!items.length) {
@@ -4918,8 +4804,10 @@ async function attachFromBytes(file) {
   try {
     const buffer = await file.arrayBuffer();
     const bytes = Array.from(new Uint8Array(buffer));
+    const subDir = `task${task.number}/anexos`;
     const info = await invoke("attachment_save_from_bytes", {
       userId: user.id,
+      subDir,
       fileName: file.name,
       bytes
     });
@@ -4938,8 +4826,10 @@ async function attachFromPath(sourcePath) {
   const task = activeMainTask();
   if (!user || !task) return null;
   try {
+    const subDir = `task${task.number}/anexos`;
     const info = await invoke("attachment_save_from_path", {
       userId: user.id,
+      subDir,
       sourcePath
     });
     const attachment = pushAttachment(task, info);
@@ -4983,9 +4873,18 @@ async function handleAttachInputChange(event) {
 }
 
 // ------------------------------------------------------------------
-// Gravacao de tela + audio. A gravacao final vira um anexo .webm da
-// task que estava ativa quando a gravacao comecou.
+// Gravacao de tela + audio.
+//
+// O arquivo destino e aberto na pasta da task ANTES de a gravacao
+// comecar e cada pedaco produzido pelo MediaRecorder e escrito em disco
+// na hora. Isso trava a pasta de destino na task correta e evita montar
+// o video inteiro na memoria no final (o que travava a interface e
+// perdia gravacoes longas em maquinas mais fracas).
 // ------------------------------------------------------------------
+const RECORDING_TIMESLICE_MS = 2000;
+const RECORDING_VIDEO_BPS = 2500000;
+const RECORDING_AUDIO_BPS = 128000;
+
 let recordingState = null;
 let recordingTimerInterval = null;
 
@@ -5004,6 +4903,10 @@ async function startScreenRecording() {
     console.warn("Gravacao de tela nao suportada neste ambiente");
     return;
   }
+  if (!invoke) {
+    console.warn("Backend indisponivel; gravacao nao foi iniciada");
+    return;
+  }
 
   const user = activeUser();
   const task = activeMainTask();
@@ -5012,7 +4915,7 @@ async function startScreenRecording() {
   let displayStream;
   try {
     displayStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { 
+      video: {
         displaySurface: "monitor",
         frameRate: { ideal: 10, max: 15 }
       },
@@ -5041,7 +4944,11 @@ async function startScreenRecording() {
   const mimeType = pickRecorderMimeType();
   let recorder;
   try {
-    recorder = new MediaRecorder(recordStream, mimeType ? { mimeType } : undefined);
+    recorder = new MediaRecorder(recordStream, {
+      ...(mimeType ? { mimeType } : {}),
+      videoBitsPerSecond: RECORDING_VIDEO_BPS,
+      audioBitsPerSecond: RECORDING_AUDIO_BPS
+    });
   } catch (error) {
     console.warn("Falha ao criar o gravador", error);
     stopAllTracks([displayStream, micStream]);
@@ -5049,24 +4956,49 @@ async function startScreenRecording() {
     return;
   }
 
-  const chunks = [];
-  recorder.addEventListener("dataavailable", event => {
-    if (event.data && event.data.size > 0) chunks.push(event.data);
-  });
+  // Abre o arquivo destino agora: a pasta fica presa na task escolhida
+  // aqui, mesmo que o usuario troque de task durante a gravacao.
+  const sessionId = makeId("rec");
+  const fileName = buildRecordingFileName();
+  const subDir = `task${task.number}/anexos`;
+  let target;
+  try {
+    target = await invoke("recording_begin", {
+      sessionId,
+      userId: user.id,
+      subDir,
+      fileName
+    });
+  } catch (error) {
+    console.warn("Falha ao preparar o arquivo da gravacao", error);
+    stopAllTracks([displayStream, micStream]);
+    closeAudioContext(mixed.context);
+    return;
+  }
 
-  recordingState = {
+  const recState = {
     recorder,
     displayStream,
     micStream,
     audioContext: mixed.context,
+    sessionId,
+    targetFile: target?.file || "",
     userId: user.id,
     taskId: task.id,
     startedAt: Date.now(),
-    mimeType: recorder.mimeType || mimeType || "video/webm"
+    bytesWritten: 0,
+    writeChain: Promise.resolve(),
+    writeError: null,
+    finalized: false
   };
+  recordingState = recState;
 
-  const recState = recordingState;
-  recorder.addEventListener("stop", () => finalizeRecording(recState, chunks));
+  recorder.addEventListener("dataavailable", event => {
+    if (event.data && event.data.size > 0) queueRecordingChunk(recState, event.data);
+  });
+  recorder.addEventListener("stop", () => {
+    finalizeRecording(recState);
+  });
 
   // Se o usuario parar o compartilhamento pela UI nativa do sistema.
   displayStream.getVideoTracks().forEach(track => {
@@ -5074,12 +5006,13 @@ async function startScreenRecording() {
   });
 
   try {
-    recorder.start(1000);
+    recorder.start(RECORDING_TIMESLICE_MS);
   } catch (error) {
     console.warn("Falha ao iniciar o gravador", error);
     recordingState = null;
     stopAllTracks([displayStream, micStream]);
     closeAudioContext(mixed.context);
+    invoke("recording_abort", { sessionId, discard: true }).catch(() => {});
     return;
   }
 
@@ -5095,51 +5028,87 @@ function stopScreenRecording() {
   try {
     if (recState.recorder.state !== "inactive") {
       recState.recorder.stop();
+    } else {
+      finalizeRecording(recState);
     }
   } catch (error) {
     console.warn("Falha ao parar o gravador", error);
+    finalizeRecording(recState);
   }
 }
 
-async function finalizeRecording(recState, chunks) {
+// Cada pedaco vai para o disco assim que sai do gravador, na ordem.
+function queueRecordingChunk(recState, blob) {
+  recState.writeChain = recState.writeChain.then(async () => {
+    if (recState.writeError) return;
+    try {
+      const chunk = await blobToBase64(blob);
+      if (!chunk) return;
+      recState.bytesWritten = await invoke("recording_append", {
+        sessionId: recState.sessionId,
+        chunk
+      });
+    } catch (error) {
+      recState.writeError = error;
+      console.warn("Falha ao gravar pedaco do video", error);
+      // Encerra a captura: o que ja foi escrito continua salvo.
+      if (recordingState === recState) stopScreenRecording();
+    }
+  });
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : "");
+    };
+    reader.onerror = () => reject(reader.error || new Error("Falha ao ler o pedaco da gravacao"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function finalizeRecording(recState) {
+  if (recState.finalized) return;
+  recState.finalized = true;
+  showRecordingSavingState();
+
   stopAllTracks([recState.displayStream, recState.micStream]);
   await closeAudioContext(recState.audioContext);
 
-  if (!chunks.length) {
-    console.warn("Gravacao vazia, nada para salvar");
-    return;
+  // Espera a fila de escrita esvaziar antes de fechar o arquivo. Um
+  // pedaco pode entrar na fila enquanto esperamos, por isso o laco.
+  let drained = null;
+  while (drained !== recState.writeChain) {
+    drained = recState.writeChain;
+    try {
+      await drained;
+    } catch (error) {
+      console.warn("Falha na fila de escrita da gravacao", error);
+    }
   }
 
-  const baseType = String(recState.mimeType || "video/webm").split(";")[0] || "video/webm";
-  const blob = new Blob(chunks, { type: baseType });
-  const fileName = buildRecordingFileName();
-
-  const targetUser = state.users.find(u => u.id === recState.userId) || activeUser();
-  const targetTask =
-    targetUser?.tasks.find(t => t.id === recState.taskId) ||
-    targetUser?.tasks.find(t => t.id === targetUser.activeTaskId);
-  if (!targetUser || !targetTask) return;
-
-  await saveRecordingBlob(blob, fileName, targetUser, targetTask);
-}
-
-async function saveRecordingBlob(blob, fileName, user, task) {
-  if (!invoke) {
-    console.warn("Backend indisponivel; gravacao nao foi salva");
-    return;
-  }
+  let info = null;
   try {
-    const buffer = await blob.arrayBuffer();
-    const bytes = Array.from(new Uint8Array(buffer));
-    const info = await invoke("attachment_save_from_bytes", {
-      userId: user.id,
-      fileName,
-      bytes
-    });
-    pushAttachment(task, info, "video/webm");
+    info = await invoke("recording_finish", { sessionId: recState.sessionId });
   } catch (error) {
-    console.warn("Falha ao salvar a gravacao", error);
+    console.warn("Falha ao fechar o arquivo da gravacao", error);
+    hideRecordingIndicator();
+    return;
   }
+  hideRecordingIndicator();
+
+  const targetUser = state.users.find(u => u.id === recState.userId) || null;
+  const targetTask = targetUser?.tasks.find(t => t.id === recState.taskId) || null;
+  if (!targetUser || !targetTask) {
+    // Nao anexa em outra task: o arquivo fica na pasta original.
+    console.warn(`Task original nao encontrada; a gravacao ficou salva em ${info.file}`);
+    return;
+  }
+
+  pushAttachment(targetTask, info, "video/webm");
 }
 
 function mixAudioStreams(streams) {
@@ -5190,14 +5159,14 @@ function buildRecordingFileName() {
   const now = new Date();
   const pad = n => String(n).padStart(2, "0");
   const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-  return `Gravacao-${stamp}.webm`;
+  return `Recording-${stamp}.webm`;
 }
 
 function updateRecordingUi(active) {
   if (recordButton) {
     recordButton.classList.toggle("recording", active);
-    recordButton.title = active ? "Parar gravacao" : "Gravar tela";
-    recordButton.setAttribute("aria-label", active ? "Parar gravacao" : "Gravar tela");
+    recordButton.title = active ? "Stop recording" : "Record screen";
+    recordButton.setAttribute("aria-label", active ? "Stop recording" : "Record screen");
   }
   if (active) {
     startRecordingTimer();
@@ -5206,20 +5175,25 @@ function updateRecordingUi(active) {
   }
 }
 
+function setRecordingIndicatorText(text) {
+  if (!recordingIndicator) return;
+  const textSpan = document.getElementById("recordingIndicatorText");
+  if (textSpan) {
+    textSpan.textContent = text;
+  } else {
+    recordingIndicator.textContent = text;
+  }
+}
+
 function startRecordingTimer() {
   if (!recordingIndicator) return;
   recordingIndicator.hidden = false;
-  const textSpan = document.getElementById("recordingIndicatorText");
   const tick = () => {
     if (!recordingState) return;
     const elapsed = Math.max(0, Math.floor((Date.now() - recordingState.startedAt) / 1000));
     const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
     const ss = String(elapsed % 60).padStart(2, "0");
-    if (textSpan) {
-      textSpan.textContent = `Gravando ${mm}:${ss}`;
-    } else {
-      recordingIndicator.textContent = `Gravando ${mm}:${ss}`;
-    }
+    setRecordingIndicatorText(`Recording ${mm}:${ss}`);
   };
   tick();
   recordingTimerInterval = window.setInterval(tick, 1000);
@@ -5230,7 +5204,27 @@ function stopRecordingTimer() {
     window.clearInterval(recordingTimerInterval);
     recordingTimerInterval = null;
   }
-  if (recordingIndicator) recordingIndicator.hidden = true;
+}
+
+// Enquanto o resto da fila e escrito o indicador vira "Saving...",
+// para nao parecer que a interface travou.
+function showRecordingSavingState() {
+  stopRecordingTimer();
+  if (!recordingIndicator) return;
+  recordingIndicator.hidden = false;
+  recordingIndicator.classList.add("saving");
+  const stopBtn = document.getElementById("recordingIndicatorStop");
+  if (stopBtn) stopBtn.hidden = true;
+  setRecordingIndicatorText("Saving recording...");
+}
+
+function hideRecordingIndicator() {
+  stopRecordingTimer();
+  if (!recordingIndicator) return;
+  recordingIndicator.classList.remove("saving");
+  const stopBtn = document.getElementById("recordingIndicatorStop");
+  if (stopBtn) stopBtn.hidden = false;
+  recordingIndicator.hidden = true;
 }
 
 let dropOverActive = false;
@@ -5244,16 +5238,48 @@ function isPointInsideBoardShell(point) {
   return px >= rect.left && px <= rect.right && py >= rect.top && py <= rect.bottom;
 }
 
-function setDropOverlay(visible) {
-  if (!canvasDropOverlay) return;
-  if (visible && !dropOverActive) {
-    canvasDropOverlay.hidden = false;
-    requestAnimationFrame(() => canvasDropOverlay.classList.add("visible"));
-    dropOverActive = true;
-  } else if (!visible && dropOverActive) {
-    canvasDropOverlay.classList.remove("visible");
-    canvasDropOverlay.hidden = true;
-    dropOverActive = false;
+let dropOverCardId = null;
+
+function setDropOverlay(inside, cardId = null) {
+  if (dropOverCardId && dropOverCardId !== cardId) {
+    const oldCard = document.querySelector(`.task-card[data-id="${dropOverCardId}"]`);
+    if (oldCard) {
+      oldCard.classList.remove("card-drag-target");
+      const overlay = oldCard.querySelector('.card-drop-overlay');
+      if (overlay) overlay.remove();
+    }
+  }
+  
+  if (cardId) {
+    if (dropOverActive && canvasDropOverlay) {
+      canvasDropOverlay.classList.remove("visible");
+      canvasDropOverlay.hidden = true;
+      dropOverActive = false;
+    }
+    const newCard = document.querySelector(`.task-card[data-id="${cardId}"]`);
+    if (newCard) {
+      newCard.classList.add("card-drag-target");
+      if (!newCard.querySelector('.card-drop-overlay') && canvasDropOverlay) {
+        const inner = document.createElement('div');
+        inner.className = 'card-drop-overlay';
+        inner.innerHTML = canvasDropOverlay.innerHTML;
+        newCard.appendChild(inner);
+      }
+    }
+    dropOverCardId = cardId;
+  } else {
+    dropOverCardId = null;
+    if (canvasDropOverlay) {
+      if (inside && !dropOverActive) {
+        canvasDropOverlay.hidden = false;
+        requestAnimationFrame(() => canvasDropOverlay.classList.add("visible"));
+        dropOverActive = true;
+      } else if (!inside && dropOverActive) {
+        canvasDropOverlay.classList.remove("visible");
+        canvasDropOverlay.hidden = true;
+        dropOverActive = false;
+      }
+    }
   }
 }
 
@@ -5261,26 +5287,84 @@ async function setupFileDrop() {
   const listen = window.__TAURI__?.event?.listen;
   if (!listen) return;
 
-  const onEnter = () => {
-    if (currentViewMode() === "canvas") setDropOverlay(true);
-  };
+  // Sem task aberta nao ha onde anexar: o drop e ignorado por completo.
+  const onEnter = () => setDropOverlay(Boolean(activeBoard()));
   const onOver = event => {
-    if (currentViewMode() !== "canvas") {
+    if (!activeBoard()) {
       setDropOverlay(false);
       return;
     }
+    const scale = window.devicePixelRatio || 1;
+    const px = Number(event.payload?.position?.x || 0) / scale;
+    const py = Number(event.payload?.position?.y || 0) / scale;
     const inside = isPointInsideBoardShell(event.payload?.position);
-    setDropOverlay(inside);
+    
+    let cardId = null;
+    if (inside) {
+      const el = document.elementFromPoint(px, py);
+      const card = el?.closest(".task-card");
+      if (card) {
+        cardId = card.dataset.id;
+      }
+    }
+    setDropOverlay(inside, cardId);
   };
   const onLeave = () => setDropOverlay(false);
   const onDrop = async event => {
+    const targetCardId = dropOverCardId;
     setDropOverlay(false);
     const paths = event.payload?.paths || [];
     if (!paths.length) return;
-    if (currentViewMode() !== "canvas") return;
+    if (!activeBoard()) return;
     if (!isPointInsideBoardShell(event.payload?.position)) return;
-    for (const path of paths) {
-      await attachFromPath(path);
+
+    if (targetCardId) {
+      const board = activeBoard();
+      const node = board.nodes.find(n => n.id === targetCardId);
+      if (node) {
+        for (const path of paths) {
+          try {
+            const bytes = await invoke("read_file_bytes", { path });
+            if (bytes && bytes.length) {
+              const ext = path.split('.').pop().toLowerCase();
+              let mimeType = "image/png";
+              if (ext === "jpg" || ext === "jpeg") mimeType = "image/jpeg";
+              else if (ext === "gif") mimeType = "image/gif";
+              else if (ext === "webp") mimeType = "image/webp";
+              else if (ext === "svg") mimeType = "image/svg+xml";
+
+              let binary = '';
+              const len = bytes.length;
+              const CHUNK_SIZE = 0x8000; // 32768
+              for (let i = 0; i < len; i += CHUNK_SIZE) {
+                binary += String.fromCharCode.apply(null, bytes.slice(i, i + CHUNK_SIZE));
+              }
+              const dataUrl = `data:${mimeType};base64,${window.btoa(binary)}`;
+
+              if (node.type === "image") {
+                node.imageUrl = dataUrl;
+                const img = new Image();
+                img.onload = () => {
+                  applyImageNodeSize(node, img.width, img.height);
+                  saveState();
+                  renderNodes();
+                };
+                img.src = dataUrl;
+              } else {
+                setNodeContent(node, (getNodeContent(node) || "") + `\n![image](${dataUrl})\n`);
+                saveState();
+                renderNodes();
+              }
+            }
+          } catch(e) {
+            console.warn("Falha ao salvar anexo no card", e);
+          }
+        }
+      }
+    } else {
+      for (const path of paths) {
+        await attachFromPath(path);
+      }
     }
   };
 
@@ -5331,7 +5415,7 @@ function renderAttachmentsPopup() {
   if (!items.length) {
     const empty = document.createElement("div");
     empty.className = "attachments-empty";
-    empty.textContent = "Nenhum anexo";
+    empty.textContent = "No attachments";
     attachmentsList.appendChild(empty);
     return;
   }
@@ -5355,8 +5439,8 @@ function renderAttachmentsPopup() {
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.className = "attachments-action";
-    openBtn.title = "Abrir";
-    openBtn.setAttribute("aria-label", "Abrir");
+    openBtn.title = "Open";
+    openBtn.setAttribute("aria-label", "Open");
     openBtn.innerHTML = icons.externalLink;
     openBtn.addEventListener("click", event => {
       event.stopPropagation();
@@ -5366,8 +5450,8 @@ function renderAttachmentsPopup() {
     const delBtn = document.createElement("button");
     delBtn.type = "button";
     delBtn.className = "attachments-action attachments-action-danger";
-    delBtn.title = "Excluir";
-    delBtn.setAttribute("aria-label", "Excluir");
+    delBtn.title = "Delete";
+    delBtn.setAttribute("aria-label", "Delete");
     delBtn.innerHTML = icons.trash;
     delBtn.addEventListener("click", event => {
       event.stopPropagation();
@@ -5393,11 +5477,12 @@ async function openAttachment(att) {
 }
 
 async function openAttachmentsFolder() {
-  if (!invoke) return;
   const user = activeUser();
+  const task = activeMainTask();
   if (!user) return;
   try {
-    await invoke("attachment_open_folder", { userId: user.id });
+    const subDir = task ? `task${task.number}/anexos` : null;
+    await invoke("attachment_open_folder", { userId: user.id, subDir });
   } catch (e) {
     console.warn("Falha ao abrir pasta de anexos", e);
   }

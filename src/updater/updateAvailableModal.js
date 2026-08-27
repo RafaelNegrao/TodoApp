@@ -15,13 +15,13 @@ function build() {
   root.innerHTML = `
     <div class="canvas-modal updater-modal" role="dialog" aria-modal="true" aria-labelledby="updaterAvailableTitle">
       <header>
-        <strong id="updaterAvailableTitle">Atualização disponível</strong>
+        <strong id="updaterAvailableTitle">Update available</strong>
       </header>
-      <p class="updater-modal-text" id="updaterAvailableText">Uma nova versão está disponível. Deseja atualizar agora?</p>
+      <p class="updater-modal-text" id="updaterAvailableText">A new version is available. Would you like to update now?</p>
       <div class="updater-version-row" id="updaterAvailableVersion" hidden></div>
       <footer>
-        <button type="button" class="modal-button secondary" data-action="cancel">Cancelar</button>
-        <button type="button" class="modal-button primary" data-action="update">Atualizar</button>
+        <button type="button" class="modal-button secondary" data-action="cancel">Cancel</button>
+        <button type="button" class="modal-button primary" data-action="update">Update</button>
       </footer>
     </div>
   `;
@@ -35,7 +35,7 @@ export function showUpdateAvailableModal({ currentVersion, version } = {}) {
   const versionRow = root.querySelector("#updaterAvailableVersion");
   if (currentVersion && version) {
     versionRow.hidden = false;
-    versionRow.textContent = `Versão ${currentVersion} → ${version}`;
+    versionRow.textContent = `Version ${currentVersion} → ${version}`;
   } else {
     versionRow.hidden = true;
     versionRow.textContent = "";

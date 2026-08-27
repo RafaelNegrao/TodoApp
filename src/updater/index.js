@@ -74,7 +74,7 @@ export async function runUpdaterFlow() {
   } catch (error) {
     console.error("[updater] install failed:", describeError(error));
     await showUpdateProgressError(
-      "Não foi possível baixar a atualização. Verifique sua conexão e tente novamente."
+      "Unable to download update. Check your connection and try again."
     );
   }
 }

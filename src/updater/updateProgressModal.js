@@ -5,10 +5,10 @@
 //   - error state with a "Fechar" button so the user is never stuck
 
 const PHASES = {
-  preparing: "Preparando atualização…",
-  downloading: "Baixando nova versão…",
-  installing: "Aplicando atualização…",
-  restarting: "Abrindo nova versão…",
+  preparing: "Preparing update…",
+  downloading: "Downloading new version…",
+  installing: "Applying update…",
+  restarting: "Opening new version…",
 };
 
 const state = {
@@ -27,7 +27,7 @@ function build() {
   root.innerHTML = `
     <div class="canvas-modal updater-progress-modal" role="dialog" aria-modal="true" aria-labelledby="updaterProgressTitle" aria-live="polite">
       <header>
-        <strong id="updaterProgressTitle">Atualizando</strong>
+        <strong id="updaterProgressTitle">Updating</strong>
       </header>
       <div class="updater-progress-body">
         <div class="updater-progress-status" id="updaterProgressStatus">${PHASES.preparing}</div>
@@ -41,7 +41,7 @@ function build() {
         </div>
       </div>
       <footer class="updater-progress-footer" hidden>
-        <button type="button" class="modal-button secondary" data-action="close">Fechar</button>
+        <button type="button" class="modal-button secondary" data-action="close">Close</button>
       </footer>
     </div>
   `;
@@ -71,7 +71,7 @@ export function openUpdateProgressModal() {
   root.querySelector("#updaterProgressPercent").textContent = "0%";
   root.querySelector("#updaterProgressBytes").textContent = "";
   root.querySelector("#updaterProgressStatus").textContent = PHASES.preparing;
-  root.querySelector("#updaterProgressTitle").textContent = "Atualizando";
+  root.querySelector("#updaterProgressTitle").textContent = "Updating";
   root.querySelector(".updater-progress-footer").hidden = true;
   root.hidden = false;
 }
@@ -137,9 +137,9 @@ export function showUpdateProgressError(message) {
   const root = build();
   root.classList.add("updater-error");
   root.classList.remove("updater-busy");
-  root.querySelector("#updaterProgressTitle").textContent = "Erro na atualização";
+  root.querySelector("#updaterProgressTitle").textContent = "Update error";
   root.querySelector("#updaterProgressStatus").textContent =
-    message || "Não foi possível concluir a atualização. Tente novamente mais tarde.";
+    message || "Unable to complete update. Please try again later.";
   root.querySelector("#updaterProgressFill").style.width = "100%";
 
   const footer = root.querySelector(".updater-progress-footer");

@@ -9,8 +9,10 @@ const versionEl = document.querySelector("#settingsVersionValue");
 const autostartInput = document.querySelector("#settingsAutostartInput");
 const linkStyleInput = document.querySelector("#settingsLinkStyleInput");
 const themeInput = document.querySelector("#settingsThemeInput");
+const lineageHoverInput = document.querySelector("#settingsLineageHoverInput");
 
 const LINK_STYLE_KEY = "todocompanion.settings.linkStyle";
+const LINEAGE_HOVER_KEY = "todocompanion.settings.lineageHover";
 const THEME_KEY = "todocompanion.settings.theme";
 const THEMES = ["claude-dark", "light-claude", "dracula"];
 const DEFAULT_THEME = "claude-dark";
@@ -55,6 +57,9 @@ async function loadSettings() {
   }
   if (linkStyleInput) {
     linkStyleInput.checked = localStorage.getItem(LINK_STYLE_KEY) !== "bezier";
+  }
+  if (lineageHoverInput) {
+    lineageHoverInput.checked = localStorage.getItem(LINEAGE_HOVER_KEY) !== "false";
   }
   if (themeInput) {
     themeInput.value = currentTheme();
@@ -112,6 +117,10 @@ function hideApp() {
   }
 }
 
+function persistLineageHover(event) {
+  localStorage.setItem(LINEAGE_HOVER_KEY, event.target.checked ? "true" : "false");
+}
+
 export function initSettings() {
   if (!modal) return;
 
@@ -124,6 +133,7 @@ export function initSettings() {
   autostartInput?.addEventListener("change", persistAutostart);
   linkStyleInput?.addEventListener("change", persistLinkStyle);
   themeInput?.addEventListener("change", persistTheme);
+  lineageHoverInput?.addEventListener("change", persistLineageHover);
   applyTheme(currentTheme());
 
   closeButton?.addEventListener("click", hideApp);

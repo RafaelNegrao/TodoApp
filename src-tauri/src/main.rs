@@ -2,7 +2,8 @@
 
 use std::env;
 use std::fs;
-use std::io::{Cursor, Read, Write};
+use std::collections::HashMap;
+use std::io::{BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
@@ -90,9 +91,19 @@ fn state_save(db: State<'_, DbState>, json: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
+    Ok(buffer)
+}
+
+#[tauri::command]
 fn attachment_save_from_path(
     app: tauri::AppHandle,
     user_id: String,
+    sub_dir: Option<String>,
     source_path: String,
 ) -> Result<AttachmentInfo, String> {
     let src = PathBuf::from(&source_path);
@@ -101,13 +112,25 @@ fn attachment_save_from_path(
         .ok_or_else(|| "Invalid file path".to_string())?
         .to_string_lossy()
         .to_string();
-    let user_dir = ensure_user_dir(&app, &user_id)?;
-    let stored_name = unique_filename(&user_dir, &original_name);
-    let dest = user_dir.join(&stored_name);
+    let mut dir = ensure_user_dir(&app, &user_id)?;
+    if let Some(sub) = sub_dir {
+        dir = dir.join(&sub);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    let stored_name = unique_filename(&dir, &original_name);
+    let dest = dir.join(&stored_name);
     fs::copy(&src, &dest).map_err(|e| e.to_string())?;
+    
+    // The relative path from the user's directory
+    let relative_file = if let Some(sub) = dir.strip_prefix(app_root(&app)?.join(&user_id)).ok() {
+        sub.join(&stored_name).to_string_lossy().replace("\\", "/")
+    } else {
+        stored_name.clone()
+    };
+
     let size = fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
     Ok(AttachmentInfo {
-        file: stored_name,
+        file: relative_file,
         original_name,
         size,
     })
@@ -117,15 +140,27 @@ fn attachment_save_from_path(
 fn attachment_save_from_bytes(
     app: tauri::AppHandle,
     user_id: String,
+    sub_dir: Option<String>,
     file_name: String,
     bytes: Vec<u8>,
 ) -> Result<AttachmentInfo, String> {
-    let user_dir = ensure_user_dir(&app, &user_id)?;
-    let stored_name = unique_filename(&user_dir, &file_name);
-    let dest = user_dir.join(&stored_name);
+    let mut dir = ensure_user_dir(&app, &user_id)?;
+    if let Some(sub) = sub_dir {
+        dir = dir.join(&sub);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    let stored_name = unique_filename(&dir, &file_name);
+    let dest = dir.join(&stored_name);
     fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+
+    let relative_file = if let Some(sub) = dir.strip_prefix(app_root(&app)?.join(&user_id)).ok() {
+        sub.join(&stored_name).to_string_lossy().replace("\\", "/")
+    } else {
+        stored_name.clone()
+    };
+
     Ok(AttachmentInfo {
-        file: stored_name,
+        file: relative_file,
         original_name: file_name,
         size: bytes.len() as u64,
     })
@@ -158,9 +193,189 @@ fn attachment_open(
 }
 
 #[tauri::command]
-fn attachment_open_folder(app: tauri::AppHandle, user_id: String) -> Result<(), String> {
-    let dir = ensure_user_dir(&app, &user_id)?;
+fn attachment_open_folder(
+    app: tauri::AppHandle, 
+    user_id: String,
+    sub_dir: Option<String>,
+) -> Result<(), String> {
+    let mut dir = ensure_user_dir(&app, &user_id)?;
+    if let Some(sub) = sub_dir {
+        dir = dir.join(&sub);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
     open_path(&dir).map_err(|e| e.to_string())
+}
+
+// ------------------------------------------------------------------
+// Gravacao de tela em streaming.
+//
+// O front-end abre uma sessao ANTES de comecar a gravar (o destino fica
+// travado na pasta da task escolhida naquele momento), envia os pedacos
+// conforme sao produzidos e fecha a sessao no final. Assim nenhum video
+// inteiro precisa passar pela memoria/IPC de uma vez, o que travava a
+// interface e derrubava gravacoes longas.
+// ------------------------------------------------------------------
+
+struct RecordingSession {
+    writer: BufWriter<fs::File>,
+    path: PathBuf,
+    relative_file: String,
+    original_name: String,
+    bytes: u64,
+}
+
+#[derive(Default)]
+struct RecordingState(Mutex<HashMap<String, RecordingSession>>);
+
+#[derive(Serialize)]
+struct RecordingTarget {
+    session_id: String,
+    file: String,
+    stored_name: String,
+}
+
+#[tauri::command]
+async fn recording_begin(
+    app: tauri::AppHandle,
+    state: State<'_, RecordingState>,
+    session_id: String,
+    user_id: String,
+    sub_dir: Option<String>,
+    file_name: String,
+) -> Result<RecordingTarget, String> {
+    let user_dir = ensure_user_dir(&app, &user_id)?;
+    let relative_dir = sanitize_sub_dir(sub_dir.as_deref());
+    let mut dir = user_dir;
+    for segment in &relative_dir {
+        dir = dir.join(segment);
+    }
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let stored_name = unique_filename(&dir, &file_name);
+    let path = dir.join(&stored_name);
+    let file = fs::File::create(&path).map_err(|e| e.to_string())?;
+
+    let mut parts = relative_dir;
+    parts.push(stored_name.clone());
+    let relative_file = parts.join("/");
+
+    let mut sessions = state.0.lock().map_err(|_| "Recording state poisoned".to_string())?;
+    sessions.insert(
+        session_id.clone(),
+        RecordingSession {
+            writer: BufWriter::with_capacity(1 << 20, file),
+            path,
+            relative_file: relative_file.clone(),
+            original_name: file_name,
+            bytes: 0,
+        },
+    );
+
+    Ok(RecordingTarget {
+        session_id,
+        file: relative_file,
+        stored_name,
+    })
+}
+
+#[tauri::command]
+async fn recording_append(
+    state: State<'_, RecordingState>,
+    session_id: String,
+    chunk: String,
+) -> Result<u64, String> {
+    let bytes = decode_base64(&chunk)?;
+    let mut sessions = state.0.lock().map_err(|_| "Recording state poisoned".to_string())?;
+    let session = sessions
+        .get_mut(&session_id)
+        .ok_or_else(|| "Sessao de gravacao nao encontrada".to_string())?;
+    session.writer.write_all(&bytes).map_err(|e| e.to_string())?;
+    session.bytes += bytes.len() as u64;
+    Ok(session.bytes)
+}
+
+#[tauri::command]
+async fn recording_finish(
+    state: State<'_, RecordingState>,
+    session_id: String,
+) -> Result<AttachmentInfo, String> {
+    let mut sessions = state.0.lock().map_err(|_| "Recording state poisoned".to_string())?;
+    let mut session = sessions
+        .remove(&session_id)
+        .ok_or_else(|| "Sessao de gravacao nao encontrada".to_string())?;
+    session.writer.flush().map_err(|e| e.to_string())?;
+    let file = session.writer.into_inner().map_err(|e| e.to_string())?;
+    let _ = file.sync_all();
+    drop(file);
+
+    let size = fs::metadata(&session.path)
+        .map(|m| m.len())
+        .unwrap_or(session.bytes);
+    if size == 0 {
+        let _ = fs::remove_file(&session.path);
+        return Err("Gravacao vazia".to_string());
+    }
+
+    Ok(AttachmentInfo {
+        file: session.relative_file,
+        original_name: session.original_name,
+        size,
+    })
+}
+
+#[tauri::command]
+async fn recording_abort(
+    state: State<'_, RecordingState>,
+    session_id: String,
+    discard: bool,
+) -> Result<(), String> {
+    let mut sessions = state.0.lock().map_err(|_| "Recording state poisoned".to_string())?;
+    if let Some(mut session) = sessions.remove(&session_id) {
+        let _ = session.writer.flush();
+        drop(session.writer);
+        if discard {
+            let _ = fs::remove_file(&session.path);
+        }
+    }
+    Ok(())
+}
+
+fn sanitize_sub_dir(sub_dir: Option<&str>) -> Vec<String> {
+    match sub_dir {
+        None => Vec::new(),
+        Some(raw) => raw
+            .split(['/', '\\'])
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty() && *segment != "." && *segment != "..")
+            .map(sanitize_segment)
+            .filter(|segment| !segment.is_empty())
+            .collect(),
+    }
+}
+
+fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::with_capacity(input.len() / 4 * 3 + 3);
+    let mut buffer: u32 = 0;
+    let mut bits: u8 = 0;
+    for byte in input.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            b'\r' | b'\n' | b' ' | b'\t' => continue,
+            _ => return Err("Conteudo base64 invalido".to_string()),
+        };
+        buffer = (buffer << 6) | value as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((buffer >> bits) & 0xFF) as u8);
+        }
+    }
+    Ok(out)
 }
 
 #[tauri::command]
@@ -646,6 +861,7 @@ fn main() {
                 e
             })?;
             app.manage(DbState(Mutex::new(conn)));
+            app.manage(RecordingState::default());
 
             if let Some(window) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
@@ -675,6 +891,10 @@ fn main() {
             attachment_delete,
             attachment_open,
             attachment_open_folder,
+            recording_begin,
+            recording_append,
+            recording_finish,
+            recording_abort,
             check_for_update,
             download_and_apply_update,
             get_app_version,
@@ -683,6 +903,7 @@ fn main() {
             set_autostart_enabled,
             open_url,
             hide_window,
+            read_file_bytes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TODOCompanion");
