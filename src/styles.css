@@ -4675,18 +4675,31 @@ body.translator-floating-mode .ai-status-text {
 
 body.translator-floating-mode .ai-translate-controls-row {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 0 2px;
 }
 
 body.translator-floating-mode .ai-tone-bar {
+  flex: 0 1 auto;
   flex-direction: row;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 8px;
   padding: 1px 2px;
   border: 0;
   border-radius: 0;
   background: transparent;
+}
+
+body.translator-floating-mode .ai-translate-thinking-side {
+  display: none !important;
+}
+
+body.translator-floating-mode .ai-translate-thinking-float {
+  display: inline-grid;
 }
 
 body.translator-floating-mode .ai-tone-labels {
@@ -5324,7 +5337,79 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+}
+
+/* Indicador animado minimalista de "pensando" no tradutor */
+.ai-translate-thinking {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.72);
+  pointer-events: none;
+  transition: opacity 180ms var(--ease-out), transform 220ms var(--ease-spring);
+}
+
+.ai-translate-thinking-float {
+  display: none;
+}
+
+.ai-translate-view.is-thinking .ai-translate-thinking {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.ai-thinking-orbit {
+  width: 16px;
+  height: 16px;
+  overflow: visible;
+}
+
+.ai-thinking-track {
+  fill: none;
+  stroke: rgba(var(--hi-rgb), 0.14);
+  stroke-width: 1.6;
+}
+
+.ai-thinking-arc {
+  fill: none;
+  stroke: var(--accent-strong);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  transform-origin: 10px 10px;
+}
+
+.ai-thinking-star {
+  fill: var(--accent-strong);
+  transform-origin: 10px 10px;
+}
+
+.ai-translate-view.is-thinking .ai-thinking-arc {
+  animation: ai-thinking-spin 0.9s cubic-bezier(0.55, 0.15, 0.45, 0.85) infinite;
+}
+
+.ai-translate-view.is-thinking .ai-thinking-star {
+  animation: ai-thinking-breathe 1.2s ease-in-out infinite;
+}
+
+@keyframes ai-thinking-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ai-thinking-breathe {
+  0%, 100% {
+    opacity: 0.55;
+    transform: scale(0.84);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
 }
 
 .ai-mini-btn {

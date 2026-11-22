@@ -7773,6 +7773,7 @@ function initAiTranslatorPanel() {
     if (trStatusText) {
       trStatusText.textContent = label;
     }
+    translateView?.classList.toggle("is-thinking", stateName === "busy");
   }
 
   function scheduleRealtimeTranslation(delayMs = 320) {
