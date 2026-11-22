@@ -1000,8 +1000,16 @@ button {
 }
 
 .canvas-meta-overlay.compact-fields .canvas-meta-left {
-  flex: 1 1 auto;
-  max-width: none;
+  flex: 0 1 auto;
+  max-width: calc(100% - 170px);
+}
+
+.canvas-meta-overlay.compact-actions .canvas-meta-left {
+  max-width: calc(100% - 44px);
+}
+
+.canvas-meta-overlay.compact-actions .canvas-meta-overflow-btn {
+  margin-left: auto;
 }
 
 .canvas-meta-overlay.compact-fields .canvas-meta-fields {
