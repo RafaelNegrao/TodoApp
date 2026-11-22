@@ -1741,7 +1741,7 @@ function renderNodes() {
 
       bodyEditor.addEventListener("focusin", event => {
         const cell = event.target.closest?.(".card-excel-cell");
-        if (cell) {
+        if (cell && !cell.classList.contains("card-excel-check-cell")) {
           const wrap = cell.closest(".card-table-wrap");
           if (wrap) {
             wrap.dataset.activeRow = cell.dataset.row || "0";
@@ -1756,7 +1756,7 @@ function renderNodes() {
 
       bodyEditor.addEventListener("focusout", event => {
         const cell = event.target.closest?.(".card-excel-cell");
-        if (cell) {
+        if (cell && !cell.classList.contains("card-excel-check-cell")) {
           const wrap = cell.closest(".card-table-wrap");
           if (wrap) {
             cell.dataset.raw = cell.textContent ?? "";
@@ -1771,7 +1771,7 @@ function renderNodes() {
         const plain = event.clipboardData?.getData("text/plain") || "";
         if (!plain.includes("\t")) return;
         const cell = event.target.closest?.(".card-excel-cell");
-        if (cell) {
+        if (cell && !cell.classList.contains("card-excel-check-cell")) {
           const wrap = cell.closest(".card-table-wrap");
           if (wrap) {
             const r = parseInt(cell.dataset.row || "0", 10);
@@ -1799,7 +1799,7 @@ function renderNodes() {
 
       bodyEditor.addEventListener("keydown", event => {
         const cell = event.target.closest?.(".card-excel-cell");
-        if (cell) {
+        if (cell && !cell.classList.contains("card-excel-check-cell")) {
           handleCardTableCellKeydown(event, cell, bodyEditor, node, card);
           return;
         }
@@ -1809,7 +1809,7 @@ function renderNodes() {
       });
       bodyEditor.addEventListener("input", event => {
         const cell = event.target.closest?.(".card-excel-cell");
-        if (cell) {
+        if (cell && !cell.classList.contains("card-excel-check-cell")) {
           cell.dataset.raw = cell.textContent ?? "";
           const wrap = cell.closest(".card-table-wrap");
           if (wrap) {
@@ -4783,9 +4783,13 @@ function readCardTableDataFromDom(wrap) {
     return decodeTableData(wrap.dataset.tableEncoded || "");
   }
   const rows = trEls.map(tr =>
-    Array.from(tr.querySelectorAll(".card-excel-cell")).map(cell =>
-      cell.dataset.raw !== undefined ? cell.dataset.raw : (cell.textContent ?? "")
-    )
+    Array.from(tr.querySelectorAll(".card-excel-cell")).map(cell => {
+      if (cell.classList.contains("card-excel-check-cell")) {
+        const btn = cell.querySelector(".card-table-check-btn");
+        return btn?.classList.contains("checked") || cell.dataset.raw === "[x]" ? "[x]" : "[ ]";
+      }
+      return cell.dataset.raw !== undefined ? cell.dataset.raw : (cell.textContent ?? "");
+    })
   );
   return hasCheckboxes ? { rows, hasCheckboxes: true } : { rows };
 }
