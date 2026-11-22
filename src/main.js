@@ -8376,6 +8376,11 @@ function initAiTranslatorPanel() {
     const messages = session.messages || [];
 
     if (!messages.length) {
+      const modelTagEl = document.getElementById("aiChatModelTag");
+      if (modelTagEl) {
+        modelTagEl.textContent = "Auto";
+        modelTagEl.title = "Seleção automática na cascata";
+      }
       const empty = document.createElement("div");
       empty.className = "ai-chat-empty";
       empty.innerHTML = `
@@ -8469,7 +8474,8 @@ function initAiTranslatorPanel() {
 
         const timeSpan = document.createElement("span");
         timeSpan.className = "ai-msg-time";
-        timeSpan.textContent = "just now";
+        timeSpan.textContent = msg.model ? formatAiModelName(msg.model) : "just now";
+        if (msg.model) timeSpan.title = msg.model;
 
         actions.append(copyBtn, cardBtn, timeSpan);
       } else {
@@ -8751,6 +8757,13 @@ function initAiTranslatorPanel() {
       chatMessagesEl.appendChild(row);
     });
 
+    const modelTagEl = document.getElementById("aiChatModelTag");
+    if (modelTagEl) {
+      const lastModelMsg = [...messages].reverse().find(m => m.role === "model" && m.model);
+      modelTagEl.textContent = lastModelMsg ? formatAiModelName(lastModelMsg.model) : "Auto";
+      modelTagEl.title = lastModelMsg ? `Última resposta: ${lastModelMsg.model}` : "Seleção automática na cascata";
+    }
+
     if (chatBusy) {
       const working = document.createElement("div");
       working.className = "ai-chat-working";
@@ -8799,6 +8812,7 @@ function initAiTranslatorPanel() {
 
     try {
       let reply = "";
+      let usedModel = "";
       if (invoke) {
         const payloadMessages = session.messages.slice(-18).map(m => ({
           role: m.role,
@@ -8820,14 +8834,21 @@ function initAiTranslatorPanel() {
             translatorMode: localStorage.getItem("todocompanion.settings.translatorMode") || "manual"
           }
         });
-        reply = await invoke("ai_chat_english", {
+        const res = await invoke("ai_chat_english", {
           messages: payloadMessages,
           formality,
           apiKey: localStorage.getItem(GEMINI_API_KEY_STORAGE) || null,
           appContext
         });
+        if (res && typeof res === "object") {
+          reply = String(res.text || "");
+          usedModel = String(res.model || "");
+        } else {
+          reply = String(res || "");
+        }
       } else {
         reply = await fallbackBrowserTranslate(text || "Analyze attached file", formality, "auto");
+        usedModel = DEFAULT_ENV_GEMINI_MODEL;
       }
 
       const { cleanText: afterActionsText, proposal } = extractAiActionProposal(String(reply || ""));
@@ -8838,6 +8859,7 @@ function initAiTranslatorPanel() {
       session.messages.push({
         role: "model",
         text: cleaned,
+        model: usedModel,
         attachments: [],
         proposal: proposal || null,
         questionSet: questionSet || null
@@ -8886,6 +8908,22 @@ function initAiTranslatorPanel() {
       chatInput.style.height = "auto";
     }
   });
+}
+
+function formatAiModelName(modelId) {
+  const id = String(modelId || "").trim();
+  if (!id) return "Auto";
+  return id
+    .replace(/-preview$/i, "")
+    .replace(/-a4b-it$/i, "")
+    .replace(/-it$/i, "")
+    .split("-")
+    .map(part => {
+      if (/^\d+(\.\d+)?[a-z]?$/i.test(part)) return part.toUpperCase();
+      if (part.toLowerCase() === "er") return "ER";
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(" ");
 }
 
 function findUserByAction(action) {

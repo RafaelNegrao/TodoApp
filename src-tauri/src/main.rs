@@ -203,27 +203,50 @@ fn gemini_translate_agent() -> &'static ureq::Agent {
     })
 }
 
+// Cascata completa de modelos de texto da API Gemini/Gemma ordenada por velocidade real
+// (benchmark medido) + maior cota diaria (RPD):
+// 1. Top rapidos e alta cota (500 RPD, ~800ms): gemini-3.1-flash-lite, gemini-3.5-flash-lite
+// 2. Fallbacks rapidos com cota ativa (20 RPD): robotics-er-2, 3-flash, 3.6-flash, 4-hydrogen, 3.8-flash
+// 3. Cota gigante de seguranca (14.4K RPD): gemma-4-26b-a4b-it, gemma-4-31b-it
+// 4. Demais modelos de texto da API como ultimo recurso caso tenham cota liberada
 const GEMINI_MODEL_CASCADE: &[&str] = &[
-    "gemini-flash-lite-latest",
     "gemini-3.1-flash-lite",
-    "gemini-3.1-flash-lite-preview",
     "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-flash-lite-latest",
+    "gemini-robotics-er-2-preview",
     "gemini-3-flash-preview",
     "gemini-3.6-flash",
+    "gemini-4-hydrogen",
     "gemini-3.5-flash",
+    "gemini-3.7-flash",
+    "gemini-3.8-flash",
+    "gemma-4-26b-a4b-it",
+    "gemma-4-31b-it",
     "gemini-flash-latest",
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-3.1-pro-preview",
+    "gemini-4-argon",
+    "gemini-4-carbon",
+    "gemini-4-neon",
+    "gemini-pro-latest",
     "gemini-2.0-flash-lite",
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemma-4-31b-it",
-    "gemma-4-26b-a4b-it",
-    "gemini-3.8-flash",
 ];
 
 fn model_prefers_minimal_thinking(model: &str) -> bool {
-    matches!(model, "gemini-3-flash-preview" | "gemini-3.6-flash")
+    matches!(
+        model,
+        "gemini-3-flash-preview"
+            | "gemini-3.6-flash"
+            | "gemini-3.7-flash"
+            | "gemini-3.8-flash"
+            | "gemini-3.5-flash"
+            | "gemini-4-hydrogen"
+            | "gemini-flash-latest"
+    )
 }
 
 fn gemini_model_cooldowns() -> &'static Mutex<HashMap<String, Instant>> {
@@ -344,6 +367,16 @@ fn execute_gemini_fast_payload(
     payload: serde_json::Value,
     use_short_timeout: bool,
 ) -> Result<String, String> {
+    execute_gemini_fast_payload_with_model(key, models, payload, use_short_timeout)
+        .map(|(text, _)| text)
+}
+
+fn execute_gemini_fast_payload_with_model(
+    key: &str,
+    models: &[String],
+    payload: serde_json::Value,
+    use_short_timeout: bool,
+) -> Result<(String, String), String> {
     let agent = if use_short_timeout {
         gemini_translate_agent()
     } else {
@@ -396,16 +429,24 @@ fn execute_gemini_fast_payload(
                     }
                     let final_text = combined.trim();
                     if !final_text.is_empty() {
-                        return Ok(final_text.to_string());
+                        return Ok((final_text.to_string(), model.clone()));
                     }
                 }
                 Err(ureq::Error::Status(code, resp)) => {
                     let err_body = resp.into_string().unwrap_or_default();
                     last_err = format!("Gemini HTTP {code} ({model}): {err_body}");
                     if code == 429 {
-                        // Cota do modelo excedida: coloca esse modelo em cooldown por 30s
-                        // e desce imediatamente para o proximo modelo da lista!
-                        mark_model_cooldown(model, Duration::from_secs(30));
+                        // Cota do modelo excedida: se for limite diario ou cota 0, aplica cooldown longo;
+                        // se for RPM por minuto, 30s — descendo imediatamente para o proximo modelo da cascata.
+                        let cooldown_secs = if err_body.contains("PerDay")
+                            || err_body.contains("DAILY")
+                            || err_body.contains("limit: 0")
+                        {
+                            300
+                        } else {
+                            30
+                        };
+                        mark_model_cooldown(model, Duration::from_secs(cooldown_secs));
                         break;
                     }
                     if code == 503 || code == 502 || code == 500 || code == 504 {
@@ -526,15 +567,24 @@ async fn ai_translate_fast(
     .map_err(|e| e.to_string())?
 }
 
+#[derive(Serialize)]
+struct AiChatReply {
+    text: String,
+    model: String,
+}
+
 #[tauri::command]
 async fn ai_chat_english(
     messages: Vec<AiChatMessage>,
     formality: u8,
     api_key: Option<String>,
     app_context: Option<String>,
-) -> Result<String, String> {
+) -> Result<AiChatReply, String> {
     if messages.is_empty() {
-        return Ok(String::new());
+        return Ok(AiChatReply {
+            text: String::new(),
+            model: String::new(),
+        });
     }
 
     let (key, models) = resolve_gemini_key_and_models(api_key)?;
@@ -653,7 +703,8 @@ async fn ai_chat_english(
             }
         });
 
-        execute_gemini_fast_payload(&key, &models, payload, false)
+        let (text, model) = execute_gemini_fast_payload_with_model(&key, &models, payload, false)?;
+        Ok(AiChatReply { text, model })
     })
     .await
     .map_err(|e| e.to_string())?

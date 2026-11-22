@@ -1,126 +1,144 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TODOCompanion</title>
-    <link rel="stylesheet" href="./styles.css" />
-    <link rel="stylesheet" href="./updater/updater.css" />
-    <script>
-      (function () {
-        try {
-          var theme = localStorage.getItem("todocompanion.settings.theme");
-          if (theme && theme !== "claude-dark") {
-            document.documentElement.dataset.theme = theme;
-          }
-          var fontSize = localStorage.getItem("todocompanion.settings.cardFontSize");
-          var num = parseInt(fontSize, 10);
-          if (!isNaN(num) && num >= 1 && num <= 99) {
-            document.documentElement.style.setProperty("--card-font-size", num + "px");
-          }
-        } catch (e) {}
-      })();
-    </script>
-  </head>
-  <body>
-    <div id="app">
-      <section class="panel" aria-label="TODOCompanion">
-        <header class="topbar" data-tauri-drag-region>
-          <div class="brand" data-tauri-drag-region>
-            <span class="brand-mark" aria-hidden="true"></span>
-            <span class="brand-copy" data-tauri-drag-region>
-              <strong>TODOCompanion</strong>
-              <small>Task map</small>
-            </span>
-          </div>
-          <div class="topbar-actions">
-            <button class="topbar-action" id="openAiTranslatorButton" type="button" aria-label="AI Instant Translator" title="AI Instant Translator">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="m5 8 6 6" />
-                <path d="m4 14 6-6 2-3" />
-                <path d="M2 5h12" />
-                <path d="M7 2h1" />
-                <path d="m22 22-5-10-5 10" />
-                <path d="M14 18h6" />
-              </svg>
-            </button>
-            <button class="topbar-action topbar-ai-chat-btn" id="openAiChatButton" type="button" aria-label="AI Chat" title="AI Chat">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M11 3C11 7.97 15.03 12 20 12C15.03 12 11 16.03 11 21C11 16.03 6.97 12 2 12C6.97 12 11 7.97 11 3Z" />
-                <path d="M19 2C19 4.21 20.79 6 23 6C20.79 6 19 7.79 19 10C19 7.79 17.21 6 15 6C17.21 6 19 4.21 19 2Z" />
-              </svg>
-              <span class="ai-chat-thinking-indicator" id="aiChatThinkingIndicator" aria-hidden="true"></span>
-            </button>
-            <button class="topbar-action" id="openSearchButton" type="button" aria-label="Search" title="Search">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="11" cy="11" r="7" />
-                <path d="m20 20-3.5-3.5" />
-              </svg>
-            </button>
-            <button class="topbar-action" id="openSettingsButton" type="button" aria-label="Settings" title="Settings">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
-            <span class="topbar-divider" aria-hidden="true"></span>
-            <button class="topbar-action" id="minimizeAppButton" type="button" aria-label="Minimize" title="Minimize">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M6 18h12" />
-              </svg>
-            </button>
-            <button class="topbar-action" id="maximizeAppButton" type="button" aria-label="Maximize" title="Maximize / Restore">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="5" y="5" width="14" height="14" rx="1.5" />
-              </svg>
-            </button>
-            <button class="topbar-action topbar-close" id="closeAppButton" type="button" aria-label="Close" title="Close application">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M18 6 6 18M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </header>
 
-        <div class="workspace">
-          <aside class="users-rail" id="usersRail" aria-label="Users">
-            <div class="users-rail-head">
-              <button class="users-rail-toggle" id="usersRailToggle" type="button" aria-label="Collapse users panel" title="Collapse panel"></button>
-              <strong class="users-rail-title">Users</strong>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TODOCompanion</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./updater/updater.css" />
+  <script>
+    (function () {
+      try {
+        var theme = localStorage.getItem("todocompanion.settings.theme");
+        if (theme && theme !== "claude-dark") {
+          document.documentElement.dataset.theme = theme;
+        }
+        var fontSize = localStorage.getItem("todocompanion.settings.cardFontSize");
+        var num = parseInt(fontSize, 10);
+        if (!isNaN(num) && num >= 1 && num <= 99) {
+          document.documentElement.style.setProperty("--card-font-size", num + "px");
+        }
+      } catch (e) { }
+    })();
+  </script>
+</head>
+
+<body>
+  <div id="app">
+    <section class="panel" aria-label="TODOCompanion">
+      <header class="topbar" data-tauri-drag-region>
+        <div class="brand" data-tauri-drag-region>
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-copy" data-tauri-drag-region>
+            <strong>TODOCompanion</strong>
+            <small>Task map</small>
+          </span>
+        </div>
+        <div class="topbar-actions">
+          <button class="topbar-action" id="openAiTranslatorButton" type="button" aria-label="AI Instant Translator"
+            title="AI Instant Translator">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m5 8 6 6" />
+              <path d="m4 14 6-6 2-3" />
+              <path d="M2 5h12" />
+              <path d="M7 2h1" />
+              <path d="m22 22-5-10-5 10" />
+              <path d="M14 18h6" />
+            </svg>
+          </button>
+          <button class="topbar-action topbar-ai-chat-btn" id="openAiChatButton" type="button" aria-label="AI Chat"
+            title="AI Chat">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M11 3C11 7.97 15.03 12 20 12C15.03 12 11 16.03 11 21C11 16.03 6.97 12 2 12C6.97 12 11 7.97 11 3Z" />
+              <path d="M19 2C19 4.21 20.79 6 23 6C20.79 6 19 7.79 19 10C19 7.79 17.21 6 15 6C17.21 6 19 4.21 19 2Z" />
+            </svg>
+            <span class="ai-chat-thinking-indicator" id="aiChatThinkingIndicator" aria-hidden="true"></span>
+          </button>
+          <button class="topbar-action" id="openSearchButton" type="button" aria-label="Search" title="Search">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+          </button>
+          <button class="topbar-action" id="openSettingsButton" type="button" aria-label="Settings" title="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+          <span class="topbar-divider" aria-hidden="true"></span>
+          <button class="topbar-action" id="minimizeAppButton" type="button" aria-label="Minimize" title="Minimize">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 18h12" />
+            </svg>
+          </button>
+          <button class="topbar-action" id="maximizeAppButton" type="button" aria-label="Maximize"
+            title="Maximize / Restore">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="5" y="5" width="14" height="14" rx="1.5" />
+            </svg>
+          </button>
+          <button class="topbar-action topbar-close" id="closeAppButton" type="button" aria-label="Close"
+            title="Close application">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="users-rail" id="usersRail" aria-label="Users">
+          <div class="users-rail-head">
+            <button class="users-rail-toggle" id="usersRailToggle" type="button" aria-label="Collapse users panel"
+              title="Collapse panel"></button>
+            <strong class="users-rail-title">Users</strong>
+          </div>
+          <div class="users-rail-list" id="usersRailList" role="tablist" aria-label="Users list"></div>
+          <button class="users-rail-add" id="addBoardButton" type="button" aria-label="New user" title="New user"><svg
+              class="icon" viewBox="0 0 24 24">
+              <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" />
+            </svg> <span>New user</span></button>
+        </aside>
+        <aside class="tasks-sidebar" id="tasksSidebar" aria-label="Tasks by user">
+          <div class="tasks-sidebar-resizer" id="tasksSidebarResizer" title="Drag to resize (double click to reset)">
+            <div class="resizer-dots" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
             </div>
-            <div class="users-rail-list" id="usersRailList" role="tablist" aria-label="Users list"></div>
-            <button class="users-rail-add" id="addBoardButton" type="button" aria-label="New user" title="New user"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2"/></svg> <span>New user</span></button>
-          </aside>
-          <aside class="tasks-sidebar" id="tasksSidebar" aria-label="Tasks by user">
-            <div class="tasks-sidebar-resizer" id="tasksSidebarResizer" title="Drag to resize (double click to reset)">
-              <div class="resizer-dots" aria-hidden="true">
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
+          </div>
+          <div class="tasks-sidebar-head">
+            <button class="tasks-sidebar-toggle" id="tasksSidebarToggle" type="button" aria-label="Collapse tasks panel"
+              title="Collapse panel"></button>
+            <strong class="tasks-sidebar-title">Tasks</strong>
+            <button class="tasks-sidebar-sort" id="tasksSortButton" type="button" aria-label="Sort tasks"
+              title="Sort tasks"></button>
+            <div class="tasks-sort-menu" id="tasksSortMenu" role="menu" hidden>
+              <button type="button" role="menuitem" data-sort="criticality">Criticality</button>
+              <button type="button" role="menuitem" data-sort="priority">Priority</button>
+              <button type="button" role="menuitem" data-sort="status">Status</button>
+              <button type="button" role="menuitem" data-sort="start">Start date</button>
+              <button type="button" role="menuitem" data-sort="end">End date</button>
+              <button type="button" role="menuitem" data-sort="title">Title (A–Z)</button>
             </div>
-            <div class="tasks-sidebar-head">
-              <button class="tasks-sidebar-toggle" id="tasksSidebarToggle" type="button" aria-label="Collapse tasks panel" title="Collapse panel"></button>
-              <strong class="tasks-sidebar-title">Tasks</strong>
-              <button class="tasks-sidebar-sort" id="tasksSortButton" type="button" aria-label="Sort tasks" title="Sort tasks"></button>
-              <div class="tasks-sort-menu" id="tasksSortMenu" role="menu" hidden>
-                <button type="button" role="menuitem" data-sort="criticality">Criticality</button>
-                <button type="button" role="menuitem" data-sort="priority">Priority</button>
-                <button type="button" role="menuitem" data-sort="status">Status</button>
-                <button type="button" role="menuitem" data-sort="start">Start date</button>
-                <button type="button" role="menuitem" data-sort="end">End date</button>
-                <button type="button" role="menuitem" data-sort="title">Title (A–Z)</button>
-              </div>
-            </div>
-            <div class="tasks-status-filter" id="tasksStatusFilter" role="tablist" aria-label="Status filter">
-              <button class="tasks-status-pill" type="button" role="tab" data-filter="all">All</button>
-              <button class="tasks-status-pill active" type="button" role="tab" data-filter="ongoing" aria-selected="true">Ongoing</button>
-              <button class="tasks-status-pill" type="button" role="tab" data-filter="stopped">Stopped</button>
-              <button class="tasks-status-pill" type="button" role="tab" data-filter="complete">Complete</button>
-            </div>
-            <div class="user-task-list" id="userTaskList"></div>
-            <button class="dock-add" id="addUserTaskButton" type="button" aria-label="New main task" title="New main task"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2"/></svg> <span>New task</span></button>
-          </aside>
+          </div>
+          <div class="tasks-status-filter" id="tasksStatusFilter" role="tablist" aria-label="Status filter">
+            <button class="tasks-status-pill" type="button" role="tab" data-filter="all">All</button>
+            <button class="tasks-status-pill active" type="button" role="tab" data-filter="ongoing"
+              aria-selected="true">Ongoing</button>
+            <button class="tasks-status-pill" type="button" role="tab" data-filter="stopped">Stopped</button>
+            <button class="tasks-status-pill" type="button" role="tab" data-filter="complete">Complete</button>
+          </div>
+          <div class="user-task-list" id="userTaskList"></div>
+          <button class="dock-add" id="addUserTaskButton" type="button" aria-label="New main task"
+            title="New main task"><svg class="icon" viewBox="0 0 24 24">
+              <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" />
+            </svg> <span>New task</span></button>
+        </aside>
         <main class="board-shell">
           <div class="canvas-meta-overlay" id="canvasMetaOverlay" aria-label="Main task details">
             <div class="canvas-meta-left">
@@ -128,7 +146,10 @@
                 <span class="overlay-user-avatar" id="overlayUserAvatar"></span>
                 <span class="overlay-user-name" id="overlayUserName"></span>
               </div>
-              <svg class="overlay-breadcrumb-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 3.5l4.5 4.5L6 12.5"/></svg>
+              <svg class="overlay-breadcrumb-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                stroke-width="1.6" aria-hidden="true">
+                <path d="M6 3.5l4.5 4.5L6 12.5" />
+              </svg>
               <div class="overlay-task-badge" id="overlayTaskBadge">
                 <span class="overlay-task-id" id="overlayTaskId"></span>
                 <span class="overlay-task-title" id="overlayTaskTitle"></span>
@@ -172,20 +193,26 @@
                       <span class="crit-dot"></span>
                       <span class="crit-dot"></span>
                     </div>
-                    <input id="overlayCriticalityInput" type="range" min="0" max="2" step="1" value="0" aria-label="Criticality" />
+                    <input id="overlayCriticalityInput" type="range" min="0" max="2" step="1" value="0"
+                      aria-label="Criticality" />
                   </div>
                 </label>
               </div>
             </div>
 
             <div class="canvas-meta-actions" id="canvasMetaActions">
-              <button class="canvas-organize-button" id="organizeCanvasButton" type="button" aria-label="Organize cards" title="Organize cards"></button>
-              <button class="canvas-center-button" id="centerCanvasButton" type="button" aria-label="Center tasks" title="Center tasks"></button>
-              <button class="canvas-record-button" id="recordButton" type="button" aria-label="Record screen" title="Record screen"></button>
-              <button class="canvas-attach-button" id="canvasAttachButton" type="button" aria-label="Attach file" title="Attach file"></button>
+              <button class="canvas-organize-button" id="organizeCanvasButton" type="button" aria-label="Organize cards"
+                title="Organize cards"></button>
+              <button class="canvas-center-button" id="centerCanvasButton" type="button" aria-label="Center tasks"
+                title="Center tasks"></button>
+              <button class="canvas-record-button" id="recordButton" type="button" aria-label="Record screen"
+                title="Record screen"></button>
+              <button class="canvas-attach-button" id="canvasAttachButton" type="button" aria-label="Attach file"
+                title="Attach file"></button>
             </div>
 
-            <button class="canvas-meta-overflow-btn" id="canvasMetaOverflowBtn" type="button" aria-label="Show task details and actions" title="Detalhes e ações" aria-expanded="false" hidden>
+            <button class="canvas-meta-overflow-btn" id="canvasMetaOverflowBtn" type="button"
+              aria-label="Show task details and actions" title="Detalhes e ações" aria-expanded="false" hidden>
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none" />
                 <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
@@ -205,14 +232,19 @@
           <input class="canvas-attach-input" id="canvasAttachInput" type="file" multiple hidden />
           <div class="recording-indicator" id="recordingIndicator" hidden>
             <span id="recordingIndicatorText"></span>
-            <button class="recording-indicator-target" id="recordingIndicatorTarget" type="button" title="Ir para a task em gravação" hidden></button>
-            <button class="recording-indicator-stop" id="recordingIndicatorStop" type="button" aria-label="Stop">Stop</button>
+            <button class="recording-indicator-target" id="recordingIndicatorTarget" type="button"
+              title="Ir para a task em gravação" hidden></button>
+            <button class="recording-indicator-stop" id="recordingIndicatorStop" type="button"
+              aria-label="Stop">Stop</button>
           </div>
           <div class="record-mode-popup" id="recordModePopup" role="menu" aria-label="Modo de gravação" hidden>
             <div class="record-mode-head">Iniciar gravação</div>
             <button class="record-mode-option" type="button" role="menuitem" data-record-mode="all">
               <span class="record-mode-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>
+                <svg viewBox="0 0 24 24">
+                  <rect x="2" y="4" width="20" height="14" rx="2" />
+                  <path d="M8 21h8M12 18v3" />
+                </svg>
               </span>
               <span class="record-mode-copy">
                 <strong>Tela + Áudio</strong>
@@ -221,7 +253,10 @@
             </button>
             <button class="record-mode-option" type="button" role="menuitem" data-record-mode="audio">
               <span class="record-mode-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4M8 21h8"/></svg>
+                <svg viewBox="0 0 24 24">
+                  <rect x="9" y="2" width="6" height="12" rx="3" />
+                  <path d="M5 10a7 7 0 0 0 14 0M12 17v4M8 21h8" />
+                </svg>
               </span>
               <span class="record-mode-copy">
                 <strong>Apenas Áudio</strong>
@@ -233,15 +268,21 @@
             <div class="attachments-list" id="attachmentsList"></div>
             <div class="attachments-footer">
               <button class="attachments-add" id="attachmentsAdd" type="button">+ Add attachment</button>
-              <button class="attachments-folder" id="attachmentsOpenFolder" type="button" aria-label="Open attachments folder" title="Open attachments folder"></button>
+              <button class="attachments-folder" id="attachmentsOpenFolder" type="button"
+                aria-label="Open attachments folder" title="Open attachments folder"></button>
             </div>
           </div>
-          <div class="attachment-reference-popup" id="attachmentReferencePopup" role="dialog" aria-label="Attachments" hidden>
+          <div class="attachment-reference-popup" id="attachmentReferencePopup" role="dialog" aria-label="Attachments"
+            hidden>
             <div class="attachment-reference-list" id="attachmentReferenceList"></div>
           </div>
           <div class="canvas-drop-overlay" id="canvasDropOverlay" hidden>
             <div class="canvas-drop-inner">
-              <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+              <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path
+                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
               <span>Drop to attach</span>
             </div>
           </div>
@@ -257,7 +298,8 @@
           </div>
           <div class="ai-panel-head" id="aiPanelHead" data-tauri-drag-region>
             <div class="ai-panel-head-left" data-tauri-drag-region>
-              <button class="ai-head-icon-btn" id="aiChatHistoryToggle" type="button" title="Chat History" aria-label="Chat History" hidden>
+              <button class="ai-head-icon-btn" id="aiChatHistoryToggle" type="button" title="Chat History"
+                aria-label="Chat History" hidden>
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
                   <path d="M3 3v5h5" />
@@ -267,19 +309,22 @@
               <strong class="ai-panel-title" id="aiPanelTitle" data-tauri-drag-region>Instant Translator</strong>
             </div>
             <div class="ai-panel-head-right">
-              <button class="ai-head-icon-btn" id="aiDetachTranslatorBtn" type="button" title="Detach translator on top of all apps (or drag header)" aria-label="Detach translator">
+              <button class="ai-head-icon-btn" id="aiDetachTranslatorBtn" type="button"
+                title="Detach translator on top of all apps (or drag header)" aria-label="Detach translator">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M15 3h6v6" />
                   <path d="M10 14 21 3" />
                   <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                 </svg>
               </button>
-              <button class="ai-head-icon-btn" id="aiNewChatBtn" type="button" title="New Chat" aria-label="New Chat" hidden>
+              <button class="ai-head-icon-btn" id="aiNewChatBtn" type="button" title="New Chat" aria-label="New Chat"
+                hidden>
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M12 5v14M5 12h14" />
                 </svg>
               </button>
-              <button class="ai-head-icon-btn ai-panel-close" id="closeAiTranslatorButton" type="button" aria-label="Close" title="Close (Esc)">
+              <button class="ai-head-icon-btn ai-panel-close" id="closeAiTranslatorButton" type="button"
+                aria-label="Close" title="Close (Esc)">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M18 6 6 18M6 6l12 12" />
                 </svg>
@@ -296,26 +341,32 @@
                   <span class="ai-tone-badge" id="aiToneBadge">Balanced</span>
                   <span class="ai-tone-end" data-tone-jump="100">Formal</span>
                 </div>
-                <input class="ai-tone-slider" id="aiToneSlider" type="range" min="0" max="100" step="5" value="40" aria-label="Tone between Natural and Formal" />
+                <input class="ai-tone-slider" id="aiToneSlider" type="range" min="0" max="100" step="5" value="40"
+                  aria-label="Tone between Natural and Formal" />
               </div>
 
               <div class="ai-dir-dropdown" id="aiDirDropdown">
-                <button class="ai-dir-trigger" id="aiDirDropdownTrigger" type="button" aria-haspopup="listbox" aria-expanded="false" title="Translation language">
+                <button class="ai-dir-trigger" id="aiDirDropdownTrigger" type="button" aria-haspopup="listbox"
+                  aria-expanded="false" title="Translation language">
                   <span class="ai-dir-trigger-label" id="aiDirDropdownLabel">PT → EN</span>
                   <svg class="ai-dir-chevron" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="m6 9 6 6 6-6" />
                   </svg>
                 </button>
-                <div class="ai-dir-menu" id="aiDirDropdownMenu" role="listbox" aria-label="Translation direction" hidden>
-                  <button class="ai-dir-option active" type="button" role="option" aria-selected="true" data-ai-dir="pt-en" data-ai-dir-label="PT → EN">
+                <div class="ai-dir-menu" id="aiDirDropdownMenu" role="listbox" aria-label="Translation direction"
+                  hidden>
+                  <button class="ai-dir-option active" type="button" role="option" aria-selected="true"
+                    data-ai-dir="pt-en" data-ai-dir-label="PT → EN">
                     <span>PT → EN</span>
                     <span class="ai-dir-check" aria-hidden="true">✓</span>
                   </button>
-                  <button class="ai-dir-option" type="button" role="option" aria-selected="false" data-ai-dir="en-pt" data-ai-dir-label="EN → PT">
+                  <button class="ai-dir-option" type="button" role="option" aria-selected="false" data-ai-dir="en-pt"
+                    data-ai-dir-label="EN → PT">
                     <span>EN → PT</span>
                     <span class="ai-dir-check" aria-hidden="true">✓</span>
                   </button>
-                  <button class="ai-dir-option" type="button" role="option" aria-selected="false" data-ai-dir="auto" data-ai-dir-label="Auto">
+                  <button class="ai-dir-option" type="button" role="option" aria-selected="false" data-ai-dir="auto"
+                    data-ai-dir-label="Auto">
                     <span>Auto (PT ↔ EN)</span>
                     <span class="ai-dir-check" aria-hidden="true">✓</span>
                   </button>
@@ -326,7 +377,8 @@
                 <svg class="ai-thinking-orbit" viewBox="0 0 20 20">
                   <circle class="ai-thinking-track" cx="10" cy="10" r="7.5" />
                   <path class="ai-thinking-arc" d="M10 2.5A7.5 7.5 0 0 1 17.5 10" />
-                  <path class="ai-thinking-star" d="M10 6.2c.35 1.85 1.95 3.45 3.8 3.8-1.85.35-3.45 1.95-3.8 3.8-.35-1.85-1.95-3.45-3.8-3.8 1.85-.35 3.45-1.95 3.8-3.8Z" />
+                  <path class="ai-thinking-star"
+                    d="M10 6.2c.35 1.85 1.95 3.45 3.8 3.8-1.85.35-3.45 1.95-3.8 3.8-.35-1.85-1.95-3.45-3.8-3.8 1.85-.35 3.45-1.95 3.8-3.8Z" />
                 </svg>
               </span>
             </div>
@@ -335,10 +387,12 @@
               <div class="ai-input-box">
                 <span class="ai-box-lang-watermark" id="aiInputLangWatermark" aria-hidden="true">PORTUGUÊS</span>
                 <textarea id="aiTranslateInput" spellcheck="false" aria-label="Texto para traduzir"></textarea>
-                <button class="ai-clear-input" id="aiTranslateClearBtn" type="button" title="Clear text" aria-label="Clear text" hidden>×</button>
+                <button class="ai-clear-input" id="aiTranslateClearBtn" type="button" title="Clear text"
+                  aria-label="Clear text" hidden>×</button>
                 <div class="ai-input-foot">
                   <span class="ai-input-hint">Enter traduz</span>
-                  <button class="ai-translate-run-btn" id="aiTranslateRunBtn" type="button" title="Traduzir (Enter)" aria-label="Traduzir">
+                  <button class="ai-translate-run-btn" id="aiTranslateRunBtn" type="button" title="Traduzir (Enter)"
+                    aria-label="Traduzir">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M5 12h14" />
                       <path d="m13 6 6 6-6 6" />
@@ -347,7 +401,8 @@
                 </div>
               </div>
 
-              <button class="ai-flip-dir-btn" id="aiFlipDirBtn" type="button" title="Inverter idiomas (PT ↔ EN)" aria-label="Inverter idiomas">
+              <button class="ai-flip-dir-btn" id="aiFlipDirBtn" type="button" title="Inverter idiomas (PT ↔ EN)"
+                aria-label="Inverter idiomas">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M8 7l4-4 4 4" />
                   <path d="M12 3v11" />
@@ -362,14 +417,17 @@
                   <span class="ai-status-dot" id="aiTranslateStatusDot"></span>
                   <span class="ai-status-text" id="aiTranslateStatusText">Instant AI Translation</span>
                   <div class="ai-output-actions">
-                    <span class="ai-translate-thinking ai-translate-thinking-side" aria-hidden="true" title="Traduzindo...">
+                    <span class="ai-translate-thinking ai-translate-thinking-side" aria-hidden="true"
+                      title="Traduzindo...">
                       <svg class="ai-thinking-orbit" viewBox="0 0 20 20">
                         <circle class="ai-thinking-track" cx="10" cy="10" r="7.5" />
                         <path class="ai-thinking-arc" d="M10 2.5A7.5 7.5 0 0 1 17.5 10" />
-                        <path class="ai-thinking-star" d="M10 6.2c.35 1.85 1.95 3.45 3.8 3.8-1.85.35-3.45 1.95-3.8 3.8-.35-1.85-1.95-3.45-3.8-3.8 1.85-.35 3.45-1.95 3.8-3.8Z" />
+                        <path class="ai-thinking-star"
+                          d="M10 6.2c.35 1.85 1.95 3.45 3.8 3.8-1.85.35-3.45 1.95-3.8 3.8-.35-1.85-1.95-3.45-3.8-3.8 1.85-.35 3.45-1.95 3.8-3.8Z" />
                       </svg>
                     </span>
-                    <button class="ai-mini-btn ai-copy-icon-btn primary" id="aiTranslateCopyBtn" type="button" title="Copy translation" aria-label="Copy translation">
+                    <button class="ai-mini-btn ai-copy-icon-btn primary" id="aiTranslateCopyBtn" type="button"
+                      title="Copy translation" aria-label="Copy translation">
                       <svg viewBox="0 0 24 24" aria-hidden="true">
                         <rect x="9" y="9" width="13" height="13" rx="2" />
                         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
@@ -388,18 +446,21 @@
 
             <form class="ai-chat-composer" id="aiChatForm">
               <div class="ai-chat-pending-list" id="aiChatPendingList" hidden></div>
-              <textarea id="aiChatInput" placeholder="Ask anything, paste images or attach files..." rows="1" spellcheck="false"></textarea>
+              <textarea id="aiChatInput" placeholder="Ask anything, paste images or attach files..." rows="1"
+                spellcheck="false"></textarea>
               <input type="file" id="aiChatFileInput" multiple hidden />
               <div class="ai-chat-composer-foot">
                 <div class="ai-chat-composer-left">
-                  <button class="ai-composer-plus-btn" id="aiChatAttachBtn" type="button" title="Attach image, PDF, audio or file" aria-label="Attach file">
+                  <button class="ai-composer-plus-btn" id="aiChatAttachBtn" type="button"
+                    title="Attach image, PDF, audio or file" aria-label="Attach file">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M12 5v14M5 12h14" />
                     </svg>
                   </button>
-                  <span class="ai-composer-model-tag">Gemini 3.5 Flash</span>
+                  <span class="ai-composer-model-tag" id="aiChatModelTag">Auto</span>
                 </div>
-                <button class="ai-chat-send" id="aiChatSendBtn" type="submit" title="Send message (Enter)" aria-label="Send message">
+                <button class="ai-chat-send" id="aiChatSendBtn" type="submit" title="Send message (Enter)"
+                  aria-label="Send message">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M5 12h14" />
                     <path d="m13 6 6 6-6 6" />
@@ -416,43 +477,308 @@
                     <strong>Conversations</strong>
                     <span class="ai-chat-sessions-count" id="aiChatSessionsCount">0</span>
                   </div>
-                  <button class="ai-head-icon-btn" id="aiHistoryModalCloseBtn" type="button" title="Close" aria-label="Close">
+                  <button class="ai-head-icon-btn" id="aiHistoryModalCloseBtn" type="button" title="Close"
+                    aria-label="Close">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M18 6 6 18M6 6l12 12" />
                     </svg>
                   </button>
                 </div>
                 <div class="ai-history-search-wrap">
-                  <input type="text" id="aiHistorySearchInput" placeholder="Filter conversations..." autocomplete="off" spellcheck="false" />
+                  <input type="text" id="aiHistorySearchInput" placeholder="Filter conversations..." autocomplete="off"
+                    spellcheck="false" />
                 </div>
                 <div class="ai-chat-sessions-list" id="aiChatSessionsList"></div>
               </div>
             </div>
           </div>
         </aside>
-        </div>
+      </div>
 
-      </section>
+    </section>
 
-      <form class="task-edit-popup" id="taskEditPopup" hidden>
+    <form class="task-edit-popup" id="taskEditPopup" hidden>
+      <label>
+        <span>Task</span>
+        <input id="tepNameInput" type="text" autocomplete="off" required />
+      </label>
+      <div class="tep-grid">
         <label>
-          <span>Task</span>
-          <input id="tepNameInput" type="text" autocomplete="off" required />
+          <span>Start</span>
+          <input id="tepStartInput" type="date" />
         </label>
-        <div class="tep-grid">
+        <label>
+          <span>End</span>
+          <input id="tepEndInput" type="date" />
+        </label>
+      </div>
+      <div class="tep-grid">
+        <label>
+          <span>Priority</span>
+          <select id="tepPriorityInput">
+            <option value="low">Low</option>
+            <option value="normal">Normal</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+          </select>
+        </label>
+        <label>
+          <span>Status</span>
+          <select id="tepStatusInput">
+            <option value="ongoing">Ongoing</option>
+            <option value="stopped">Stopped</option>
+            <option value="complete">Complete</option>
+          </select>
+        </label>
+      </div>
+      <div class="tep-footer">
+        <button class="modal-button secondary" type="button" id="tepCancelButton">Cancel</button>
+        <button class="modal-button primary" type="submit">Save</button>
+      </div>
+    </form>
+
+    <form class="new-card-popup" id="newCardForm" hidden>
+      <button class="new-card-create-button" type="submit">+ New action</button>
+      <button class="new-card-create-button" type="button" id="newTodoTableButton">+ Todo list</button>
+    </form>
+
+    <input type="file" accept="image/*" id="inlineImageInput" hidden />
+    <input type="file" accept="image/*" id="updateImageInput" hidden />
+
+    <form class="user-create-popup" id="userCreateForm" hidden>
+      <label>
+        <span>Name</span>
+        <input id="userCreateNameInput" type="text" autocomplete="off" required />
+      </label>
+      <div class="user-create-popup-footer">
+        <button class="modal-button secondary" id="userCreateCancelButton" type="button">Cancel</button>
+        <button class="modal-button primary" type="submit">Create</button>
+      </div>
+    </form>
+
+    <div class="modal-backdrop" id="settingsModal" hidden>
+      <div class="canvas-modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+        <header class="settings-header">
+          <strong id="settingsModalTitle">Settings</strong>
+          <button class="modal-icon" id="settingsCloseIcon" type="button" aria-label="Close" title="Close">×</button>
+        </header>
+        <div class="settings-layout">
+          <nav class="settings-nav" role="tablist" aria-label="Settings categories">
+            <button class="settings-nav-item active" type="button" role="tab" aria-selected="true"
+              data-settings-tab="general">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="3" />
+                <path
+                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+              <span>Geral</span>
+            </button>
+            <button class="settings-nav-item" type="button" role="tab" aria-selected="false"
+              data-settings-tab="appearance">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 3a9 9 0 0 0 0 18V3z" />
+              </svg>
+              <span>Aparência</span>
+            </button>
+            <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="canvas">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="4" width="6" height="5" rx="1.4" />
+                <rect x="15" y="15" width="6" height="5" rx="1.4" />
+                <path d="M9 6.5h4a2 2 0 0 1 2 2v6.5" />
+              </svg>
+              <span>Canvas</span>
+            </button>
+            <button class="settings-nav-item" type="button" role="tab" aria-selected="false"
+              data-settings-tab="translator">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m5 8 6 6" />
+                <path d="m4 14 6-6 2-3" />
+                <path d="M2 5h12" />
+                <path d="M7 2h1" />
+                <path d="m22 22-5-10-5 10" />
+                <path d="M14 18h6" />
+              </svg>
+              <span>Tradutor</span>
+            </button>
+          </nav>
+
+          <div class="settings-content">
+            <section class="settings-pane active" data-settings-pane="general">
+              <h4 class="settings-pane-title">Geral</h4>
+              <label class="settings-row settings-toggle">
+                <div class="settings-row-copy">
+                  <span class="settings-label">Iniciar com o Windows</span>
+                  <small class="settings-desc">Abre automaticamente em segundo plano ao ligar o PC</small>
+                </div>
+                <input type="checkbox" id="settingsAutostartInput" />
+                <span class="settings-switch" aria-hidden="true"></span>
+              </label>
+              <div class="settings-row">
+                <div class="settings-row-copy">
+                  <span class="settings-label">Versão instalada</span>
+                  <small class="settings-desc">TODOCompanion</small>
+                </div>
+                <span class="settings-value" id="settingsVersionValue">—</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-copy">
+                  <span class="settings-label">Atualizações</span>
+                  <small class="settings-desc" id="settingsUpdateStatus">Verifica automaticamente ao abrir o app</small>
+                </div>
+                <button class="settings-action-btn" id="settingsCheckUpdateButton" type="button">Verificar
+                  agora</button>
+              </div>
+            </section>
+
+            <section class="settings-pane" data-settings-pane="appearance" hidden>
+              <h4 class="settings-pane-title">Aparência</h4>
+              <label class="settings-row">
+                <div class="settings-row-copy">
+                  <span class="settings-label">Tema</span>
+                  <small class="settings-desc">Esquema de cores da interface</small>
+                </div>
+                <select class="settings-select" id="settingsThemeInput">
+                  <option value="claude-dark">Dark</option>
+                  <option value="light-claude">White</option>
+                  <option value="dracula">Dracula</option>
+                </select>
+              </label>
+              <label class="settings-row">
+                <div class="settings-row-copy">
+                  <span class="settings-label">Tamanho da fonte</span>
+                  <small class="settings-desc">Texto interno dos cards</small>
+                </div>
+                <div class="settings-slider-control">
+                  <input type="range" class="settings-range-slider" id="settingsCardFontSizeInput" min="10" max="36"
+                    step="1" value="14" aria-label="Tamanho da fonte dos cards" />
+                  <span class="settings-range-value" id="settingsCardFontSizeValue">14px</span>
+                </div>
+              </label>
+            </section>
+
+            <section class="settings-pane" data-settings-pane="canvas" hidden>
+              <h4 class="settings-pane-title">Canvas</h4>
+              <label class="settings-row settings-toggle">
+                <div class="settings-row-copy">
+                  <span class="settings-label">Linhas retas nas conexões</span>
+                  <small class="settings-desc">Usa ângulos retos em vez de curvas suaves</small>
+                </div>
+                <input type="checkbox" id="settingsLinkStyleInput" />
+                <span class="settings-switch" aria-hidden="true"></span>
+              </label>
+              <label class="settings-row settings-toggle">
+                <div class="settings-row-copy">
+                  <span class="settings-label">Mostrar setas nas conexões</span>
+                  <small class="settings-desc">Exibe a ponta direcional ao ligar dois cards</small>
+                </div>
+                <input type="checkbox" id="settingsLinkArrowsInput" />
+                <span class="settings-switch" aria-hidden="true"></span>
+              </label>
+            </section>
+
+            <section class="settings-pane" data-settings-pane="translator" hidden>
+              <h4 class="settings-pane-title">Tradutor</h4>
+              <label class="settings-row settings-toggle">
+                <div class="settings-row-copy">
+                  <span class="settings-label">Tradução simultânea</span>
+                  <small class="settings-desc">Traduz automaticamente 100ms após parar de editar (sem precisar clicar no
+                    botão)</small>
+                </div>
+                <input type="checkbox" id="settingsTranslatorAutoInput" />
+                <span class="settings-switch" aria-hidden="true"></span>
+              </label>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="confirmDeleteModal" hidden>
+      <form class="canvas-modal confirm-modal" id="confirmDeleteForm">
+        <header>
+          <strong id="confirmDeleteTitle">Delete</strong>
+        </header>
+        <p class="confirm-text" id="confirmDeleteMessage">This action cannot be undone.</p>
+        <label>
+          <span>To confirm, type <code class="confirm-code" id="confirmDeleteCode">XYZ</code></span>
+          <input id="confirmDeleteInput" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"
+            maxlength="3" />
+        </label>
+        <footer>
+          <button class="modal-button secondary" id="confirmDeleteCancel" type="button">Cancel</button>
+          <button class="modal-button primary" id="confirmDeleteOk" type="submit" disabled>Delete</button>
+        </footer>
+      </form>
+    </div>
+
+    <div class="modal-backdrop" id="searchModal" hidden>
+      <section class="canvas-modal search-modal" role="dialog" aria-modal="true" aria-labelledby="searchModalTitle">
+        <header>
+          <strong id="searchModalTitle">Search</strong>
+          <button class="modal-icon" id="searchCloseIcon" type="button" aria-label="Close" title="Close">x</button>
+        </header>
+        <label class="search-field">
+          <span>Task or action</span>
+          <input id="searchInput" type="search" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="search-results" id="searchResults"></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="clipboardAttachModal" hidden>
+      <section class="canvas-modal clipboard-attach-modal" role="dialog" aria-modal="true"
+        aria-labelledby="clipboardAttachTitle">
+        <header>
+          <strong id="clipboardAttachTitle">Attach from clipboard</strong>
+          <button class="modal-icon" id="clipboardAttachClose" type="button" aria-label="Close" title="Close">x</button>
+        </header>
+        <div class="clipboard-attach-preview" id="clipboardAttachPreview"></div>
+        <div class="clipboard-attach-info">
+          <label class="clipboard-attach-name-field">
+            <span>File name</span>
+            <div class="clipboard-attach-name-control">
+              <input id="clipboardAttachNameInput" type="text" autocomplete="off" spellcheck="false" maxlength="140" />
+              <span class="clipboard-attach-extension" id="clipboardAttachExtension"></span>
+            </div>
+          </label>
+          <span id="clipboardAttachMeta"></span>
+        </div>
+        <footer>
+          <button class="modal-button secondary" id="clipboardAttachCancel" type="button">Cancel</button>
+          <button class="modal-button primary" id="clipboardAttachConfirm" type="button">Attach</button>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="canvasModal" hidden>
+      <form class="canvas-modal" id="canvasForm">
+        <header>
+          <strong id="canvasModalTitle">New canvas</strong>
+          <button class="modal-icon" id="canvasCancelIcon" type="button" aria-label="Close" title="Close">x</button>
+        </header>
+        <label class="modal-owner-field">
+          <span id="canvasOwnerLabel">User</span>
+          <input id="canvasOwnerInput" type="text" autocomplete="off" />
+        </label>
+        <label class="modal-task-field">
+          <span>Task</span>
+          <input id="canvasNameInput" type="text" autocomplete="off" required />
+        </label>
+        <div class="modal-grid modal-task-options">
           <label>
             <span>Start</span>
-            <input id="tepStartInput" type="date" />
+            <input id="canvasStartInput" type="date" />
           </label>
           <label>
             <span>End</span>
-            <input id="tepEndInput" type="date" />
+            <input id="canvasEndInput" type="date" />
           </label>
         </div>
-        <div class="tep-grid">
+        <div class="modal-grid modal-task-options">
           <label>
             <span>Priority</span>
-            <select id="tepPriorityInput">
+            <select id="canvasPriorityInput">
               <option value="low">Low</option>
               <option value="normal">Normal</option>
               <option value="high">High</option>
@@ -461,282 +787,58 @@
           </label>
           <label>
             <span>Status</span>
-            <select id="tepStatusInput">
+            <select id="canvasStatusInput">
               <option value="ongoing">Ongoing</option>
               <option value="stopped">Stopped</option>
               <option value="complete">Complete</option>
             </select>
           </label>
         </div>
-        <div class="tep-footer">
-          <button class="modal-button secondary" type="button" id="tepCancelButton">Cancel</button>
+        <footer>
+          <button class="modal-button secondary" id="canvasCancelButton" type="button">Cancel</button>
           <button class="modal-button primary" type="submit">Save</button>
-        </div>
+        </footer>
       </form>
-
-      <form class="new-card-popup" id="newCardForm" hidden>
-        <button class="new-card-create-button" type="submit">+ New action</button>
-        <button class="new-card-create-button" type="button" id="newTodoTableButton">+ Todo list</button>
-      </form>
-
-      <input type="file" accept="image/*" id="inlineImageInput" hidden />
-      <input type="file" accept="image/*" id="updateImageInput" hidden />
-
-      <form class="user-create-popup" id="userCreateForm" hidden>
-        <label>
-          <span>Name</span>
-          <input id="userCreateNameInput" type="text" autocomplete="off" required />
-        </label>
-        <div class="user-create-popup-footer">
-          <button class="modal-button secondary" id="userCreateCancelButton" type="button">Cancel</button>
-          <button class="modal-button primary" type="submit">Create</button>
-        </div>
-      </form>
-
-      <div class="modal-backdrop" id="settingsModal" hidden>
-        <div class="canvas-modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
-          <header class="settings-header">
-            <strong id="settingsModalTitle">Settings</strong>
-            <button class="modal-icon" id="settingsCloseIcon" type="button" aria-label="Close" title="Close">×</button>
-          </header>
-          <div class="settings-layout">
-            <nav class="settings-nav" role="tablist" aria-label="Settings categories">
-              <button class="settings-nav-item active" type="button" role="tab" aria-selected="true" data-settings-tab="general">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                <span>Geral</span>
-              </button>
-              <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="appearance">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18V3z"/></svg>
-                <span>Aparência</span>
-              </button>
-              <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="canvas">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="6" height="5" rx="1.4"/><rect x="15" y="15" width="6" height="5" rx="1.4"/><path d="M9 6.5h4a2 2 0 0 1 2 2v6.5"/></svg>
-                <span>Canvas</span>
-              </button>
-              <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="translator">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
-                <span>Tradutor</span>
-              </button>
-            </nav>
-
-            <div class="settings-content">
-              <section class="settings-pane active" data-settings-pane="general">
-                <h4 class="settings-pane-title">Geral</h4>
-                <label class="settings-row settings-toggle">
-                  <div class="settings-row-copy">
-                    <span class="settings-label">Iniciar com o Windows</span>
-                    <small class="settings-desc">Abre automaticamente em segundo plano ao ligar o PC</small>
-                  </div>
-                  <input type="checkbox" id="settingsAutostartInput" />
-                  <span class="settings-switch" aria-hidden="true"></span>
-                </label>
-                <div class="settings-row">
-                  <div class="settings-row-copy">
-                    <span class="settings-label">Versão instalada</span>
-                    <small class="settings-desc">TODOCompanion</small>
-                  </div>
-                  <span class="settings-value" id="settingsVersionValue">—</span>
-                </div>
-                <div class="settings-row">
-                  <div class="settings-row-copy">
-                    <span class="settings-label">Atualizações</span>
-                    <small class="settings-desc" id="settingsUpdateStatus">Verifica automaticamente ao abrir o app</small>
-                  </div>
-                  <button class="settings-action-btn" id="settingsCheckUpdateButton" type="button">Verificar agora</button>
-                </div>
-              </section>
-
-              <section class="settings-pane" data-settings-pane="appearance" hidden>
-                <h4 class="settings-pane-title">Aparência</h4>
-                <label class="settings-row">
-                  <div class="settings-row-copy">
-                    <span class="settings-label">Tema</span>
-                    <small class="settings-desc">Esquema de cores da interface</small>
-                  </div>
-                  <select class="settings-select" id="settingsThemeInput">
-                    <option value="claude-dark">Dark</option>
-                    <option value="light-claude">White</option>
-                    <option value="dracula">Dracula</option>
-                  </select>
-                </label>
-                <label class="settings-row">
-                  <div class="settings-row-copy">
-                    <span class="settings-label">Tamanho da fonte</span>
-                    <small class="settings-desc">Texto interno dos cards</small>
-                  </div>
-                  <div class="settings-slider-control">
-                    <input type="range" class="settings-range-slider" id="settingsCardFontSizeInput" min="10" max="36" step="1" value="14" aria-label="Tamanho da fonte dos cards" />
-                    <span class="settings-range-value" id="settingsCardFontSizeValue">14px</span>
-                  </div>
-                </label>
-              </section>
-
-              <section class="settings-pane" data-settings-pane="canvas" hidden>
-                <h4 class="settings-pane-title">Canvas</h4>
-                <label class="settings-row settings-toggle">
-                  <div class="settings-row-copy">
-                    <span class="settings-label">Linhas retas nas conexões</span>
-                    <small class="settings-desc">Usa ângulos retos em vez de curvas suaves</small>
-                  </div>
-                  <input type="checkbox" id="settingsLinkStyleInput" />
-                  <span class="settings-switch" aria-hidden="true"></span>
-                </label>
-                <label class="settings-row settings-toggle">
-                  <div class="settings-row-copy">
-                    <span class="settings-label">Mostrar setas nas conexões</span>
-                    <small class="settings-desc">Exibe a ponta direcional ao ligar dois cards</small>
-                  </div>
-                  <input type="checkbox" id="settingsLinkArrowsInput" />
-                  <span class="settings-switch" aria-hidden="true"></span>
-                </label>
-              </section>
-
-              <section class="settings-pane" data-settings-pane="translator" hidden>
-                <h4 class="settings-pane-title">Tradutor</h4>
-                <label class="settings-row settings-toggle">
-                  <div class="settings-row-copy">
-                    <span class="settings-label">Tradução simultânea</span>
-                    <small class="settings-desc">Traduz automaticamente 100ms após parar de editar (sem precisar clicar no botão)</small>
-                  </div>
-                  <input type="checkbox" id="settingsTranslatorAutoInput" />
-                  <span class="settings-switch" aria-hidden="true"></span>
-                </label>
-              </section>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="modal-backdrop" id="confirmDeleteModal" hidden>
-        <form class="canvas-modal confirm-modal" id="confirmDeleteForm">
-          <header>
-            <strong id="confirmDeleteTitle">Delete</strong>
-          </header>
-          <p class="confirm-text" id="confirmDeleteMessage">This action cannot be undone.</p>
-          <label>
-            <span>To confirm, type <code class="confirm-code" id="confirmDeleteCode">XYZ</code></span>
-            <input id="confirmDeleteInput" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="3" />
-          </label>
-          <footer>
-            <button class="modal-button secondary" id="confirmDeleteCancel" type="button">Cancel</button>
-            <button class="modal-button primary" id="confirmDeleteOk" type="submit" disabled>Delete</button>
-          </footer>
-        </form>
-      </div>
-
-      <div class="modal-backdrop" id="searchModal" hidden>
-        <section class="canvas-modal search-modal" role="dialog" aria-modal="true" aria-labelledby="searchModalTitle">
-          <header>
-            <strong id="searchModalTitle">Search</strong>
-            <button class="modal-icon" id="searchCloseIcon" type="button" aria-label="Close" title="Close">x</button>
-          </header>
-          <label class="search-field">
-            <span>Task or action</span>
-            <input id="searchInput" type="search" autocomplete="off" spellcheck="false" />
-          </label>
-          <div class="search-results" id="searchResults"></div>
-        </section>
-      </div>
-
-      <div class="modal-backdrop" id="clipboardAttachModal" hidden>
-        <section class="canvas-modal clipboard-attach-modal" role="dialog" aria-modal="true" aria-labelledby="clipboardAttachTitle">
-          <header>
-            <strong id="clipboardAttachTitle">Attach from clipboard</strong>
-            <button class="modal-icon" id="clipboardAttachClose" type="button" aria-label="Close" title="Close">x</button>
-          </header>
-          <div class="clipboard-attach-preview" id="clipboardAttachPreview"></div>
-          <div class="clipboard-attach-info">
-            <label class="clipboard-attach-name-field">
-              <span>File name</span>
-              <div class="clipboard-attach-name-control">
-                <input id="clipboardAttachNameInput" type="text" autocomplete="off" spellcheck="false" maxlength="140" />
-                <span class="clipboard-attach-extension" id="clipboardAttachExtension"></span>
-              </div>
-            </label>
-            <span id="clipboardAttachMeta"></span>
-          </div>
-          <footer>
-            <button class="modal-button secondary" id="clipboardAttachCancel" type="button">Cancel</button>
-            <button class="modal-button primary" id="clipboardAttachConfirm" type="button">Attach</button>
-          </footer>
-        </section>
-      </div>
-
-      <div class="modal-backdrop" id="canvasModal" hidden>
-        <form class="canvas-modal" id="canvasForm">
-          <header>
-            <strong id="canvasModalTitle">New canvas</strong>
-            <button class="modal-icon" id="canvasCancelIcon" type="button" aria-label="Close" title="Close">x</button>
-          </header>
-          <label class="modal-owner-field">
-            <span id="canvasOwnerLabel">User</span>
-            <input id="canvasOwnerInput" type="text" autocomplete="off" />
-          </label>
-          <label class="modal-task-field">
-            <span>Task</span>
-            <input id="canvasNameInput" type="text" autocomplete="off" required />
-          </label>
-          <div class="modal-grid modal-task-options">
-            <label>
-              <span>Start</span>
-              <input id="canvasStartInput" type="date" />
-            </label>
-            <label>
-              <span>End</span>
-              <input id="canvasEndInput" type="date" />
-            </label>
-          </div>
-          <div class="modal-grid modal-task-options">
-            <label>
-              <span>Priority</span>
-              <select id="canvasPriorityInput">
-                <option value="low">Low</option>
-                <option value="normal">Normal</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
-              </select>
-            </label>
-            <label>
-              <span>Status</span>
-              <select id="canvasStatusInput">
-                <option value="ongoing">Ongoing</option>
-                <option value="stopped">Stopped</option>
-                <option value="complete">Complete</option>
-              </select>
-            </label>
-          </div>
-          <footer>
-            <button class="modal-button secondary" id="canvasCancelButton" type="button">Cancel</button>
-            <button class="modal-button primary" type="submit">Save</button>
-          </footer>
-        </form>
-      </div>
-
-      <!-- Modal de Imagem em Tela Cheia com Zoom e Pan -->
-      <div class="modal-backdrop image-fullscreen-modal" id="imageFullscreenModal" hidden>
-        <div class="image-fullscreen-bar">
-          <div class="image-fullscreen-zoom-group">
-            <button class="image-fullscreen-btn" id="imageFullscreenZoomOut" type="button" aria-label="Diminuir zoom" title="Diminuir zoom (-)">
-              <svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
-            </button>
-            <span class="image-fullscreen-zoom-badge" id="imageFullscreenZoomBadge">100%</span>
-            <button class="image-fullscreen-btn" id="imageFullscreenZoomIn" type="button" aria-label="Aumentar zoom" title="Aumentar zoom (+)">
-              <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-            </button>
-            <button class="image-fullscreen-btn" id="imageFullscreenZoomReset" type="button" aria-label="Ajustar à tela" title="Ajustar à tela (1:1)">
-              <svg class="icon" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
-            </button>
-          </div>
-          <button class="image-fullscreen-close" id="imageFullscreenClose" type="button" aria-label="Fechar" title="Fechar (Esc)">
-            <svg class="icon" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
-          </button>
-        </div>
-        <div class="image-fullscreen-canvas" id="imageFullscreenCanvas">
-          <img class="image-fullscreen-img" id="imageFullscreenImg" src="" alt="Tela cheia" draggable="false" />
-        </div>
-      </div>
     </div>
 
-    <script type="module" src="./main.js"></script>
-  </body>
+    <!-- Modal de Imagem em Tela Cheia com Zoom e Pan -->
+    <div class="modal-backdrop image-fullscreen-modal" id="imageFullscreenModal" hidden>
+      <div class="image-fullscreen-bar">
+        <div class="image-fullscreen-zoom-group">
+          <button class="image-fullscreen-btn" id="imageFullscreenZoomOut" type="button" aria-label="Diminuir zoom"
+            title="Diminuir zoom (-)">
+            <svg class="icon" viewBox="0 0 24 24">
+              <path d="M5 12h14" />
+            </svg>
+          </button>
+          <span class="image-fullscreen-zoom-badge" id="imageFullscreenZoomBadge">100%</span>
+          <button class="image-fullscreen-btn" id="imageFullscreenZoomIn" type="button" aria-label="Aumentar zoom"
+            title="Aumentar zoom (+)">
+            <svg class="icon" viewBox="0 0 24 24">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+          <button class="image-fullscreen-btn" id="imageFullscreenZoomReset" type="button" aria-label="Ajustar à tela"
+            title="Ajustar à tela (1:1)">
+            <svg class="icon" viewBox="0 0 24 24">
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+            </svg>
+          </button>
+        </div>
+        <button class="image-fullscreen-close" id="imageFullscreenClose" type="button" aria-label="Fechar"
+          title="Fechar (Esc)">
+          <svg class="icon" viewBox="0 0 24 24">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="image-fullscreen-canvas" id="imageFullscreenCanvas">
+        <img class="image-fullscreen-img" id="imageFullscreenImg" src="" alt="Tela cheia" draggable="false" />
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+
 </html>
