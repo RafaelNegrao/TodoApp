@@ -9427,5 +9427,5 @@ async function fallbackBrowserTranslate(text, formality, direction) {
     })
   });
   const data = await resp.json();
-  return data?.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("\n") || "";
+  return (data?.candidates?.[0]?.content?.parts?.map(p => (p.thought ? "" : p.text || "")).join("") || "").trim();
 }

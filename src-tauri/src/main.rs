@@ -383,22 +383,20 @@ fn execute_gemini_fast_payload(
                     let body: serde_json::Value = resp
                         .into_json()
                         .map_err(|e| format!("Resposta invalida do Gemini: {e}"))?;
-                    let mut text_parts: Vec<String> = Vec::new();
+                    let mut combined = String::new();
                     if let Some(parts) = body["candidates"][0]["content"]["parts"].as_array() {
                         for p in parts {
                             if p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false) {
                                 continue;
                             }
                             if let Some(t) = p["text"].as_str() {
-                                let trimmed = t.trim();
-                                if !trimmed.is_empty() {
-                                    text_parts.push(trimmed.to_string());
-                                }
+                                combined.push_str(t);
                             }
                         }
                     }
-                    if !text_parts.is_empty() {
-                        return Ok(text_parts.join("\n"));
+                    let final_text = combined.trim();
+                    if !final_text.is_empty() {
+                        return Ok(final_text.to_string());
                     }
                 }
                 Err(ureq::Error::Status(code, resp)) => {
@@ -2323,18 +2321,18 @@ async fn transcribe_audio_gemini(
                         let body: serde_json::Value = resp
                             .into_json()
                             .map_err(|e| format!("Resposta invalida do Gemini: {e}"))?;
-                        let mut text_parts: Vec<String> = Vec::new();
+                        let mut combined = String::new();
                         if let Some(parts) = body["candidates"][0]["content"]["parts"].as_array() {
                             for p in parts {
+                                if p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                    continue;
+                                }
                                 if let Some(t) = p["text"].as_str() {
-                                    let trimmed = t.trim();
-                                    if !trimmed.is_empty() {
-                                        text_parts.push(trimmed.to_string());
-                                    }
+                                    combined.push_str(t);
                                 }
                             }
                         }
-                        return Ok(text_parts.join("\n"));
+                        return Ok(combined.trim().to_string());
                     }
                     Err(ureq::Error::Status(code, resp)) => {
                         let err_body = resp.into_string().unwrap_or_default();

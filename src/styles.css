@@ -5639,10 +5639,13 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   flex: 1 1 auto;
   padding: 11px 12px;
   overflow-y: auto;
+  overflow-x: hidden;
   color: var(--text-strong);
   font-size: 13.5px;
   line-height: 1.5;
   white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: break-word;
   user-select: text;
 }
 
