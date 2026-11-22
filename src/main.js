@@ -1884,7 +1884,9 @@ function renderLinks() {
     // degrau curto antes da entrada.
     const end = getPortPoint(to, toPort);
 
-    const linkObstacles = obstacles.filter(o => o.id !== link.from && o.id !== link.to);
+    // Inclui tambem os proprios cards de origem e destino nos obstaculos para que a linha
+    // nunca atravesse por baixo do proprio card (ex.: quando os cards estao empilhados verticalmente).
+    const linkObstacles = obstacles;
     const arrowTip = insetLinkEndpoint(end, toPort, LINK_ARROW_END_GAP);
     const lineEnd = showArrows ? getArrowBasePoint(arrowTip, toPort, LINK_ARROW_LENGTH) : end;
     const linkStatus = normalizeStatus(to.status);

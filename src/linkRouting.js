@@ -23,7 +23,11 @@ export function routeLinkPath({ start, end, startPort = "out", endPort = "in", o
   const nearY2 = Math.max(start.y, end.y) + pad;
   const near = obstacles.filter(o => o.x2 > nearX1 && o.x1 < nearX2 && o.y2 > nearY1 && o.y1 < nearY2);
 
-  let waypoints = findOrthogonalRoute(startStub, endStub, near, margin);
+  // Garante que nenhum obstaculo engula o ponto de partida/chegada (startStub/endStub)
+  // caso dois cards estejam muito proximos, evitando que o A* falhe e caia no fallback reto.
+  const safeObstacles = near.map(o => clampObstacleAroundEndpoints(o, startStub, endStub));
+
+  let waypoints = findOrthogonalRoute(startStub, endStub, safeObstacles, margin);
   if (!waypoints) {
     waypoints = simpleElbow(startStub, endStub, startPort, endPort);
   }
@@ -124,6 +128,26 @@ function findOrthogonalRoute(s, t, obstacles, margin) {
   }
   path.reverse();
   return path;
+}
+
+// Se um ponto stub cair estritamente dentro de um obstaculo inflado (ex.: gap < 2*margin),
+// recua apenas a face mais proxima desse obstaculo ate a borda do stub para liberar o canal.
+function clampObstacleAroundEndpoints(o, s, t) {
+  let { x1, y1, x2, y2 } = o;
+  for (const p of [s, t]) {
+    if (p.x > x1 + EPS && p.x < x2 - EPS && p.y > y1 + EPS && p.y < y2 - EPS) {
+      const dLeft = p.x - x1;
+      const dRight = x2 - p.x;
+      const dTop = p.y - y1;
+      const dBottom = y2 - p.y;
+      const minD = Math.min(dLeft, dRight, dTop, dBottom);
+      if (minD === dLeft) x1 = p.x;
+      else if (minD === dRight) x2 = p.x;
+      else if (minD === dTop) y1 = p.y;
+      else y2 = p.y;
+    }
+  }
+  return { x1, y1, x2, y2 };
 }
 
 // Um segmento axis-aligned esta bloqueado se atravessa o INTERIOR de algum
