@@ -3,7 +3,7 @@ import { routeLinkPath } from "./linkRouting.js";
 const STORAGE_KEY = "todocompanion.state.v4";
 const LEGACY_STORAGE_KEYS = ["todocompanion.state.v3", "todocompanion.state.v2", "todocompanion.state.v1"];
 const MIN_ZOOM = 0.15;
-const MAX_ZOOM = 1.8;
+const MAX_ZOOM = 5.0;
 // Distancia (em pixels de tela) dentro da qual um card "gruda" no alinhamento
 // de um card conectado, deixando a linha reta. Convertido para coords do canvas
 // dividindo pelo zoom para o "puxao" parecer igual em qualquer nivel de zoom.
@@ -37,6 +37,8 @@ const CRITICALITY_META = [
 
 const icons = {
   plus: `<svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>`,
+  minus: `<svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/></svg>`,
+  fullscreen: `<svg class="icon" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>`,
   list: `<svg class="icon" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>`,
   link: `<svg class="icon" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.07 0l2.12-2.12a5 5 0 0 0-7.07-7.07L11 4.93"/><path d="M14 11a5 5 0 0 0-7.07 0L4.81 13.12a5 5 0 0 0 7.07 7.07L13 19.07"/></svg>`,
   trash: `<svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg>`,
@@ -54,7 +56,7 @@ const icons = {
   image: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>`,
   externalLink: `<svg class="icon" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>`,
   info: `<svg class="icon" viewBox="0 0 24 24"><path d="M12 18v-8"/><path d="M12 6h.01"/></svg>`,
-  grip: `<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>`,
+  grip: `<svg class="card-drag-icon" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="5" cy="19" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="19" r="1.6" fill="currentColor" stroke="none"/></svg>`,
   sort: `<svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h5"/></svg>`,
   record: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.6" fill="currentColor" stroke="none"/></svg>`,
   folder: `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`,
@@ -68,6 +70,7 @@ const icons = {
   formatListNumbered: `<svg class="icon" viewBox="0 0 24 24"><path d="M10 6h11M10 12h11M10 18h11"/><text x="3" y="7" font-size="6" fill="currentColor">1</text><text x="3" y="13" font-size="6" fill="currentColor">2</text><text x="3" y="19" font-size="6" fill="currentColor">3</text></svg>`,
   checkbox: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   formatClear: `<svg class="icon" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m13.3 9 5.5 5.5"/></svg>`,
+  micAi: `<svg class="icon" viewBox="0 0 24 24"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/><path d="M5 16l.6 1.4L7 18l-1.4.6L5 20l-.6-1.4L3 18l1.4-.6L5 16z"/></svg>`,
   menu: `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`
 };
 
@@ -171,8 +174,6 @@ let dockDragId = null;
 let dockPointerDrag = null;
 let tabDragId = null;
 let tabPointerDrag = null;
-let lineageHoverTimer = null;
-let lineageState = null;
 const pendingCardPop = new Set();
 // Altura real (renderizada) de cada card, medida em renderNodes. Cards de altura
 // automatica (node.h === 0) variam conforme o conteudo; usar essa medida garante
@@ -205,6 +206,7 @@ async function init() {
   initUsersRail();
   initTasksSidebar();
   initTasksStatusFilter();
+  initImageFullscreenModal();
   setupFileDrop().catch(err => console.warn("Drag-and-drop indisponivel", err));
 
   maximizeAppButton?.addEventListener("click", toggleMaximizeWindow);
@@ -234,7 +236,13 @@ async function init() {
   centerCanvasButton.addEventListener("click", centerCanvasOnTasks);
   organizeCanvasButton.addEventListener("click", organizeCanvasCards);
   recordButton.addEventListener("click", toggleScreenRecording);
-  document.querySelector("#recordingIndicatorStop")?.addEventListener("click", stopScreenRecording);
+  document.querySelector("#recordingIndicatorStop")?.addEventListener("click", () => {
+    if (transcribeState) {
+      stopAudioTranscription();
+    } else {
+      stopScreenRecording();
+    }
+  });
   canvasAttachButton.addEventListener("pointerdown", () => preserveAttachmentReferenceTarget());
   canvasAttachButton.addEventListener("click", handleAttachButtonClick);
   canvasAttachInput.addEventListener("change", handleAttachInputChange);
@@ -275,10 +283,10 @@ async function init() {
   boardShell.addEventListener("wheel", handleZoom, { passive: false });
   boardShell.addEventListener("pointerdown", handleBoardPointerDown);
   boardShell.addEventListener("contextmenu", handleBoardContextMenu);
-  window.onerror = function(msg, url, line, col, error) {
+  window.onerror = function (msg, url, line, col, error) {
     alert("ERRO: " + msg + "\nLinha: " + line + "\n" + (error ? error.stack : ""));
   };
-  
+
   newCardForm.addEventListener("submit", saveNewCard);
   updateImageInput?.addEventListener("change", handleUpdateImage);
   inlineImageInput?.addEventListener("change", event => {
@@ -293,7 +301,8 @@ async function init() {
       document.execCommand("insertHTML", false, "<br>&#8203;");
       setNodeContent(window.inlineImageNodeTarget, serializeEditableContent(window.inlineImageEditorTarget));
       saveState();
-      
+      renderNodes();
+
       window.inlineImageEditorTarget = null;
       window.inlineImageNodeTarget = null;
     };
@@ -663,9 +672,13 @@ function normalizeNode(node) {
   const body = node.body || "";
   const title = typeof node.title === "string" ? node.title : "";
   const GRID = 24;
+  const HEIGHT_GRID = GRID * 2;
+  const isImage = node.type === "image";
+  const minW = isImage ? 72 : 288;
+  const minH = isImage ? 48 : 96;
   const rawX = Number(node.x) || 0;
   const rawY = Number(node.y) || 0;
-  const rawW = Math.max(288, Number(node.w) || 288);
+  const rawW = Math.max(minW, Number(node.w) || minW);
   const rawH = Number(node.h) || 0;
 
   const normalized = {
@@ -676,7 +689,7 @@ function normalizeNode(node) {
     x: Math.round(rawX / GRID) * GRID,
     y: Math.round(rawY / GRID) * GRID,
     w: Math.round(rawW / GRID) * GRID,
-    h: rawH > 0 ? Math.round(rawH / GRID) * GRID : 0
+    h: rawH > 0 ? Math.max(minH, Math.round(rawH / HEIGHT_GRID) * HEIGHT_GRID) : 144
   };
   if (node.createdAt) normalized.createdAt = node.createdAt;
   if (node.type) normalized.type = node.type;
@@ -858,7 +871,6 @@ function clearSelection() {
   selectedLinkId = null;
   pendingLink = null;
   linkDragState = null;
-  clearLineagePreview(false);
 }
 
 function render() {
@@ -1095,6 +1107,7 @@ function startTabDrag(event, userId) {
     }
 
     positionTabDragGhost(moveEvent);
+    autoScrollUsersRail(moveEvent.clientY);
     const beforeId = getTabInsertionId(moveEvent.clientY);
     moveUserBefore(userId, beforeId);
   };
@@ -1154,18 +1167,74 @@ function getTabInsertionId(clientY) {
   return null;
 }
 
+function autoScrollUsersRail(clientY) {
+  const rect = usersRailList.getBoundingClientRect();
+  const threshold = 36;
+
+  if (clientY < rect.top + threshold) {
+    usersRailList.scrollTop -= 16;
+  } else if (clientY > rect.bottom - threshold) {
+    usersRailList.scrollTop += 16;
+  }
+}
+
+function captureUserRailRects() {
+  const rects = new Map();
+  usersRailList.querySelectorAll(".user-rail-item").forEach(tab => {
+    const rect = tab.getBoundingClientRect();
+    rects.set(tab.dataset.userId, { left: rect.left, top: rect.top });
+  });
+  return rects;
+}
+
+function animateUserRailReorder(previousRects) {
+  requestAnimationFrame(() => {
+    usersRailList.querySelectorAll(".user-rail-item").forEach(tab => {
+      if (tab.dataset.userId === tabDragId) {
+        return;
+      }
+
+      const previous = previousRects.get(tab.dataset.userId);
+      if (!previous) {
+        return;
+      }
+
+      const current = tab.getBoundingClientRect();
+      const dx = previous.left - current.left;
+      const dy = previous.top - current.top;
+      if (!dx && !dy) {
+        return;
+      }
+
+      tab.animate(
+        [
+          { transform: `translate(${dx}px, ${dy}px)` },
+          { transform: "translate(0, 0)" }
+        ],
+        {
+          duration: 230,
+          easing: "cubic-bezier(0.2, 0.8, 0.2, 1)"
+        }
+      );
+    });
+  });
+}
+
 function moveUserBefore(sourceId, beforeId) {
   if (!sourceId || sourceId === beforeId) return;
   const fromIndex = state.users.findIndex(u => u.id === sourceId);
   if (fromIndex < 0) return;
   const currentBeforeId = state.users[fromIndex + 1]?.id || null;
   if (currentBeforeId === beforeId) return;
+
+  const previousRects = captureUserRailRects();
   const [item] = state.users.splice(fromIndex, 1);
   const toIndex = beforeId ? state.users.findIndex(u => u.id === beforeId) : state.users.length;
   const insertionIndex = toIndex < 0 ? state.users.length : toIndex;
   state.users.splice(insertionIndex, 0, item);
   saveState();
   renderUsersRail();
+  animateUserRailReorder(previousRects);
 }
 
 let confirmDeleteResolve = null;
@@ -1290,8 +1359,6 @@ function renderNodes() {
   const board = activeBoard();
   nodesLayer.innerHTML = "";
   if (!board) return;
-  const lineageNodeIds = lineageState?.nodeIds || null;
-  boardShell.classList.toggle("lineage-mode", Boolean(lineageState));
 
   board.nodes.forEach(node => {
     const status = normalizeStatus(node.status);
@@ -1307,7 +1374,6 @@ function renderNodes() {
       `status-${status}`,
       status === "complete" ? "done" : "",
       node.id === selectedNodeId ? "selected" : "",
-      lineageNodeIds ? (lineageNodeIds.has(node.id) ? "lineage-active-node" : "lineage-dim") : "",
       dragState?.nodeId === node.id ? "dragging" : "",
       justCreated ? "just-created" : "",
       hasFixedHeight ? "fixed-height" : "",
@@ -1316,87 +1382,102 @@ function renderNodes() {
     ].filter(Boolean).join(" ");
     card.dataset.id = node.id;
     card.dataset.status = status;
+    const minW = node.type === "image" ? 72 : 288;
+    const minH = node.type === "image" ? 48 : 96;
+    const GRID = 24;
+    const HEIGHT_GRID = GRID * 2;
+    node.x = Math.round((Number(node.x) || 0) / GRID) * GRID;
+    node.y = Math.round((Number(node.y) || 0) / GRID) * GRID;
+    node.w = Math.max(minW, Math.round((Number(node.w) || minW) / GRID) * GRID);
+    node.h = Math.max(minH, Math.round((Number(node.h) || 144) / HEIGHT_GRID) * HEIGHT_GRID);
+
     card.style.left = `${node.x}px`;
     card.style.top = `${node.y}px`;
-    card.style.width = `${Math.max(288, node.w || 288)}px`;
-    card.style.minHeight = hasFixedHeight ? `${node.h}px` : "80px";
-    card.style.height = "auto";
+    card.style.width = `${node.w}px`;
+    card.style.minHeight = `${node.h}px`;
+    card.style.height = `${node.h}px`;
+    card.classList.add("fixed-height");
 
     const createdAtHtml = (!rootCard && node.createdAt && node.type !== "image")
-      ? `<div class="card-footer">
-           <span class="card-created-at">${formatCreatedAt(node.createdAt)}</span>
-           <div class="card-footer-crit crit-${node.criticality ?? 0}">
-             <span class="crit-dot"></span>
-             <span class="crit-dot"></span>
-             <span class="crit-dot"></span>
-           </div>
-         </div>`
+      ? `<span class="card-created-at">${formatCreatedAt(node.createdAt)}</span>`
       : "";
     card.innerHTML = `
       ${rootCard ? "" : `<button class="port port-in${linkDragState?.nodeId === node.id && linkDragState?.port === "in" ? " pending" : ""}" data-port="in" type="button" aria-label="Input"></button>`}
       <button class="port port-out${pendingLink?.from === node.id || (linkDragState?.nodeId === node.id && linkDragState?.port === "out") ? " pending" : ""}" data-port="out" type="button" aria-label="Output"></button>
-      ${rootCard ? "" : node.type === "image" ? `
-        <div class="image-card-top">
-          <button class="card-action" type="button" aria-label="Remove" title="Remove">${icons.close}</button>
-        </div>
-      ` : `
-        <div class="card-top">
-          <button class="card-check" type="button" aria-label="Complete" title="Complete">${status === "complete" ? icons.check : ""}</button>
-          <div class="crit-wrap crit-${node.criticality ?? 0}">
-            <div class="crit-track">
-              <span class="crit-dot"></span>
-              <span class="crit-dot"></span>
-              <span class="crit-dot"></span>
+      <div class="card-bento-inner">
+        ${rootCard ? "" : node.type === "image" ? `
+          <div class="card-top image-card-top">
+            <div class="card-drag-handle" title="Arrastar card" aria-label="Arrastar card">
+              ${icons.grip}
             </div>
-            <input class="crit-range" type="range" min="0" max="2" step="1" value="${node.criticality ?? 0}" title="Criticality" />
+            <div class="image-card-top-actions">
+              ${node.imageUrl ? `<button class="image-card-fullscreen-btn" type="button" aria-label="Tela cheia" title="Tela cheia">${icons.fullscreen}</button>` : ""}
+              <button class="card-action" type="button" aria-label="Remove" title="Remove">${icons.close}</button>
+            </div>
           </div>
-          <button class="card-action" type="button" aria-label="Remove" title="Remove">${icons.close}</button>
-        </div>
-      `}
-      <div class="card-body-wrap">
-        ${rootCard
+        ` : `
+          <div class="card-top">
+            <div class="card-top-left">
+              <button class="card-check" type="button" aria-label="Complete" title="Complete">${icons.check}</button>
+              ${createdAtHtml}
+            </div>
+            <div class="card-top-right">
+              <div class="crit-wrap crit-${node.criticality ?? 0}" title="Criticality">
+                <div class="crit-track">
+                  <span class="crit-dot"></span>
+                  <span class="crit-dot"></span>
+                  <span class="crit-dot"></span>
+                </div>
+                <input class="crit-range" type="range" min="0" max="2" step="1" value="${node.criticality ?? 0}" title="Criticality" />
+              </div>
+              <button class="card-ai-btn card-transcribe-btn${transcribeState?.targetNodeId === node.id ? " recording" : ""}" type="button" aria-label="Transcribe audio with AI" title="Transcribe audio with AI">${icons.micAi}</button>
+              <button class="card-action" type="button" aria-label="Remove" title="Remove">${icons.close}</button>
+            </div>
+          </div>
+        `}
+        <div class="card-body-wrap">
+          ${rootCard
           ? `<div class="root-card-header">
-               <strong class="root-card-title" contenteditable="true" spellcheck="false" role="textbox" aria-label="Board Title">${escapeHtml(board.title)}</strong>
-               <button class="root-card-edit" type="button" aria-label="Edit" title="Edit">${icons.edit}</button>
-             </div>`
+                 <strong class="root-card-title" contenteditable="true" spellcheck="false" role="textbox" aria-label="Board Title">${escapeHtml(board.title)}</strong>
+                 <button class="root-card-edit" type="button" aria-label="Edit" title="Edit">${icons.edit}</button>
+               </div>`
           : node.type === "image"
             ? node.imageUrl
-                ? `<div class="card-body image-card-body" role="img" aria-label="Attached image"><img src="${node.imageUrl}" alt="Card image" draggable="false" /></div>`
-                : `<div class="card-body image-card-body empty-image-card" role="button" aria-label="Add image" title="Add image" onclick="document.getElementById('updateImageInput').click(); window.nodeToUpdateImage = '${node.id}';">${icons.image}</div>`
+              ? `<div class="card-body image-card-body" role="img" aria-label="Attached image"><img src="${node.imageUrl}" alt="Card image" draggable="false" /></div>`
+              : `<div class="card-body image-card-body empty-image-card" role="button" aria-label="Add image" title="Add image" onclick="document.getElementById('updateImageInput').click(); window.nodeToUpdateImage = '${node.id}';">${icons.image}</div>`
             : `<div class="card-body" contenteditable="true" role="textbox" aria-label="Card content">${renderBodyHtml(getNodeContent(node))}</div>`}
+        </div>
+        ${rootCard ? "" : node.type === "image" && node.imageUrl ? `
+          <div class="image-card-bottom" contenteditable="false">
+            <button class="image-card-btn" type="button" data-command="changeImage" title="Change Image">${icons.image}</button>
+            <button class="image-card-btn" type="button" data-command="clearImage" title="Remove Image">${icons.close}</button>
+          </div>
+        ` : node.type === "image" ? "" : `
+          <div class="card-format-bar" contenteditable="false">
+            <button class="card-format-btn" type="button" data-command="bold" title="Bold (Ctrl+B)">${icons.formatBold}</button>
+            <button class="card-format-btn" type="button" data-command="italic" title="Italic (Ctrl+I)">${icons.formatItalic}</button>
+            <button class="card-format-btn" type="button" data-command="underline" title="Underline (Ctrl+U)">${icons.formatUnderline}</button>
+            <button class="card-format-btn" type="button" data-command="strikethrough" title="Strikethrough">${icons.formatStrikethrough}</button>
+            <div class="card-format-bar-sep"></div>
+            <button class="card-format-btn" type="button" data-command="insertUnorderedList" title="Bulleted List">${icons.formatListBulleted}</button>
+            <button class="card-format-btn" type="button" data-command="insertOrderedList" title="Numbered List">${icons.formatListNumbered}</button>
+            <button class="card-format-btn" type="button" data-command="insertCheckbox" title="Checkbox">${icons.checkbox}</button>
+            <div class="card-format-bar-sep"></div>
+            <button class="card-format-btn" type="button" data-command="insertImageInline" title="Insert Image">${icons.image}</button>
+            <button class="card-format-btn" type="button" data-command="removeFormat" title="Clear Formatting">${icons.formatClear}</button>
+          </div>
+        `}
       </div>
-      ${createdAtHtml}
-      ${rootCard ? "" : node.type === "image" && node.imageUrl ? `
-        <div class="image-card-bottom" contenteditable="false">
-          <button class="image-card-btn" type="button" data-command="changeImage" title="Change Image">${icons.image}</button>
-          <button class="image-card-btn" type="button" data-command="clearImage" title="Remove Image">${icons.close}</button>
-        </div>
-      ` : node.type === "image" ? "" : `
-        <div class="card-format-bar" contenteditable="false">
-          <button class="card-format-btn" type="button" data-command="bold" title="Bold (Ctrl+B)">${icons.formatBold}</button>
-          <button class="card-format-btn" type="button" data-command="italic" title="Italic (Ctrl+I)">${icons.formatItalic}</button>
-          <button class="card-format-btn" type="button" data-command="underline" title="Underline (Ctrl+U)">${icons.formatUnderline}</button>
-          <button class="card-format-btn" type="button" data-command="strikethrough" title="Strikethrough">${icons.formatStrikethrough}</button>
-          <div style="width: 1px; background: rgba(var(--hi-rgb),0.15); margin: 2px 2px;"></div>
-          <button class="card-format-btn" type="button" data-command="insertUnorderedList" title="Bulleted List">${icons.formatListBulleted}</button>
-          <button class="card-format-btn" type="button" data-command="insertOrderedList" title="Numbered List">${icons.formatListNumbered}</button>
-          <button class="card-format-btn" type="button" data-command="insertCheckbox" title="Checkbox">${icons.checkbox}</button>
-          <div style="width: 1px; background: rgba(var(--hi-rgb),0.15); margin: 2px 2px;"></div>
-          <button class="card-format-btn" type="button" data-command="insertImageInline" title="Insert Image">${icons.image}</button>
-          <button class="card-format-btn" type="button" data-command="removeFormat" title="Clear Formatting">${icons.formatClear}</button>
-        </div>
-      `}
       <button class="resize-handle" type="button" aria-label="Resize" title="Resize"></button>
     `;
 
-    card.addEventListener("pointerdown", () => {
-      clearLineagePreview(false);
+    card.addEventListener("pointerdown", event => {
+      if (event.target.closest(".card-action")) return;
       selectedNodeId = node.id;
       selectedLinkId = null;
-      removeLineageClasses();
       renderLinks();
       refreshSelectionClasses();
-    });
+    }, true);
 
     card.addEventListener("change", event => {
       if (event.target.classList.contains("card-todo-checkbox")) {
@@ -1408,9 +1489,6 @@ function renderNodes() {
       }
     });
 
-    card.addEventListener("mouseenter", () => scheduleLineagePreview(node.id));
-    card.addEventListener("mouseleave", () => clearLineagePreview());
-
     card.addEventListener("dblclick", event => {
       if (event.target.closest("input, textarea, button, .resize-handle, .port")) {
         return;
@@ -1419,8 +1497,12 @@ function renderNodes() {
     });
 
     if (rootCard) {
-      card.querySelector(".root-card-title")?.addEventListener("pointerdown", event => {
-        if (event.target.closest("button") || event.target.closest("input")) {
+      card.addEventListener("pointerdown", event => {
+        if (event.target.closest("button, input, textarea, .port, .resize-handle")) {
+          return;
+        }
+        const titleEl = card.querySelector(".root-card-title");
+        if (titleEl && document.activeElement === titleEl && event.target.closest(".root-card-title")) {
           return;
         }
         startDrag(event, node.id);
@@ -1438,17 +1520,35 @@ function renderNodes() {
         });
       }
 
+      card.querySelector(".card-drag-handle")?.addEventListener("pointerdown", event => {
+        event.stopPropagation();
+        startDrag(event, node.id);
+      });
+
+      card.querySelector(".card-ai-btn")?.addEventListener("pointerdown", event => {
+        event.stopPropagation();
+      });
+
+      card.querySelector(".card-ai-btn")?.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        handleTranscribeTriggerClick(event, node.id, event.currentTarget);
+      });
+
       card.querySelector(".card-check")?.addEventListener("click", event => {
         event.stopPropagation();
         const currentStatus = node.status || "ongoing";
         const newStatus = currentStatus === "complete" ? "ongoing" : "complete";
         node.status = newStatus;
         saveState();
-        
-        card.classList.remove(`status-${currentStatus}`);
+
+        card.classList.remove(`status-${currentStatus}`, "done");
         card.classList.add(`status-${newStatus}`);
-        event.currentTarget.innerHTML = newStatus === "complete" ? icons.check : "";
-        
+        if (newStatus === "complete") card.classList.add("done");
+        card.dataset.status = newStatus;
+        event.currentTarget.innerHTML = icons.check;
+
+        renderLinks();
         renderUserTasks();
       });
 
@@ -1456,18 +1556,57 @@ function renderNodes() {
         event.stopPropagation();
         removeNode(node.id);
       });
+
+      card.querySelector(".image-card-fullscreen-btn")?.addEventListener("click", event => {
+        event.stopPropagation();
+        if (node.imageUrl && window.openFullscreenImage) {
+          window.openFullscreenImage(node.imageUrl);
+        }
+      });
+
+      card.querySelector(".image-card-body img")?.addEventListener("dblclick", event => {
+        event.stopPropagation();
+        if (node.imageUrl && window.openFullscreenImage) {
+          window.openFullscreenImage(node.imageUrl);
+        }
+      });
+
+      card.querySelectorAll(".card-inline-img-wrap img").forEach(img => {
+        img.addEventListener("dblclick", event => {
+          event.stopPropagation();
+          const src = img.getAttribute("src");
+          if (src && window.openFullscreenImage) {
+            window.openFullscreenImage(src);
+          }
+        });
+      });
     }
 
     const bodyEditor = card.querySelector(".card-body");
 
     if (bodyEditor) {
       bodyEditor.addEventListener("pointerdown", event => {
-        if (event.target.closest(".card-todo-btn") || event.target.closest(".card-todo-wrap")) {
+        if (event.target.closest(".card-todo-btn, .card-todo-wrap, .card-inline-img-del")) {
           event.stopPropagation();
         }
       });
 
       bodyEditor.addEventListener("click", event => {
+        const imgDelBtn = event.target.closest(".card-inline-img-del");
+        if (imgDelBtn) {
+          event.preventDefault();
+          event.stopPropagation();
+          const imgWrap = imgDelBtn.closest(".card-inline-img-wrap");
+          if (imgWrap) {
+            imgWrap.remove();
+            setNodeContent(node, serializeEditableContent(bodyEditor));
+            saveState();
+            renderLinks();
+            setTimeout(() => scheduleNodeHeightSync(node.id, card), 50);
+          }
+          return;
+        }
+
         const todoWrap = event.target.closest(".card-todo-wrap");
         const todoBtn = event.target.closest(".card-todo-btn") || todoWrap?.querySelector(".card-todo-btn");
         if (todoBtn && todoWrap) {
@@ -1561,6 +1700,10 @@ function renderNodes() {
           renderNodes();
           return;
         }
+        if (command === "transcribeAudio") {
+          handleTranscribeTriggerClick(event, node.id, btn);
+          return;
+        }
         const editor = card.querySelector(".card-body");
         if (editor) {
           if (command === "insertImageInline") {
@@ -1620,8 +1763,6 @@ function renderNodes() {
     if (rootCard) {
       const titleEl = card.querySelector(".root-card-title");
       if (titleEl) {
-        titleEl.addEventListener("pointerdown", event => event.stopPropagation());
-        
         const commitTitle = () => {
           const newTitle = titleEl.innerText.trim();
           if (newTitle && newTitle !== board.title) {
@@ -1634,7 +1775,7 @@ function renderNodes() {
             titleEl.innerText = board.title;
           }
         };
-        
+
         titleEl.addEventListener("blur", commitTitle);
         titleEl.addEventListener("keydown", event => {
           if (event.key === "Enter") {
@@ -1660,14 +1801,20 @@ function renderNodes() {
   renderedHeights.clear();
   board.nodes.forEach(node => {
     const el = nodesLayer.querySelector(`[data-id="${node.id}"]`);
-    if (el) renderedHeights.set(node.id, el.offsetHeight);
+    if (el) renderedHeights.set(node.id, node.h > 0 ? node.h : el.offsetHeight);
   });
 }
 
 // Altura usada para posicionar ports/linhas: altura fixa quando o card foi
-// redimensionado, senao a altura real renderizada, com fallback de 144.
+// redimensionado, senao a altura real renderizada com snap para a grade, com fallback de 144.
 function nodeHeight(node) {
-  return renderedHeights.get(node.id) || node.h || 144;
+  const minH = node.type === "image" ? 48 : 96;
+  if (node.h > 0) return Math.max(minH, Math.round(node.h / 48) * 48);
+  const measured = renderedHeights.get(node.id);
+  if (measured) {
+    return Math.max(minH, Math.round(measured / 48) * 48);
+  }
+  return 144;
 }
 
 // O card cresce/encolhe com o texto digitado. Sem re-medir, os ports (e as setas
@@ -1679,108 +1826,24 @@ function scheduleNodeHeightSync(nodeId, card) {
   nodeHeightSyncFrame = requestAnimationFrame(() => {
     nodeHeightSyncFrame = null;
     if (!card.isConnected) return;
-    const measured = card.offsetHeight;
-    if (renderedHeights.get(nodeId) === measured) return;
-    renderedHeights.set(nodeId, measured);
-    renderLinks();
-  });
-}
-
-function scheduleLineagePreview(nodeId) {
-  if (localStorage.getItem("todocompanion.settings.lineageHover") === "false") {
-    return;
-  }
-
-  window.clearTimeout(lineageHoverTimer);
-  lineageHoverTimer = window.setTimeout(() => {
-    showLineagePreview(nodeId);
-  }, 600);
-}
-
-function showLineagePreview(nodeId) {
-  if (localStorage.getItem("todocompanion.settings.lineageHover") === "false") {
-    return;
-  }
-  
-  const board = activeBoard();
-  const lineage = getNodeLineage(board, nodeId);
-  if (!lineage.nodeIds.size) {
-    return;
-  }
-
-  lineageState = lineage;
-  applyLineageClasses();
-  renderLinks();
-}
-
-function clearLineagePreview(renderNow = true) {
-  window.clearTimeout(lineageHoverTimer);
-  lineageHoverTimer = null;
-
-  if (!lineageState) {
-    return;
-  }
-
-  lineageState = null;
-  if (renderNow) {
-    removeLineageClasses();
-    renderLinks();
-  } else {
-    removeLineageClasses();
-  }
-}
-
-function applyLineageClasses() {
-  boardShell.classList.add("lineage-mode");
-  document.querySelectorAll(".task-card").forEach(card => {
-    const active = lineageState?.nodeIds.has(card.dataset.id);
-    card.classList.toggle("lineage-active-node", Boolean(active));
-    card.classList.toggle("lineage-dim", Boolean(lineageState && !active));
-  });
-}
-
-function removeLineageClasses() {
-  boardShell.classList.remove("lineage-mode");
-  document.querySelectorAll(".task-card").forEach(card => {
-    card.classList.remove("lineage-active-node", "lineage-dim");
-  });
-  document.querySelectorAll(".link-path, .link-dot").forEach(item => {
-    item.classList.remove("lineage-link", "lineage-dim");
-  });
-}
-
-function getNodeLineage(board, nodeId) {
-  const nodeIds = new Set([nodeId]);
-  const linkIds = new Set();
-
-  const visitParents = current => {
-    board.links.forEach(link => {
-      if (link.to !== current || linkIds.has(link.id)) {
-        return;
+    const board = activeBoard();
+    const node = board?.nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const bodyEl = card.querySelector(".card-body");
+    if (bodyEl && bodyEl.scrollHeight > bodyEl.clientHeight) {
+      const extra = bodyEl.scrollHeight - bodyEl.clientHeight;
+      const newHeight = Math.ceil((nodeHeight(node) + extra) / 48) * 48;
+      const width = Math.max(node.type === "image" ? 72 : 288, node.w || 288);
+      if (!nodeCollidesWithOthers(board, nodeId, node.x, node.y, width, newHeight)) {
+        node.h = newHeight;
+        card.style.height = `${newHeight}px`;
+        card.style.minHeight = `${newHeight}px`;
+        renderedHeights.set(nodeId, newHeight);
+        renderLinks();
+        saveState();
       }
-
-      linkIds.add(link.id);
-      nodeIds.add(link.from);
-      visitParents(link.from);
-    });
-  };
-
-  const visitChildren = current => {
-    board.links.forEach(link => {
-      if (link.from !== current || linkIds.has(link.id)) {
-        return;
-      }
-
-      linkIds.add(link.id);
-      nodeIds.add(link.to);
-      visitChildren(link.to);
-    });
-  };
-
-  visitParents(nodeId);
-  visitChildren(nodeId);
-
-  return { nodeIds, linkIds };
+    }
+  });
 }
 
 function renderLinks() {
@@ -1798,6 +1861,7 @@ function renderLinks() {
   linkLayer.setAttribute("viewBox", `${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`);
 
   const obstacles = buildLinkObstacles(board.nodes);
+  const showArrows = isShowLinkArrows();
 
   board.links.forEach(link => {
     const from = nodesById.get(link.from);
@@ -1814,41 +1878,71 @@ function renderLinks() {
 
     const linkObstacles = obstacles.filter(o => o.id !== link.from && o.id !== link.to);
     const arrowTip = insetLinkEndpoint(end, toPort, LINK_ARROW_END_GAP);
-    const lineEnd = getArrowBasePoint(arrowTip, toPort, LINK_ARROW_LENGTH);
+    const lineEnd = showArrows ? getArrowBasePoint(arrowTip, toPort, LINK_ARROW_LENGTH) : end;
     const linkStatus = normalizeStatus(to.status);
     const startStatus = normalizeStatus(from.status);
     const endStatus = normalizeStatus(to.status);
-    const lineageActive = lineageState?.linkIds.has(link.id);
-    const lineageDim = lineageState && !lineageActive;
+    const isConnectedToSelected =
+      Boolean(selectedNodeId) && (link.from === selectedNodeId || link.to === selectedNodeId);
+    const isFlowing = isConnectedToSelected || link.id === selectedLinkId;
+    const pathData = createLinkPath(start, lineEnd, fromPort, toPort, linkObstacles);
+
+    const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    group.setAttribute("class", [
+      "link-group",
+      `status-${linkStatus}`,
+      link.id === selectedLinkId ? "selected" : "",
+      isFlowing ? "flowing" : ""
+    ].filter(Boolean).join(" "));
+
+    const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    hitPath.setAttribute("class", "link-hit-area");
+    hitPath.setAttribute("d", pathData);
 
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("class", [
       "link-path",
       `status-${linkStatus}`,
       link.id === selectedLinkId ? "selected" : "",
-      lineageActive ? "lineage-link" : "",
-      lineageDim ? "lineage-dim" : ""
+      isFlowing ? "flowing" : ""
     ].filter(Boolean).join(" "));
-    path.setAttribute("d", createLinkPath(start, lineEnd, fromPort, toPort, linkObstacles));
-    path.addEventListener("click", event => {
+    path.setAttribute("d", pathData);
+
+    const handleSelectLink = event => {
       event.stopPropagation();
       selectedLinkId = link.id;
       selectedNodeId = null;
       pendingLink = null;
       render();
-    });
-    path.addEventListener("dblclick", event => {
+    };
+
+    const handleRemoveLink = event => {
       event.stopPropagation();
-      const board = activeBoard();
-      board.links = board.links.filter(l => l.id !== link.id);
+      event.preventDefault();
+      const currentBoard = activeBoard();
+      if (!currentBoard) return;
+      currentBoard.links = currentBoard.links.filter(l => l.id !== link.id);
       if (selectedLinkId === link.id) selectedLinkId = null;
       saveState();
       render();
-    });
+    };
 
-    const lineageDotClass = lineageActive ? "lineage-link" : lineageDim ? "lineage-dim" : "";
-    const arrow = createSvgArrowHead(arrowTip, toPort, linkStatus, lineageDotClass);
-    linkLayer.append(path, arrow);
+    hitPath.addEventListener("click", handleSelectLink);
+    hitPath.addEventListener("dblclick", handleRemoveLink);
+    path.addEventListener("click", handleSelectLink);
+    path.addEventListener("dblclick", handleRemoveLink);
+
+    group.append(hitPath, path);
+    if (showArrows) {
+      const arrow = createSvgArrowHead(arrowTip, toPort, linkStatus);
+      group.appendChild(arrow);
+    }
+
+    linkLayer.appendChild(group);
+
+    const midPoint = getLinkMidpoint(path, start, lineEnd);
+    const deleteBtn = createSvgLinkDeleteButton(midPoint, handleRemoveLink);
+    group.appendChild(deleteBtn);
   });
 
   if (dragState?.snap) {
@@ -1893,12 +1987,18 @@ function renderLinks() {
       const previewStatus = normalizeStatus(source.status);
       const previewPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
       const previewArrowTip = toPoint;
-      const previewLineEnd = getArrowBasePoint(previewArrowTip, toPort, LINK_ARROW_LENGTH);
+      const previewLineEnd = showArrows
+        ? getArrowBasePoint(previewArrowTip, toPort, LINK_ARROW_LENGTH)
+        : previewArrowTip;
       previewPath.setAttribute("class", `link-path link-preview status-${previewStatus}`);
       const previewObstacles = obstacles.filter(o => o.id !== source.id && o.id !== linkDragState.snappedNodeId);
       previewPath.setAttribute("d", createLinkPath(fromPoint, previewLineEnd, fromPort, toPort, previewObstacles));
-      const previewArrow = createSvgArrowHead(previewArrowTip, toPort, previewStatus);
-      linkLayer.append(previewPath, previewArrow);
+      if (showArrows) {
+        const previewArrow = createSvgArrowHead(previewArrowTip, toPort, previewStatus);
+        linkLayer.append(previewPath, previewArrow);
+      } else {
+        linkLayer.append(previewPath);
+      }
     }
   }
 }
@@ -1943,6 +2043,53 @@ function createSvgDot(point, status = "ongoing", extraClass = "") {
   dot.setAttribute("cy", point.y);
   dot.setAttribute("r", "5");
   return dot;
+}
+
+function getLinkMidpoint(pathEl, fallbackStart, fallbackEnd) {
+  try {
+    const totalLength = pathEl.getTotalLength();
+    if (Number.isFinite(totalLength) && totalLength > 0) {
+      const pt = pathEl.getPointAtLength(totalLength * 0.5);
+      return { x: pt.x, y: pt.y };
+    }
+  } catch (_) {}
+  return {
+    x: (fallbackStart.x + fallbackEnd.x) * 0.5,
+    y: (fallbackStart.y + fallbackEnd.y) * 0.5
+  };
+}
+
+function createSvgLinkDeleteButton(point, onRemove) {
+  const btn = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  btn.setAttribute("class", "link-delete-btn");
+  btn.setAttribute("transform", `translate(${point.x}, ${point.y})`);
+
+  const inner = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  inner.setAttribute("class", "link-delete-inner");
+
+  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  circle.setAttribute("class", "link-delete-bg");
+  circle.setAttribute("cx", "0");
+  circle.setAttribute("cy", "0");
+  circle.setAttribute("r", "10");
+
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  icon.setAttribute("class", "link-delete-icon");
+  icon.setAttribute("d", "M-3.5 -3.5 L3.5 3.5 M3.5 -3.5 L-3.5 3.5");
+
+  const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+  title.textContent = "Remove connection";
+
+  inner.append(circle, icon);
+  btn.append(title, inner);
+
+  btn.addEventListener("pointerdown", event => {
+    event.stopPropagation();
+    event.preventDefault();
+  });
+  btn.addEventListener("click", onRemove);
+
+  return btn;
 }
 
 function createSvgArrowHead(point, port, status = "ongoing", extraClass = "", length = LINK_ARROW_LENGTH, halfWidth = LINK_ARROW_HALF_WIDTH, baseClass = "link-arrow") {
@@ -2001,13 +2148,16 @@ function createSnapGuide(orientation, coord, bounds) {
 }
 
 function getPortPoint(node, port) {
-  const width = node.w || 288;
+  const GRID = 24;
+  const width = Math.max(node.type === "image" ? 72 : 288, node.w || 288);
   const height = nodeHeight(node);
-  if (port === "top") return { x: node.x + width / 2, y: node.y };
-  if (port === "bottom") return { x: node.x + width / 2, y: node.y + height };
+  const snappedX = Math.round(node.x / GRID) * GRID;
+  const snappedY = Math.round(node.y / GRID) * GRID;
+  if (port === "top") return { x: snappedX + width / 2, y: snappedY };
+  if (port === "bottom") return { x: snappedX + width / 2, y: snappedY + height };
   return {
-    x: port === "out" ? node.x + width : node.x,
-    y: node.y + height / 2
+    x: port === "out" ? snappedX + width : snappedX,
+    y: Math.round((snappedY + height / 2) / GRID) * GRID
   };
 }
 
@@ -2033,17 +2183,24 @@ function isOrthogonalLinks() {
   return localStorage.getItem("todocompanion.settings.linkStyle") !== "bezier";
 }
 
+function isShowLinkArrows() {
+  return localStorage.getItem("todocompanion.settings.linkArrows") !== "false";
+}
+
 // Retangulos dos cards inflados pela margem, usados pelo roteador para desviar.
 function buildLinkObstacles(nodes) {
+  const GRID = 24;
   return nodes.map(node => {
-    const w = node.w || 288;
+    const w = Math.max(node.type === "image" ? 72 : 288, node.w || 288);
     const h = nodeHeight(node);
+    const x = Math.round(node.x / GRID) * GRID;
+    const y = Math.round(node.y / GRID) * GRID;
     return {
       id: node.id,
-      x1: Math.round(node.x - LINK_MARGIN),
-      y1: Math.round(node.y - LINK_MARGIN),
-      x2: Math.round(node.x + w + LINK_MARGIN),
-      y2: Math.round(node.y + h + LINK_MARGIN)
+      x1: Math.round(x - LINK_MARGIN),
+      y1: Math.round(y - LINK_MARGIN),
+      x2: Math.round(x + w + LINK_MARGIN),
+      y2: Math.round(y + h + LINK_MARGIN)
     };
   });
 }
@@ -2663,9 +2820,11 @@ function applyViewport() {
   let gridUnit = 24;
   while (gridUnit * view.zoom < 14) gridUnit *= 2;
   const gridSize = gridUnit * view.zoom;
+  const dotRadius = clamp(1.1 * Math.sqrt(view.zoom), 0.85, 1.75);
   boardShell.style.setProperty("--grid-size", `${gridSize}px`);
   boardShell.style.setProperty("--grid-x", `${view.panX}px`);
   boardShell.style.setProperty("--grid-y", `${view.panY}px`);
+  boardShell.style.setProperty("--dot-radius", `${dotRadius.toFixed(2)}px`);
   boardSurface.style.transform = `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`;
 }
 
@@ -2684,10 +2843,14 @@ function ensureCanvasPositions() {
       changed = true;
     }
 
+    const HEIGHT_GRID = GRID * 2;
+    const isImage = node.type === "image";
+    const minW = isImage ? 72 : 288;
+    const minH = isImage ? 48 : 96;
     const snappedX = Math.round(node.x / GRID) * GRID;
     const snappedY = Math.round(node.y / GRID) * GRID;
-    const snappedW = Math.max(288, Math.round((node.w || 288) / GRID) * GRID);
-    const snappedH = node.h > 0 ? Math.round(node.h / GRID) * GRID : 0;
+    const snappedW = Math.max(minW, Math.round((node.w || minW) / GRID) * GRID);
+    const snappedH = Math.max(minH, Math.round((node.h || 144) / HEIGHT_GRID) * HEIGHT_GRID);
 
     if (node.x !== snappedX || node.y !== snappedY || node.w !== snappedW || node.h !== snappedH) {
       node.x = snappedX;
@@ -2710,18 +2873,24 @@ function isDefaultNewAction(node) {
 }
 
 function overlapsPlacedNodes(node, placed) {
+  const w = node.w || 288;
+  const h = node.h || 144;
+  const GAP = 48;
   return placed.some(other => {
-    const overlapX = Math.max(0, Math.min(node.x + (node.w || 288), other.x + (other.w || 288)) - Math.max(node.x, other.x));
-    const overlapY = Math.max(0, Math.min(node.y + (node.h || 144), other.y + (other.h || 144)) - Math.max(node.y, other.y));
-    const overlapArea = overlapX * overlapY;
-    const nodeArea = (node.w || 288) * (node.h || 144);
-    return overlapArea / nodeArea > 0.65;
+    const otherW = other.w || 288;
+    const otherH = other.h || 144;
+    return (
+      node.x < other.x + otherW + GAP &&
+      node.x + w + GAP > other.x &&
+      node.y < other.y + otherH + GAP &&
+      node.y + h + GAP > other.y
+    );
   });
 }
 
 function getNextActionPosition(board, indexOverride = null) {
   const GRID = 24;
-  const GAP = -24;
+  const GAP = 48;
   const width = 288;
   const height = 144;
   const nodes = indexOverride == null ? board.nodes : board.nodes.slice(0, indexOverride);
@@ -2736,9 +2905,16 @@ function getNextActionPosition(board, indexOverride = null) {
   }
 
   const last = nodes[nodes.length - 1];
+  let targetX = Math.round((last.x + (last.w || width) + GAP) / GRID) * GRID;
+  let targetY = Math.round(last.y / GRID) * GRID;
+
+  while (nodeCollidesWithOthers(board, null, targetX, targetY, width, height, GAP)) {
+    targetX += width + GAP;
+  }
+
   return {
-    x: Math.round((last.x + (last.w || width) + GAP) / GRID) * GRID,
-    y: Math.round(last.y / GRID) * GRID
+    x: targetX,
+    y: targetY
   };
 }
 
@@ -2820,108 +2996,242 @@ function focusCardOnNode(nodeId) {
 
 function organizeCanvasCards() {
   const board = activeBoard();
-  if (!board.nodes.length) {
+  if (!board?.nodes?.length) {
     return;
   }
 
-  clearLineagePreview(false);
+  const GRID = 24;
+  const GAP = 48; // Distância mínima de 2 quadrados de grade (48px) entre cards
 
   const nodesById = new Map(board.nodes.map(node => [node.id, node]));
-  const canvasOrder = (a, b) => {
-    const first = nodesById.get(a);
-    const second = nodesById.get(b);
-    return ((first?.y ?? 0) - (second?.y ?? 0)) || ((first?.x ?? 0) - (second?.x ?? 0));
+
+  const getNodeWidth = node => {
+    const minW = node.type === "image" ? 72 : 288;
+    return Math.max(minW, Math.round((Number(node.w) || minW) / GRID) * GRID);
   };
-  const children = new Map(board.nodes.map(node => [node.id, []]));
-  const parentById = new Map();
 
-  board.links.forEach(link => {
-    if (!nodesById.has(link.from) || !nodesById.has(link.to) || link.from === link.to) {
-      return;
-    }
+  const getNodeHeight = node => nodeHeight(node);
 
-    if (!parentById.has(link.to)) {
-      parentById.set(link.to, link.from);
-      children.get(link.from)?.push(link.to);
+  // Filtra links válidos (ambos nós existentes e sem auto-loops)
+  const validLinks = (board.links || []).filter(
+    link => nodesById.has(link.from) && nodesById.has(link.to) && link.from !== link.to
+  );
+
+  const outgoing = new Map(board.nodes.map(n => [n.id, []]));
+  const incoming = new Map(board.nodes.map(n => [n.id, []]));
+
+  validLinks.forEach(link => {
+    outgoing.get(link.from).push(link.to);
+    incoming.get(link.to).push(link.from);
+  });
+
+  const canvasSort = (aId, bId) => {
+    const a = nodesById.get(aId);
+    const b = nodesById.get(bId);
+    return ((a?.y ?? 0) - (b?.y ?? 0)) || ((a?.x ?? 0) - (b?.x ?? 0));
+  };
+
+  outgoing.forEach(list => list.sort(canvasSort));
+
+  // 1. Identificar raízes e atribuir profundidade (camadas X)
+  const depths = new Map();
+  const rootIds = [];
+
+  // Card principal sempre é a raiz primária
+  if (board.nodes[0]) {
+    rootIds.push(board.nodes[0].id);
+  }
+
+  board.nodes.forEach(node => {
+    if (incoming.get(node.id).length === 0 && !rootIds.includes(node.id)) {
+      rootIds.push(node.id);
     }
   });
 
-  children.forEach(items => items.sort(canvasOrder));
+  rootIds.forEach(id => depths.set(id, 0));
 
-  const roots = board.nodes
-    .map(node => node.id)
-    .filter(id => !parentById.has(id))
-    .sort(canvasOrder);
-  const orderedRoots = roots.length ? roots : [board.nodes[0].id];
-  const maxWidth = Math.max(...board.nodes.map(node => node.w || 288));
-  const minX = Math.min(...board.nodes.map(node => Number.isFinite(node.x) ? node.x : 0));
-  const minY = Math.min(...board.nodes.map(node => Number.isFinite(node.y) ? node.y : 0));
-  const originX = Number.isFinite(minX) ? minX : 80;
-  const originY = Number.isFinite(minY) ? minY : 80;
-  const columnGap = maxWidth + 60;
-  const rowGap = 24;
-  const columnBottom = [];
-  const visited = new Set();
-  const positions = new Map();
-  let nextY = originY;
+  let changed = true;
+  let iterations = 0;
+  const maxIterations = board.nodes.length;
 
-  const layout = (nodeId, depth) => {
-    const node = nodesById.get(nodeId);
-    if (!node || visited.has(nodeId)) {
-      return null;
+  while (changed && iterations < maxIterations) {
+    changed = false;
+    iterations++;
+    for (const link of validLinks) {
+      const fromDepth = depths.get(link.from);
+      if (fromDepth !== undefined) {
+        const currentToDepth = depths.get(link.to) ?? 0;
+        if (fromDepth + 1 > currentToDepth) {
+          depths.set(link.to, fromDepth + 1);
+          changed = true;
+        }
+      }
     }
+  }
 
-    visited.add(nodeId);
-    const childCenters = (children.get(nodeId) || [])
-      .map(childId => layout(childId, depth + 1))
-      .filter(value => Number.isFinite(value));
-    const height = nodeHeight(node);
-    let centerY;
-
-    if (childCenters.length) {
-      centerY = (Math.min(...childCenters) + Math.max(...childCenters)) / 2;
-    } else {
-      centerY = nextY + height / 2;
-      nextY += height + rowGap;
+  board.nodes.forEach(node => {
+    if (!depths.has(node.id)) {
+      depths.set(node.id, 0);
     }
+  });
 
-    const desiredY = centerY - height / 2;
-    const y = Math.max(desiredY, columnBottom[depth] ?? originY);
-    centerY = y + height / 2;
-    columnBottom[depth] = y + height + rowGap;
-    nextY = Math.max(nextY, y + height + rowGap);
+  const maxDepth = Math.max(...depths.values(), 0);
+  const columns = Array.from({ length: maxDepth + 1 }, () => []);
 
-    positions.set(nodeId, {
-      x: originX + depth * columnGap,
-      y
-    });
+  board.nodes.forEach(node => {
+    const d = depths.get(node.id) ?? 0;
+    columns[d].push(node.id);
+  });
 
-    return centerY;
+  columns.forEach(col => col.sort(canvasSort));
+
+  // 2. Calcular posições X de cada coluna com GAP exato de 48px
+  const minX = Math.min(...board.nodes.map(n => Number.isFinite(n.x) ? n.x : 96));
+  const minY = Math.min(...board.nodes.map(n => Number.isFinite(n.y) ? n.y : 96));
+  const originX = Math.max(48, Number.isFinite(minX) ? Math.round(minX / GRID) * GRID : 96);
+  const originY = Math.max(48, Number.isFinite(minY) ? Math.round(minY / GRID) * GRID : 96);
+
+  const columnWidths = columns.map(col => {
+    if (!col.length) return 288;
+    return Math.max(...col.map(id => getNodeWidth(nodesById.get(id))));
+  });
+
+  const columnXs = [];
+  let curX = originX;
+  for (let d = 0; d <= maxDepth; d++) {
+    columnXs[d] = curX;
+    curX += columnWidths[d] + GAP;
+  }
+
+  // 3. Posicionamento vertical (Y) hierárquico e alinhamento de centros
+  const nodeY = new Map();
+
+  const resolveColumn = col => {
+    col.sort((a, b) => (nodeY.get(a) ?? 0) - (nodeY.get(b) ?? 0));
+    for (let i = 1; i < col.length; i++) {
+      const prevId = col[i - 1];
+      const currId = col[i];
+      const prevNode = nodesById.get(prevId);
+      const prevBottom = (nodeY.get(prevId) ?? 0) + getNodeHeight(prevNode);
+      const minAllowed = prevBottom + GAP;
+      if ((nodeY.get(currId) ?? 0) < minAllowed) {
+        nodeY.set(currId, minAllowed);
+      }
+    }
   };
 
-  orderedRoots.forEach(rootId => {
-    layout(rootId, 0);
+  const visited = new Set();
+  let currentTreeBaseY = originY;
+
+  const layoutSubtree = (nodeId, startY) => {
+    if (visited.has(nodeId)) {
+      return (nodeY.get(nodeId) ?? startY) + getNodeHeight(nodesById.get(nodeId)) / 2;
+    }
+    visited.add(nodeId);
+
+    const node = nodesById.get(nodeId);
+    const height = getNodeHeight(node);
+    const myChildren = outgoing.get(nodeId).filter(childId => depths.get(childId) > depths.get(nodeId));
+
+    if (!myChildren.length) {
+      nodeY.set(nodeId, startY);
+      return startY + height / 2;
+    }
+
+    let childCursorY = startY;
+    const childCenters = [];
+    myChildren.forEach(childId => {
+      const cCenter = layoutSubtree(childId, childCursorY);
+      childCenters.push(cCenter);
+      const childNode = nodesById.get(childId);
+      const cBottom = (nodeY.get(childId) ?? childCursorY) + getNodeHeight(childNode);
+      childCursorY = Math.max(childCursorY, cBottom + GAP);
+    });
+
+    const avgCenter = (childCenters[0] + childCenters[childCenters.length - 1]) / 2;
+    const desiredY = avgCenter - height / 2;
+    const finalY = Math.max(startY, desiredY);
+    nodeY.set(nodeId, finalY);
+    return finalY + height / 2;
+  };
+
+  rootIds.forEach(rootId => {
+    if (!visited.has(rootId)) {
+      layoutSubtree(rootId, currentTreeBaseY);
+      let maxBottomSoFar = currentTreeBaseY;
+      visited.forEach(id => {
+        const bottom = (nodeY.get(id) ?? 0) + getNodeHeight(nodesById.get(id));
+        if (bottom > maxBottomSoFar) maxBottomSoFar = bottom;
+      });
+      currentTreeBaseY = maxBottomSoFar + GAP;
+    }
   });
 
   board.nodes.forEach(node => {
     if (!visited.has(node.id)) {
-      layout(node.id, 0);
+      layoutSubtree(node.id, currentTreeBaseY);
+      currentTreeBaseY += getNodeHeight(node) + GAP;
     }
   });
 
-  board.nodes.forEach(node => {
-    const position = positions.get(node.id);
-    if (!position || isRootNode(board, node.id)) {
-      return;
+  // Relaxamento bidirecional: alinha pais com filhos e vice-versa
+  for (let pass = 0; pass < 2; pass++) {
+    for (let d = 1; d <= maxDepth; d++) {
+      columns[d].forEach(nodeId => {
+        const node = nodesById.get(nodeId);
+        const myParents = incoming.get(nodeId).filter(pId => depths.get(pId) < d);
+        if (myParents.length) {
+          const parentCenters = myParents.map(pId => (nodeY.get(pId) ?? 0) + getNodeHeight(nodesById.get(pId)) / 2);
+          const avgParentCenter = parentCenters.reduce((sum, c) => sum + c, 0) / parentCenters.length;
+          nodeY.set(nodeId, avgParentCenter - getNodeHeight(node) / 2);
+        }
+      });
+      resolveColumn(columns[d]);
     }
 
-    node.x = position.x;
-    node.y = position.y;
+    for (let d = maxDepth - 1; d >= 0; d--) {
+      columns[d].forEach(nodeId => {
+        const node = nodesById.get(nodeId);
+        const myChildren = outgoing.get(nodeId).filter(cId => depths.get(cId) > d);
+        if (myChildren.length) {
+          const childCenters = myChildren.map(cId => (nodeY.get(cId) ?? 0) + getNodeHeight(nodesById.get(cId)) / 2);
+          const avgChildCenter = (Math.min(...childCenters) + Math.max(...childCenters)) / 2;
+          nodeY.set(nodeId, avgChildCenter - getNodeHeight(node) / 2);
+        }
+      });
+      resolveColumn(columns[d]);
+    }
+  }
+
+  // 4. Normalização e snap preciso à grade de 24px
+  const allY = Array.from(nodeY.values());
+  const currentMinY = allY.length ? Math.min(...allY) : originY;
+  const shiftY = originY - currentMinY;
+
+  board.nodes.forEach(node => {
+    const rawY = (nodeY.get(node.id) ?? originY) + shiftY;
+    const d = depths.get(node.id) ?? 0;
+    node.x = columnXs[d] ?? originX;
+    node.y = Math.round(rawY / GRID) * GRID;
+  });
+
+  // Garante que após o snap nenhum card encoste no outro
+  columns.forEach(col => {
+    col.sort((aId, bId) => nodesById.get(aId).y - nodesById.get(bId).y);
+    for (let i = 1; i < col.length; i++) {
+      const prev = nodesById.get(col[i - 1]);
+      const curr = nodesById.get(col[i]);
+      const minAllowed = prev.y + getNodeHeight(prev) + GAP;
+      if (curr.y < minAllowed) {
+        curr.y = Math.ceil(minAllowed / GRID) * GRID;
+      }
+    }
   });
 
   saveState();
   renderNodes();
   renderLinks();
+  centerCanvasOnTasks();
 }
 
 let zoomAnimHandle = null;
@@ -2998,15 +3308,14 @@ function handleBoardPointerDown(event) {
   if (!view) return;
 
   finalizeZoomAnim();
-  clearSelection();
-  refreshSelectionClasses();
 
   panState = {
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
     panX: view.panX,
-    panY: view.panY
+    panY: view.panY,
+    moved: false
   };
 
   boardShell.classList.add("panning");
@@ -3017,8 +3326,14 @@ function handleBoardPointerDown(event) {
       return;
     }
 
-    view.panX = panState.panX + moveEvent.clientX - panState.startX;
-    view.panY = panState.panY + moveEvent.clientY - panState.startY;
+    const dx = moveEvent.clientX - panState.startX;
+    const dy = moveEvent.clientY - panState.startY;
+    if (Math.hypot(dx, dy) >= 4) {
+      panState.moved = true;
+    }
+
+    view.panX = panState.panX + dx;
+    view.panY = panState.panY + dy;
     applyViewport();
   };
 
@@ -3027,9 +3342,18 @@ function handleBoardPointerDown(event) {
       return;
     }
 
+    const didPan = panState.moved;
     panState = null;
     boardShell.classList.remove("panning");
-    saveState();
+
+    if (didPan) {
+      saveState();
+    } else {
+      clearSelection();
+      refreshSelectionClasses();
+      renderLinks();
+    }
+
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", stop);
   };
@@ -3213,7 +3537,7 @@ function applyImageNodeSize(node, imgWidth, imgHeight) {
     w = maxWidth;
   }
   node.w = Math.max(72, Math.round(w / GRID) * GRID);
-  node.h = Math.max(72, Math.round(h / GRID) * GRID);
+  node.h = Math.max(48, Math.round(h / (GRID * 2)) * (GRID * 2));
 }
 
 function handleUpdateImage(event) {
@@ -3289,10 +3613,18 @@ function getViewportActionPosition() {
   const rect = boardShell.getBoundingClientRect();
   const center = screenToWorld(rect.left + boardShell.clientWidth / 2, rect.top + boardShell.clientHeight / 2);
   const GRID = 24;
-  return {
-    x: Math.round((center.x - 144) / GRID) * GRID,
-    y: Math.round((center.y - 72) / GRID) * GRID
-  };
+  const GAP = 48;
+  const width = 288;
+  const height = 144;
+  let x = Math.round((center.x - 144) / GRID) * GRID;
+  let y = Math.round((center.y - 72) / GRID) * GRID;
+  const board = activeBoard();
+  if (board) {
+    while (nodeCollidesWithOthers(board, null, x, y, width, height, GAP)) {
+      y += height + GAP;
+    }
+  }
+  return { x, y };
 }
 
 function openTaskDialog(mode = "create-task", userId = null, taskId = null) {
@@ -3502,10 +3834,10 @@ function findSnapTarget(drag, cursorWorld) {
 
   for (const node of board.nodes) {
     if (node.id === drag.nodeId) continue;
-    
+
     for (const port of candidatePorts) {
       if (isRootNode(board, node.id) && isInputPort(port)) continue;
-      
+
       const point = getPortPoint(node, port);
       const dist = Math.hypot(point.x - cursorWorld.x, point.y - cursorWorld.y);
       if (dist < bestDist) {
@@ -3521,8 +3853,6 @@ function findSnapTarget(drag, cursorWorld) {
 function startLinkDrag(event, nodeId, port) {
   event.preventDefault();
   event.stopPropagation();
-
-  clearLineagePreview(false);
 
   const point = screenToWorld(event.clientX, event.clientY);
   linkMode = true;
@@ -3659,8 +3989,14 @@ function createCardFromConnection(drag, dropPoint, useReplySpacing = false, type
     : null;
   const xOffset = drag.port === "in" ? -width : drag.port === "top" || drag.port === "bottom" ? -width / 2 : 0;
   const yOffset = drag.port === "top" ? -height : drag.port === "bottom" ? 0 : -height / 2;
-  const posX = Math.round((position ? position.x : dropPoint.x + xOffset) / GRID) * GRID;
-  const posY = Math.round((position ? position.y : dropPoint.y + yOffset) / GRID) * GRID;
+  let posX = Math.round((position ? position.x : dropPoint.x + xOffset) / GRID) * GRID;
+  let posY = Math.round((position ? position.y : dropPoint.y + yOffset) / GRID) * GRID;
+  if (!position) {
+    const GAP = 48;
+    while (nodeCollidesWithOthers(board, null, posX, posY, width, height, GAP)) {
+      posY += height + GAP;
+    }
+  }
 
   board.nodes.push({
     id,
@@ -3808,6 +4144,59 @@ function removeNodesImmediately(nodeIds) {
   render();
 }
 
+function nodeCollidesWithOthers(board, nodeId, x, y, w, h, gap = 48) {
+  if (!board || !board.nodes) return false;
+  return board.nodes.some(other => {
+    if (other.id === nodeId) return false;
+    const otherW = Math.max(other.type === "image" ? 72 : 288, other.w || 288);
+    const otherH = nodeHeight(other);
+    return (
+      x < other.x + otherW + gap &&
+      x + w + gap > other.x &&
+      y < other.y + otherH + gap &&
+      y + h + gap > other.y
+    );
+  });
+}
+
+function findAllowedDragPosition(board, nodeId, targetX, targetY, w, h, currentX, currentY, gap = 48) {
+  if (!nodeCollidesWithOthers(board, nodeId, targetX, targetY, w, h, gap)) {
+    return { x: targetX, y: targetY };
+  }
+
+  if (!nodeCollidesWithOthers(board, nodeId, targetX, currentY, w, h, gap)) {
+    return { x: targetX, y: currentY };
+  }
+
+  if (!nodeCollidesWithOthers(board, nodeId, currentX, targetY, w, h, gap)) {
+    return { x: currentX, y: targetY };
+  }
+
+  const GRID = 24;
+  let bestX = currentX;
+  let bestY = currentY;
+
+  const stepX = Math.sign(targetX - currentX) * GRID;
+  if (stepX !== 0) {
+    let testX = currentX + stepX;
+    while ((stepX > 0 ? testX <= targetX : testX >= targetX) && !nodeCollidesWithOthers(board, nodeId, testX, currentY, w, h, gap)) {
+      bestX = testX;
+      testX += stepX;
+    }
+  }
+
+  const stepY = Math.sign(targetY - currentY) * GRID;
+  if (stepY !== 0) {
+    let testY = currentY + stepY;
+    while ((stepY > 0 ? testY <= targetY : testY >= targetY) && !nodeCollidesWithOthers(board, nodeId, bestX, testY, w, h, gap)) {
+      bestY = testY;
+      testY += stepY;
+    }
+  }
+
+  return { x: bestX, y: bestY };
+}
+
 function startResize(event, nodeId) {
   const board = activeBoard();
   const node = board.nodes.find(item => item.id === nodeId);
@@ -3822,16 +4211,38 @@ function startResize(event, nodeId) {
   selectedNodeId = nodeId;
   selectedLinkId = null;
   const card = nodesLayer.querySelector(`[data-id="${nodeId}"]`);
+
+  const GRID = 24;
+  const HEIGHT_GRID = GRID * 2;
+  const isImage = node.type === "image";
+  const minW = isImage ? 72 : 288;
+  const minH = isImage ? 48 : 96;
+
+  node.x = Math.round(node.x / GRID) * GRID;
+  node.y = Math.round(node.y / GRID) * GRID;
+  const initialW = Math.max(minW, Math.round((node.w || minW) / GRID) * GRID);
+  const initialH = Math.max(minH, Math.round((node.h || 144) / HEIGHT_GRID) * HEIGHT_GRID);
+  node.w = initialW;
+  node.h = initialH;
+
   resizeState = {
     nodeId,
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
-    width: node.w || 288,
-    height: node.h || (card ? card.offsetHeight : 144)
+    width: initialW,
+    height: initialH
   };
 
   card?.classList.add("resizing", "selected", "fixed-height");
+  if (card) {
+    card.style.left = `${node.x}px`;
+    card.style.top = `${node.y}px`;
+    card.style.width = `${node.w}px`;
+    card.style.minHeight = `${node.h}px`;
+    card.style.height = `${node.h}px`;
+    renderedHeights.set(node.id, node.h);
+  }
 
   const move = moveEvent => {
     if (!resizeState || moveEvent.pointerId !== resizeState.pointerId) {
@@ -3841,26 +4252,28 @@ function startResize(event, nodeId) {
     const zoom = activeView().zoom;
     const dx = (moveEvent.clientX - resizeState.startX) / zoom;
     const dy = (moveEvent.clientY - resizeState.startY) / zoom;
-    
-    const GRID = 24;
-    // Os dois eixos sao arredondados para a grade de forma independente, igual ao
-    // card de texto. A trava de proporcao antiga derivava um dos lados do outro
-    // (h = w / aspect) sem arredondar, e por isso o card de imagem parava em
-    // tamanhos fora da grade. Imagens aceitam largura menor que o card de texto,
-    // que so tem minimo de 288px por causa da barra de formatacao.
-    const minW = node.type === "image" ? 72 : 288;
-    node.w = Math.max(minW, Math.round((resizeState.width + dx) / GRID) * GRID);
-    node.h = Math.max(72, Math.round((resizeState.height + dy) / GRID) * GRID);
+
+    const candidateW = Math.max(minW, Math.round((resizeState.width + dx) / GRID) * GRID);
+    const candidateH = Math.max(minH, Math.round((resizeState.height + dy) / HEIGHT_GRID) * HEIGHT_GRID);
+
+    if (!nodeCollidesWithOthers(board, node.id, node.x, node.y, candidateW, candidateH)) {
+      node.w = candidateW;
+      node.h = candidateH;
+    } else {
+      if (!nodeCollidesWithOthers(board, node.id, node.x, node.y, candidateW, node.h)) {
+        node.w = candidateW;
+      }
+      if (!nodeCollidesWithOthers(board, node.id, node.x, node.y, node.w, candidateH)) {
+        node.h = candidateH;
+      }
+    }
 
     if (card) {
       card.style.width = `${node.w}px`;
       card.style.minHeight = `${node.h}px`;
-      card.style.height = "auto";
+      card.style.height = `${node.h}px`;
       card.classList.add("fixed-height");
-      // Sem isso nodeHeight() continua usando a altura em cache de antes do
-      // resize (renderedHeights tem prioridade sobre node.h), e os ports/arrows
-      // ficam parados enquanto o card e arrastado.
-      renderedHeights.set(node.id, card.offsetHeight);
+      renderedHeights.set(node.id, node.h);
     }
     renderLinks();
   };
@@ -3870,15 +4283,22 @@ function startResize(event, nodeId) {
       return;
     }
 
+    try {
+      event.currentTarget.releasePointerCapture(upEvent.pointerId);
+    } catch (_) { }
+
     resizeState = null;
     saveState();
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
     renderNodes();
+    renderLinks();
   };
 
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", stop);
+  window.addEventListener("pointercancel", stop);
 }
 
 // Aproxima o card arrastado do alinhamento de centro (horizontal e/ou vertical)
@@ -3929,19 +4349,26 @@ function startDrag(event, nodeId) {
   }
 
   finalizeZoomAnim();
-  if (!event.target.closest(".empty-image-card")) {
+  const isEditable = Boolean(event.target.closest("[contenteditable='true'], input, textarea"));
+  if (!event.target.closest(".empty-image-card") && !isEditable) {
     event.preventDefault();
   }
   event.currentTarget.setPointerCapture(event.pointerId);
   selectedNodeId = nodeId;
   selectedLinkId = null;
+  const GRID = 24;
+  node.x = Math.round(node.x / GRID) * GRID;
+  node.y = Math.round(node.y / GRID) * GRID;
+
   dragState = {
     nodeId,
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
     nodeX: node.x,
-    nodeY: node.y
+    nodeY: node.y,
+    lastValidX: node.x,
+    lastValidY: node.y
   };
 
   const card = nodesLayer.querySelector(`[data-id="${nodeId}"]`);
@@ -3957,12 +4384,27 @@ function startDrag(event, nodeId) {
     node.y = dragState.nodeY + (moveEvent.clientY - dragState.startY) / zoom;
 
     const snap = computeAlignmentSnap(board, node, zoom);
-    const GRID = 24;
-    if (snap.guideX === null) snap.x = Math.round(snap.x / GRID) * GRID;
-    if (snap.guideY === null) snap.y = Math.round(snap.y / GRID) * GRID;
+    const targetX = Math.round(snap.x / GRID) * GRID;
+    const targetY = Math.round(snap.y / GRID) * GRID;
 
-    node.x = snap.x;
-    node.y = snap.y;
+    const w = Math.max(node.type === "image" ? 72 : 288, node.w || 288);
+    const h = nodeHeight(node);
+
+    const allowed = findAllowedDragPosition(
+      board,
+      node.id,
+      targetX,
+      targetY,
+      w,
+      h,
+      dragState.lastValidX,
+      dragState.lastValidY
+    );
+
+    dragState.lastValidX = allowed.x;
+    dragState.lastValidY = allowed.y;
+    node.x = allowed.x;
+    node.y = allowed.y;
     dragState.snap = snap;
 
     if (card) {
@@ -3977,29 +4419,37 @@ function startDrag(event, nodeId) {
       return;
     }
 
+    try {
+      event.currentTarget.releasePointerCapture(upEvent.pointerId);
+    } catch (_) { }
+
     const distance = Math.hypot(upEvent.clientX - dragState.startX, upEvent.clientY - dragState.startY);
     const didMove = distance >= 5;
 
     dragState = null;
-    
+
     if (didMove) {
       saveState();
     } else {
-      // Handle clicks on empty image card manually since renderNodes destroys the DOM
       if (upEvent.target.closest(".empty-image-card")) {
         document.getElementById('updateImageInput').click();
         window.nodeToUpdateImage = nodeId;
+      } else if (upEvent.target.closest(".root-card-title")) {
+        const titleEl = upEvent.target.closest(".root-card-title");
+        titleEl?.focus();
       }
     }
 
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
     renderNodes();
     renderLinks();
   };
 
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", stop);
+  window.addEventListener("pointercancel", stop);
 }
 
 function nextStatus(status) {
@@ -4053,7 +4503,7 @@ function renderBodyHtml(text) {
     html += preserveFormatTags(escapeHtmlPreservingFormats(source.slice(lastIndex, index)));
 
     if (match[0].startsWith("![image](")) {
-      html += `<img src="${escapeAttr(match[1])}" style="max-width: 100%; border-radius: 4px; margin: 4px 0;" />`;
+      html += `<span class="card-inline-img-wrap" contenteditable="false"><img src="${escapeAttr(match[1])}" alt="Card image" draggable="false" /><button type="button" class="card-inline-img-del" title="Apagar imagem" aria-label="Apagar imagem">${icons.close}</button></span>`;
     } else if (match[3]) {
       html += renderAttachmentReferenceHtml(match[2], match[3], match[0]);
     } else if (match[4] !== undefined) {
@@ -4102,7 +4552,10 @@ function serializeEditableContent(el) {
     if (node.nodeType === Node.TEXT_NODE) {
       result += node.textContent;
     } else if (node.nodeType === Node.ELEMENT_NODE) {
-      if (node.matches?.(".card-attachment-link")) {
+      if (node.matches?.(".card-inline-img-wrap")) {
+        const img = node.querySelector("img");
+        if (img) result += `![image](${img.getAttribute("src")})`;
+      } else if (node.matches?.(".card-attachment-link")) {
         result += node.dataset.attachmentToken || "";
       } else if (node.matches?.(".card-todo-wrap") || node.matches?.(".card-todo-btn")) {
         const wrap = node.matches?.(".card-todo-wrap") ? node : node.closest(".card-todo-wrap");
@@ -4337,9 +4790,67 @@ function handleClipboardPaste(event) {
     return;
   }
 
+  const isImage = file.type?.startsWith("image/");
+  if (isImage) {
+    const targetCard = event.target?.closest?.(".task-card")
+      || document.activeElement?.closest?.(".task-card")
+      || document.querySelector(".task-card:hover")
+      || (selectedNodeId ? document.querySelector(`.task-card[data-id="${selectedNodeId}"]`) : null);
+
+    if (targetCard && !targetCard.classList.contains("root-card")) {
+      const board = activeBoard();
+      const node = board?.nodes?.find(n => n.id === targetCard.dataset.id);
+      if (node) {
+        event.preventDefault();
+        attachImageToCard(node, targetCard, file);
+        return;
+      }
+    }
+  }
+
   event.preventDefault();
   preserveAttachmentReferenceTarget(event.target);
   openClipboardAttachModal(file);
+}
+
+function attachImageToCard(node, cardEl, file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const dataUrl = e.target.result;
+    if (node.type === "image") {
+      const img = new Image();
+      img.onload = () => {
+        applyImageNodeSize(node, img.width, img.height);
+        node.imageUrl = dataUrl;
+        saveState();
+        renderNodes();
+        renderLinks();
+      };
+      img.src = dataUrl;
+    } else {
+      const editor = cardEl.querySelector(".card-body");
+      if (editor && (document.activeElement === editor || editor.contains(document.activeElement))) {
+        editor.focus();
+        document.execCommand("insertImage", false, dataUrl);
+        document.execCommand("insertHTML", false, "<br>&#8203;");
+        setNodeContent(node, serializeEditableContent(editor));
+        saveState();
+        renderNodes();
+        renderLinks();
+        setTimeout(() => {
+          scheduleNodeHeightSync(node.id, cardEl);
+        }, 50);
+      } else {
+        const currentContent = getNodeContent(node) || "";
+        const separator = currentContent.endsWith("\n") || !currentContent ? "" : "\n";
+        setNodeContent(node, currentContent + separator + `![image](${dataUrl})\n`);
+        saveState();
+        renderNodes();
+        renderLinks();
+      }
+    }
+  };
+  reader.readAsDataURL(file);
 }
 
 function getClipboardAttachmentFile(data) {
@@ -4886,18 +5397,23 @@ const RECORDING_VIDEO_BPS = 2500000;
 const RECORDING_AUDIO_BPS = 128000;
 
 let recordingState = null;
+let isStartingRecording = false;
 let recordingTimerInterval = null;
 
 async function toggleScreenRecording() {
   if (recordingState) {
+    // Evita que um clique duplo acidental logo ao fechar o seletor de tela pare a gravacao imediatamente.
+    if (Date.now() - recordingState.startedAt < 650) {
+      return;
+    }
     stopScreenRecording();
-  } else {
+  } else if (!isStartingRecording) {
     await startScreenRecording();
   }
 }
 
 async function startScreenRecording() {
-  if (recordingState) return;
+  if (recordingState || isStartingRecording) return;
 
   if (!navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === "undefined") {
     console.warn("Gravacao de tela nao suportada neste ambiente");
@@ -4912,121 +5428,224 @@ async function startScreenRecording() {
   const task = activeMainTask();
   if (!user || !task) return;
 
-  let displayStream;
+  isStartingRecording = true;
   try {
-    displayStream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        displaySurface: "monitor",
-        frameRate: { ideal: 10, max: 15 }
-      },
-      audio: true
+    let displayStream;
+    try {
+      displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          displaySurface: "monitor",
+          frameRate: { ideal: 15, max: 24 }
+        },
+        audio: true
+      });
+    } catch (error) {
+      // Usuario cancelou a selecao ou negou a permissao.
+      console.info("Gravacao nao iniciada", error);
+      return;
+    }
+
+    const videoTracks = displayStream.getVideoTracks().filter(track => track.readyState === "live");
+    if (!videoTracks.length) {
+      stopAllTracks([displayStream]);
+      return;
+    }
+
+    // Tenta tambem capturar o microfone para narrar; opcional.
+    let micStream = null;
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      });
+    } catch (error) {
+      console.info("Microfone indisponivel; gravando apenas o audio do sistema", error);
+    }
+
+    const mixed = await mixAudioStreams([displayStream, micStream]);
+
+    // Abre o arquivo destino agora: a pasta fica presa na task escolhida
+    // aqui, mesmo que o usuario troque de task durante a gravacao.
+    const sessionId = makeId("rec");
+    const fileName = buildRecordingFileName();
+    const subDir = `task${task.number}/anexos`;
+    let target = null;
+    let useMemoryFallback = false;
+    try {
+      target = await invoke("recording_begin", {
+        sessionId,
+        userId: user.id,
+        subDir,
+        fileName
+      });
+    } catch (error) {
+      console.warn("Falha ao abrir sessao em disco; usando buffer em memoria como fallback", error);
+      useMemoryFallback = true;
+    }
+
+    const recState = {
+      recorder: null,
+      displayStream,
+      micStream,
+      audioContext: mixed.context,
+      audioTracks: mixed.tracks,
+      sessionId,
+      fileName,
+      subDir,
+      targetFile: target?.file || "",
+      userId: user.id,
+      taskId: task.id,
+      startedAt: Date.now(),
+      bytesWritten: 0,
+      chunksProduced: 0,
+      fallbackProfile: 0,
+      useMemoryFallback,
+      fallbackChunks: [],
+      writeChain: Promise.resolve(),
+      writeError: null,
+      userStopped: false,
+      finalized: false
+    };
+
+    if (!startRecorderForState(recState, 0)) {
+      stopAllTracks([displayStream, micStream]);
+      closeAudioContext(mixed.context);
+      if (!useMemoryFallback) {
+        invoke("recording_abort", { sessionId, discard: true }).catch(() => { });
+      }
+      return;
+    }
+
+    recordingState = recState;
+
+    // Se o usuario parar o compartilhamento pela UI nativa do sistema.
+    videoTracks.forEach(track => {
+      track.addEventListener("ended", () => {
+        if (recordingState === recState) {
+          stopScreenRecording();
+        }
+      });
     });
-  } catch (error) {
-    // Usuario cancelou a selecao ou negou a permissao.
-    console.info("Gravacao nao iniciada", error);
-    return;
+
+    updateRecordingUi(true);
+  } finally {
+    isStartingRecording = false;
   }
+}
 
-  // Tenta tambem capturar o microfone para narrar; opcional.
-  let micStream = null;
-  try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (error) {
-    console.info("Microfone indisponivel; gravando apenas o audio do sistema", error);
-  }
+function buildStreamAndRecorder(recState, profileIndex) {
+  const videoTracks = recState.displayStream
+    .getVideoTracks()
+    .filter(track => track.readyState === "live");
+  if (!videoTracks.length) return null;
 
-  const mixed = mixAudioStreams([displayStream, micStream]);
-  const recordStream = new MediaStream([
-    ...displayStream.getVideoTracks(),
-    ...mixed.tracks
-  ]);
+  // Profile 0: video + audio (se houver) com codec VP8 estavel e bitrates controlados
+  // Profile 1: video + audio (se houver) com opcoes nativas padrao do WebView2
+  // Profile 2: somente video com opcoes nativas padrao (isola falhas de driver/encoder de audio corporativo)
+  const includeAudio = profileIndex < 2;
+  const liveAudioTracks = includeAudio
+    ? (recState.audioTracks || []).filter(track => track.readyState === "live" && track.enabled)
+    : [];
 
-  const mimeType = pickRecorderMimeType();
-  let recorder;
-  try {
-    recorder = new MediaRecorder(recordStream, {
+  const stream = new MediaStream([...videoTracks, ...liveAudioTracks]);
+  const hasAudio = liveAudioTracks.length > 0;
+
+  const candidates = [];
+  if (profileIndex === 0) {
+    const mimeType = pickRecorderMimeType(hasAudio);
+    candidates.push({
       ...(mimeType ? { mimeType } : {}),
       videoBitsPerSecond: RECORDING_VIDEO_BPS,
-      audioBitsPerSecond: RECORDING_AUDIO_BPS
+      ...(hasAudio ? { audioBitsPerSecond: RECORDING_AUDIO_BPS } : {})
     });
-  } catch (error) {
-    console.warn("Falha ao criar o gravador", error);
-    stopAllTracks([displayStream, micStream]);
-    closeAudioContext(mixed.context);
-    return;
   }
+  if (profileIndex <= 1) {
+    const basicMime = pickRecorderMimeType(hasAudio);
+    if (basicMime) {
+      candidates.push({ mimeType: basicMime });
+    }
+  }
+  candidates.push(undefined);
 
-  // Abre o arquivo destino agora: a pasta fica presa na task escolhida
-  // aqui, mesmo que o usuario troque de task durante a gravacao.
-  const sessionId = makeId("rec");
-  const fileName = buildRecordingFileName();
-  const subDir = `task${task.number}/anexos`;
-  let target;
-  try {
-    target = await invoke("recording_begin", {
-      sessionId,
-      userId: user.id,
-      subDir,
-      fileName
+  for (const options of candidates) {
+    try {
+      const recorder = options ? new MediaRecorder(stream, options) : new MediaRecorder(stream);
+      return recorder;
+    } catch (err) {
+      console.warn("Tentativa de criacao do MediaRecorder falhou, tentando proximo perfil", options, err);
+    }
+  }
+  return null;
+}
+
+function startRecorderForState(recState, startProfile = 0) {
+  for (let profile = startProfile; profile <= 2; profile++) {
+    const recorder = buildStreamAndRecorder(recState, profile);
+    if (!recorder) continue;
+
+    recState.fallbackProfile = profile;
+    recState.recorder = recorder;
+
+    recorder.addEventListener("dataavailable", event => {
+      if (event.data && event.data.size > 0) {
+        recState.chunksProduced += 1;
+        queueRecordingChunk(recState, event.data);
+      }
     });
-  } catch (error) {
-    console.warn("Falha ao preparar o arquivo da gravacao", error);
-    stopAllTracks([displayStream, micStream]);
-    closeAudioContext(mixed.context);
-    return;
+
+    recorder.addEventListener("error", event => {
+      console.warn(`Erro no MediaRecorder (perfil ${profile})`, event?.error || event);
+      if (!recState.userStopped && recState.chunksProduced === 0 && profile < 2) {
+        recState.recovering = true;
+        if (startRecorderForState(recState, profile + 1)) {
+          recState.recovering = false;
+          return;
+        }
+        recState.recovering = false;
+      }
+    });
+
+    recorder.addEventListener("stop", () => {
+      if (recState.recovering) return;
+      if (recState.recorder !== recorder) return;
+
+      const hasLiveVideo = recState.displayStream
+        .getVideoTracks()
+        .some(track => track.readyState === "live");
+
+      // Se o encoder parou sozinho logo no inicio sem produzir dados (comum em GPUs/drivers corporativos
+      // quando um codec ou faixa de audio falha no primeiro frame), reabre automaticamente no proximo perfil.
+      if (!recState.userStopped && recState.chunksProduced === 0 && hasLiveVideo && profile < 2) {
+        console.warn(`MediaRecorder parou prematuramente no perfil ${profile}; alternando para perfil ${profile + 1}`);
+        if (startRecorderForState(recState, profile + 1)) {
+          return;
+        }
+      }
+
+      finalizeRecording(recState);
+    });
+
+    try {
+      recorder.start(RECORDING_TIMESLICE_MS);
+      return true;
+    } catch (err) {
+      console.warn(`recorder.start falhou no perfil ${profile}`, err);
+    }
   }
-
-  const recState = {
-    recorder,
-    displayStream,
-    micStream,
-    audioContext: mixed.context,
-    sessionId,
-    targetFile: target?.file || "",
-    userId: user.id,
-    taskId: task.id,
-    startedAt: Date.now(),
-    bytesWritten: 0,
-    writeChain: Promise.resolve(),
-    writeError: null,
-    finalized: false
-  };
-  recordingState = recState;
-
-  recorder.addEventListener("dataavailable", event => {
-    if (event.data && event.data.size > 0) queueRecordingChunk(recState, event.data);
-  });
-  recorder.addEventListener("stop", () => {
-    finalizeRecording(recState);
-  });
-
-  // Se o usuario parar o compartilhamento pela UI nativa do sistema.
-  displayStream.getVideoTracks().forEach(track => {
-    track.addEventListener("ended", () => stopScreenRecording());
-  });
-
-  try {
-    recorder.start(RECORDING_TIMESLICE_MS);
-  } catch (error) {
-    console.warn("Falha ao iniciar o gravador", error);
-    recordingState = null;
-    stopAllTracks([displayStream, micStream]);
-    closeAudioContext(mixed.context);
-    invoke("recording_abort", { sessionId, discard: true }).catch(() => {});
-    return;
-  }
-
-  updateRecordingUi(true);
+  return false;
 }
 
 function stopScreenRecording() {
   const recState = recordingState;
   if (!recState) return;
+  recState.userStopped = true;
   // Zera ja para evitar reentrancia (clique + evento "ended" do track).
   recordingState = null;
   updateRecordingUi(false);
   try {
-    if (recState.recorder.state !== "inactive") {
+    if (recState.recorder && recState.recorder.state !== "inactive") {
       recState.recorder.stop();
     } else {
       finalizeRecording(recState);
@@ -5039,8 +5658,15 @@ function stopScreenRecording() {
 
 // Cada pedaco vai para o disco assim que sai do gravador, na ordem.
 function queueRecordingChunk(recState, blob) {
+  if (recState.useMemoryFallback) {
+    recState.fallbackChunks.push(blob);
+    return;
+  }
   recState.writeChain = recState.writeChain.then(async () => {
-    if (recState.writeError) return;
+    if (recState.useMemoryFallback) {
+      recState.fallbackChunks.push(blob);
+      return;
+    }
     try {
       const chunk = await blobToBase64(blob);
       if (!chunk) return;
@@ -5049,10 +5675,9 @@ function queueRecordingChunk(recState, blob) {
         chunk
       });
     } catch (error) {
-      recState.writeError = error;
-      console.warn("Falha ao gravar pedaco do video", error);
-      // Encerra a captura: o que ja foi escrito continua salvo.
-      if (recordingState === recState) stopScreenRecording();
+      console.warn("Falha ao gravar pedaco em streaming; mantendo chunks seguintes em memoria", error);
+      recState.useMemoryFallback = true;
+      recState.fallbackChunks.push(blob);
     }
   });
 }
@@ -5073,6 +5698,10 @@ function blobToBase64(blob) {
 async function finalizeRecording(recState) {
   if (recState.finalized) return;
   recState.finalized = true;
+  if (recordingState === recState) {
+    recordingState = null;
+    updateRecordingUi(false);
+  }
   showRecordingSavingState();
 
   stopAllTracks([recState.displayStream, recState.micStream]);
@@ -5091,14 +5720,36 @@ async function finalizeRecording(recState) {
   }
 
   let info = null;
-  try {
-    info = await invoke("recording_finish", { sessionId: recState.sessionId });
-  } catch (error) {
-    console.warn("Falha ao fechar o arquivo da gravacao", error);
-    hideRecordingIndicator();
-    return;
+  if (!recState.useMemoryFallback) {
+    try {
+      info = await invoke("recording_finish", { sessionId: recState.sessionId });
+    } catch (error) {
+      console.warn("Falha ao fechar o arquivo da gravacao em streaming", error);
+    }
+  } else {
+    invoke("recording_abort", { sessionId: recState.sessionId, discard: true }).catch(() => { });
   }
+
+  if (!info && recState.fallbackChunks.length > 0) {
+    try {
+      const fullBlob = new Blob(recState.fallbackChunks, { type: "video/webm" });
+      const buffer = await fullBlob.arrayBuffer();
+      const bytes = Array.from(new Uint8Array(buffer));
+      if (bytes.length > 0) {
+        info = await invoke("attachment_save_from_bytes", {
+          userId: recState.userId,
+          subDir: recState.subDir,
+          fileName: recState.fileName,
+          bytes
+        });
+      }
+    } catch (fallbackErr) {
+      console.warn("Falha ao salvar gravacao via fallback em memoria", fallbackErr);
+    }
+  }
+
   hideRecordingIndicator();
+  if (!info) return;
 
   const targetUser = state.users.find(u => u.id === recState.userId) || null;
   const targetTask = targetUser?.tasks.find(t => t.id === recState.taskId) || null;
@@ -5111,21 +5762,38 @@ async function finalizeRecording(recState) {
   pushAttachment(targetTask, info, "video/webm");
 }
 
-function mixAudioStreams(streams) {
-  const withAudio = streams.filter(stream => stream && stream.getAudioTracks().length > 0);
-  if (withAudio.length === 0) return { tracks: [], context: null };
-  if (withAudio.length === 1) return { tracks: withAudio[0].getAudioTracks(), context: null };
+async function mixAudioStreams(streams) {
+  const liveTrackGroups = streams
+    .filter(Boolean)
+    .map(stream => stream.getAudioTracks().filter(track => track.readyState === "live" && track.enabled))
+    .filter(tracks => tracks.length > 0);
+
+  if (liveTrackGroups.length === 0) return { tracks: [], context: null };
+  if (liveTrackGroups.length === 1) return { tracks: liveTrackGroups[0], context: null };
 
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  if (!AudioCtx) return { tracks: withAudio[0].getAudioTracks(), context: null };
+  if (!AudioCtx) return { tracks: liveTrackGroups[0], context: null };
 
-  const context = new AudioCtx();
-  const destination = context.createMediaStreamDestination();
-  withAudio.forEach(stream => {
-    const source = context.createMediaStreamSource(new MediaStream(stream.getAudioTracks()));
-    source.connect(destination);
-  });
-  return { tracks: destination.stream.getAudioTracks(), context };
+  let context = null;
+  try {
+    context = new AudioCtx();
+    if (context.state === "suspended") {
+      await context.resume().catch(() => { });
+    }
+    const destination = context.createMediaStreamDestination();
+    liveTrackGroups.forEach(tracks => {
+      const source = context.createMediaStreamSource(new MediaStream(tracks));
+      source.connect(destination);
+    });
+    const mixedTracks = destination.stream.getAudioTracks().filter(t => t.readyState === "live");
+    if (mixedTracks.length > 0) {
+      return { tracks: mixedTracks, context };
+    }
+  } catch (err) {
+    console.warn("Falha ao mixar faixas de audio; usando faixa primaria", err);
+    closeAudioContext(context);
+  }
+  return { tracks: liveTrackGroups[0], context: null };
 }
 
 function stopAllTracks(streams) {
@@ -5143,15 +5811,19 @@ async function closeAudioContext(context) {
   }
 }
 
-function pickRecorderMimeType() {
+function pickRecorderMimeType(hasAudio = true) {
   if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return "";
-  const candidates = [
-    "video/webm;codecs=vp9,opus",
-    "video/webm;codecs=vp8,opus",
-    "video/webm;codecs=vp9",
-    "video/webm;codecs=vp8",
-    "video/webm"
-  ];
+  const candidates = hasAudio
+    ? [
+        "video/webm;codecs=vp8,opus",
+        "video/webm;codecs=vp9,opus",
+        "video/webm"
+      ]
+    : [
+        "video/webm;codecs=vp8",
+        "video/webm;codecs=vp9",
+        "video/webm"
+      ];
   return candidates.find(type => MediaRecorder.isTypeSupported(type)) || "";
 }
 
@@ -5227,6 +5899,356 @@ function hideRecordingIndicator() {
   recordingIndicator.hidden = true;
 }
 
+// ------------------------------------------------------------------
+// Transcricao continua em 1 clique no card via Google Gemini AI.
+// Clicou no icone de IA do card -> comeca imediatamente a ouvir e transcrever
+// no proprio card em tempo real (a cada intervalo + ao clicar novamente para parar).
+// ------------------------------------------------------------------
+const GEMINI_API_KEY_STORAGE = "todocompanion.settings.geminiApiKey";
+const DEFAULT_ENV_GEMINI_KEY = "";
+const DEFAULT_ENV_GEMINI_MODEL = "gemini-3.5-flash-lite";
+const LIVE_TRANSCRIBE_INTERVAL_MS = 5500;
+
+let transcribeState = null;
+let isStartingTranscription = false;
+
+function getGeminiApiKey() {
+  return (localStorage.getItem(GEMINI_API_KEY_STORAGE) || "").trim() || DEFAULT_ENV_GEMINI_KEY;
+}
+
+function handleTranscribeTriggerClick(event, targetNodeId = null) {
+  event?.stopPropagation();
+  if (!targetNodeId) return;
+
+  if (transcribeState) {
+    if (Date.now() - transcribeState.startedAt < 400) return;
+    const wasSameCard = transcribeState.targetNodeId === targetNodeId;
+    stopAudioTranscription();
+    if (!wasSameCard) {
+      startAudioTranscription(targetNodeId);
+    }
+    return;
+  }
+
+  if (recordingState || isStartingRecording || isStartingTranscription) {
+    return;
+  }
+
+  startAudioTranscription(targetNodeId);
+}
+
+function pickAudioRecorderMimeType() {
+  if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return "";
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/mp4"
+  ];
+  return candidates.find(type => MediaRecorder.isTypeSupported(type)) || "";
+}
+
+function createSegmentRecorder(stream, mimeType, onBlobReady) {
+  if (!stream) return null;
+  let rec = null;
+  try {
+    rec = mimeType
+      ? new MediaRecorder(stream, { mimeType, audioBitsPerSecond: RECORDING_AUDIO_BPS })
+      : new MediaRecorder(stream);
+  } catch (_) {
+    try {
+      rec = new MediaRecorder(stream);
+    } catch (err) {
+      return null;
+    }
+  }
+  const segChunks = [];
+  rec.addEventListener("dataavailable", e => {
+    if (e.data && e.data.size > 0) segChunks.push(e.data);
+  });
+  rec.addEventListener("stop", () => {
+    if (segChunks.length > 0) {
+      const cleanMime = String(rec.mimeType || mimeType || "audio/webm").split(";")[0].trim() || "audio/webm";
+      const blob = new Blob(segChunks, { type: cleanMime });
+      onBlobReady(blob, cleanMime);
+    } else {
+      onBlobReady(null, "audio/webm");
+    }
+  });
+  try {
+    rec.start();
+    return rec;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function startAudioTranscription(targetNodeId) {
+  if (!targetNodeId || transcribeState || recordingState || isStartingTranscription) return;
+
+  const user = activeUser();
+  const task = activeMainTask();
+  if (!user || !task) return;
+
+  isStartingTranscription = true;
+  let nativeCaptureStarted = false;
+  let micStream = null;
+
+  try {
+    // 1. Captura nativa em Rust (WASAPI Loopback do PC/Videos + Microfone simultaneos sem popup)
+    if (invoke) {
+      try {
+        await invoke("ai_audio_capture_start");
+        nativeCaptureStarted = true;
+      } catch (err) {
+        console.warn("Captura nativa WASAPI indisponivel; usando WebView2", err);
+      }
+    }
+
+    // 2. Fallback WebView2 caso o binario Rust ainda nao tenha sido reiniciado
+    if (!nativeCaptureStarted) {
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+      } catch (err) {
+        console.info("Microfone WebView2 indisponivel", err);
+      }
+    }
+
+    const liveAudioTracks = micStream
+      ? micStream.getAudioTracks().filter(t => t.readyState === "live" && t.enabled)
+      : [];
+
+    if (!nativeCaptureStarted && !liveAudioTracks.length) {
+      stopAllTracks([micStream]);
+      return;
+    }
+
+    const audioStream = liveAudioTracks.length ? new MediaStream(liveAudioTracks) : null;
+    const mimeType = pickAudioRecorderMimeType();
+
+    const tState = {
+      nativeCaptureStarted,
+      audioStream,
+      micStream,
+      mimeType,
+      activeRecorder: null,
+      intervalId: null,
+      flushChain: Promise.resolve(),
+      userId: user.id,
+      taskId: task.id,
+      targetNodeId,
+      startedAt: Date.now(),
+      stopped: false
+    };
+
+    if (audioStream) {
+      tState.activeRecorder = createSegmentRecorder(audioStream, mimeType, (blob, cleanMime) => {
+        queueSegmentTranscription(tState, false, blob, cleanMime);
+      });
+    }
+
+    tState.intervalId = window.setInterval(() => {
+      if (transcribeState !== tState || tState.stopped) return;
+      flushLiveAudioSegment(tState, false);
+    }, LIVE_TRANSCRIBE_INTERVAL_MS);
+
+    transcribeState = tState;
+    updateTranscribeUi(true, targetNodeId);
+  } finally {
+    isStartingTranscription = false;
+  }
+}
+
+function flushLiveAudioSegment(tState, isFinalStop = false) {
+  if (tState.nativeCaptureStarted) {
+    queueSegmentTranscription(tState, isFinalStop, null, "audio/wav");
+    return;
+  }
+
+  const prevRecorder = tState.activeRecorder;
+  if (!isFinalStop && tState.audioStream) {
+    tState.activeRecorder = createSegmentRecorder(tState.audioStream, tState.mimeType, (blob, cleanMime) => {
+      queueSegmentTranscription(tState, false, blob, cleanMime);
+    });
+  } else {
+    tState.activeRecorder = null;
+  }
+
+  if (prevRecorder && prevRecorder.state !== "inactive") {
+    try {
+      prevRecorder.stop();
+    } catch (_) {}
+  }
+}
+
+function queueSegmentTranscription(tState, isFinalStop, jsBlob = null, cleanMime = "audio/webm") {
+  tState.flushChain = tState.flushChain.then(async () => {
+    try {
+      let base64Audio = "";
+      if (jsBlob && jsBlob.size >= 512) {
+        base64Audio = await blobToBase64(jsBlob);
+      }
+
+      let transcript = "";
+      if (tState.nativeCaptureStarted && invoke) {
+        transcript = await invoke("ai_audio_capture_flush_and_transcribe", {
+          stop: isFinalStop,
+          fallbackMimeType: cleanMime,
+          fallbackAudioBase64: base64Audio || null
+        });
+      } else if (base64Audio) {
+        transcript = await requestGeminiTranscription(getGeminiApiKey(), cleanMime, base64Audio);
+      }
+
+      const cleaned = String(transcript || "").trim();
+      if (cleaned) {
+        insertTranscriptionIntoBoard(tState, cleaned);
+      }
+    } catch (err) {
+      console.warn("Falha ao transcrever trecho de audio", err);
+    }
+  });
+}
+
+function stopAudioTranscription() {
+  const tState = transcribeState;
+  if (!tState || tState.stopped) return;
+  tState.stopped = true;
+  transcribeState = null;
+
+  if (tState.intervalId) {
+    window.clearInterval(tState.intervalId);
+    tState.intervalId = null;
+  }
+
+  updateTranscribeUi(false, tState.targetNodeId);
+  flushLiveAudioSegment(tState, true);
+
+  tState.flushChain.finally(() => {
+    stopAllTracks([tState.micStream]);
+  });
+}
+
+async function requestGeminiTranscription(apiKey, mimeType, audioBase64) {
+  if (invoke) {
+    try {
+      const text = await invoke("transcribe_audio_gemini", {
+        apiKey: apiKey || null,
+        mimeType,
+        audioBase64
+      });
+      if (typeof text === "string") {
+        return text;
+      }
+    } catch (rustErr) {
+      console.warn("Fallback para fetch no browser apos erro no backend Rust", rustErr);
+    }
+  }
+
+  const prompt =
+    "Transcreva fielmente todo o áudio a seguir no idioma original falado.\n" +
+    "Regras obrigatórias:\n" +
+    "1. Diferencie quem está falando (diarização de locutores). Sempre que houver mais de uma pessoa falando (por exemplo, diálogo entre pessoas, reunião ou vídeo com diferentes vozes), identifique cada fala em uma nova linha colocando o identificador do locutor no início, como 'Locutor 1:', 'Locutor 2:' (ou o nome real da pessoa se for mencionado no áudio).\n" +
+    "2. Se houver apenas uma única pessoa falando durante todo o áudio, transcreva o texto diretamente com pontuação adequada e parágrafos claros.\n" +
+    "3. Retorne APENAS a transcrição pronta, sem introduções, sem títulos e sem comentários extras. Se não houver fala audível, retorne apenas uma string vazia.";
+
+  const models = [DEFAULT_ENV_GEMINI_MODEL, "gemini-3.8-flash", "gemini-3.1-flash-lite-preview"];
+  const keyToUse = apiKey || DEFAULT_ENV_GEMINI_KEY;
+  let lastError = new Error("Could not reach Gemini API");
+
+  for (const model of models) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(keyToUse)}`;
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: prompt },
+                {
+                  inlineData: {
+                    mimeType,
+                    data: audioBase64
+                  }
+                }
+              ]
+            }
+          ],
+          generationConfig: { temperature: 0.1 }
+        })
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        lastError = new Error(`Gemini HTTP ${resp.status}: ${errText}`);
+        if (resp.status === 401 || resp.status === 403) {
+          throw lastError;
+        }
+        continue;
+      }
+
+      const data = await resp.json();
+      const parts = data?.candidates?.[0]?.content?.parts || [];
+      return parts
+        .map(p => (typeof p.text === "string" ? p.text.trim() : ""))
+        .filter(Boolean)
+        .join("\n");
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError;
+}
+
+function insertTranscriptionIntoBoard(tState, transcriptText) {
+  const targetUser = state.users.find(u => u.id === tState.userId) || activeUser();
+  const targetBoard = targetUser?.tasks.find(t => t.id === tState.taskId) || activeBoard();
+  if (!targetBoard) return;
+
+  const node = tState.targetNodeId
+    ? targetBoard.nodes.find(n => n.id === tState.targetNodeId)
+    : null;
+  if (!node) return;
+
+  const cardEl = nodesLayer.querySelector(`[data-id="${node.id}"]`);
+  const editor = cardEl?.querySelector(".card-body");
+  if (editor && document.activeElement === editor) {
+    setNodeContent(node, serializeEditableContent(editor));
+  }
+
+  const existing = String(getNodeContent(node) || "").trim();
+  const combined = existing ? `${existing}\n${transcriptText}` : transcriptText;
+  setNodeContent(node, combined);
+
+  saveState();
+  if (editor) {
+    editor.innerHTML = renderBodyHtml(getNodeContent(node));
+    scheduleNodeHeightSync(node.id, cardEl);
+  } else {
+    renderNodes();
+    renderLinks();
+  }
+}
+
+function updateTranscribeUi(active, targetNodeId = null) {
+  document.querySelectorAll(".card-transcribe-btn").forEach(btn => {
+    const card = btn.closest(".task-card");
+    const isTarget = Boolean(active && card && card.dataset.id === targetNodeId);
+    btn.classList.toggle("recording", isTarget);
+    btn.title = isTarget ? "Stop AI transcription" : "Transcribe audio with AI";
+  });
+}
+
 let dropOverActive = false;
 function isPointInsideBoardShell(point) {
   if (!point) return false;
@@ -5249,7 +6271,7 @@ function setDropOverlay(inside, cardId = null) {
       if (overlay) overlay.remove();
     }
   }
-  
+
   if (cardId) {
     if (dropOverActive && canvasDropOverlay) {
       canvasDropOverlay.classList.remove("visible");
@@ -5298,7 +6320,7 @@ async function setupFileDrop() {
     const px = Number(event.payload?.position?.x || 0) / scale;
     const py = Number(event.payload?.position?.y || 0) / scale;
     const inside = isPointInsideBoardShell(event.payload?.position);
-    
+
     let cardId = null;
     if (inside) {
       const el = document.elementFromPoint(px, py);
@@ -5356,7 +6378,7 @@ async function setupFileDrop() {
                 renderNodes();
               }
             }
-          } catch(e) {
+          } catch (e) {
             console.warn("Falha ao salvar anexo no card", e);
           }
         }
@@ -5398,11 +6420,13 @@ function handleAttachButtonClick() {
 
 function openAttachmentsPopup() {
   renderAttachmentsPopup();
+  canvasAttachButton?.classList.add("active");
   attachmentsPopup.hidden = false;
   requestAnimationFrame(() => attachmentsPopup.classList.add("visible"));
 }
 
 function closeAttachmentsPopup() {
+  canvasAttachButton?.classList.remove("active");
   attachmentsPopup.classList.remove("visible");
   attachmentsPopup.hidden = true;
 }
@@ -5516,4 +6540,135 @@ function formatFileSize(bytes) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+// -------------------------------------------------------------
+// VISUALIZADOR DE IMAGEM EM TELA CHEIA (ZOOM & PAN INTERATIVO)
+// -------------------------------------------------------------
+
+function initImageFullscreenModal() {
+  const modal = document.getElementById("imageFullscreenModal");
+  const img = document.getElementById("imageFullscreenImg");
+  const canvas = document.getElementById("imageFullscreenCanvas");
+  const closeBtn = document.getElementById("imageFullscreenClose");
+  const zoomInBtn = document.getElementById("imageFullscreenZoomIn");
+  const zoomOutBtn = document.getElementById("imageFullscreenZoomOut");
+  const zoomResetBtn = document.getElementById("imageFullscreenZoomReset");
+  const zoomBadge = document.getElementById("imageFullscreenZoomBadge");
+
+  if (!modal || !img || !canvas) return;
+
+  const state = {
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    isDragging: false,
+    dragStartX: 0,
+    dragStartY: 0
+  };
+
+  function applyTransform() {
+    img.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+    if (zoomBadge) {
+      zoomBadge.textContent = `${Math.round(state.zoom * 100)}%`;
+    }
+  }
+
+  function resetZoom() {
+    state.zoom = 1;
+    state.panX = 0;
+    state.panY = 0;
+    applyTransform();
+  }
+
+  function changeZoom(factor, clientX = null, clientY = null) {
+    const prevZoom = state.zoom;
+    const nextZoom = clamp(prevZoom * factor, 0.4, 8.0);
+    if (clientX !== null && clientY !== null) {
+      const rect = canvas.getBoundingClientRect();
+      const ox = clientX - rect.left - rect.width / 2;
+      const oy = clientY - rect.top - rect.height / 2;
+      state.panX -= (ox - state.panX) * (nextZoom / prevZoom - 1);
+      state.panY -= (oy - state.panY) * (nextZoom / prevZoom - 1);
+    }
+    state.zoom = nextZoom;
+    applyTransform();
+  }
+
+  window.openFullscreenImage = function (src) {
+    if (!src) return;
+    img.src = src;
+    resetZoom();
+    modal.hidden = false;
+    document.addEventListener("keydown", onKeyDown);
+  };
+
+  function closeModal() {
+    modal.hidden = true;
+    img.src = "";
+    document.removeEventListener("keydown", onKeyDown);
+  }
+
+  function onKeyDown(e) {
+    if (e.key === "Escape") {
+      closeModal();
+    } else if (e.key === "+" || e.key === "=") {
+      changeZoom(1.25);
+    } else if (e.key === "-") {
+      changeZoom(0.8);
+    } else if (e.key === "0") {
+      resetZoom();
+    }
+  }
+
+  closeBtn?.addEventListener("click", closeModal);
+  zoomInBtn?.addEventListener("click", () => changeZoom(1.25));
+  zoomOutBtn?.addEventListener("click", () => changeZoom(0.8));
+  zoomResetBtn?.addEventListener("click", resetZoom);
+
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.15 : 0.87;
+    changeZoom(factor, e.clientX, e.clientY);
+  }, { passive: false });
+
+  img.addEventListener("dblclick", (e) => {
+    e.stopPropagation();
+    if (state.zoom > 1.05) {
+      resetZoom();
+    } else {
+      changeZoom(2.5, e.clientX, e.clientY);
+    }
+  });
+
+  canvas.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("button") || e.target.closest(".image-fullscreen-bar")) return;
+    if (e.target === canvas) {
+      closeModal();
+      return;
+    }
+    state.isDragging = true;
+    state.dragStartX = e.clientX - state.panX;
+    state.dragStartY = e.clientY - state.panY;
+    canvas.classList.add("dragging");
+    canvas.setPointerCapture(e.pointerId);
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (!state.isDragging) return;
+    state.panX = e.clientX - state.dragStartX;
+    state.panY = e.clientY - state.dragStartY;
+    applyTransform();
+  });
+
+  const stopDrag = (e) => {
+    if (state.isDragging) {
+      state.isDragging = false;
+      canvas.classList.remove("dragging");
+      try { canvas.releasePointerCapture(e.pointerId); } catch { }
+    }
+  };
+
+  canvas.addEventListener("pointerup", stopDrag);
+  canvas.addEventListener("pointercancel", stopDrag);
 }

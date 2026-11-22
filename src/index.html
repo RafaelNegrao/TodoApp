@@ -13,6 +13,11 @@
           if (theme && theme !== "claude-dark") {
             document.documentElement.dataset.theme = theme;
           }
+          var fontSize = localStorage.getItem("todocompanion.settings.cardFontSize");
+          var num = parseInt(fontSize, 10);
+          if (!isNaN(num) && num >= 1 && num <= 99) {
+            document.documentElement.style.setProperty("--card-font-size", num + "px");
+          }
         } catch (e) {}
       })();
     </script>
@@ -121,7 +126,9 @@
                   <span class="overlay-field-label">Start</span>
                   <input id="overlayStartInput" type="date" />
                 </label>
-                <span class="overlay-date-sep" aria-hidden="true">→</span>
+              </div>
+
+              <div class="overlay-field-group">
                 <label class="overlay-field-item">
                   <span class="overlay-field-label">End</span>
                   <input id="overlayEndInput" type="date" />
@@ -272,6 +279,10 @@
               <option value="dracula">Dracula</option>
             </select>
           </label>
+          <label class="settings-row">
+            <span class="settings-label">Card font size</span>
+            <input type="number" class="settings-number-input" id="settingsCardFontSizeInput" min="1" max="99" step="1" />
+          </label>
           <label class="settings-row settings-toggle">
             <span class="settings-label">Start with Windows</span>
             <input type="checkbox" id="settingsAutostartInput" />
@@ -283,9 +294,13 @@
             <span class="settings-switch" aria-hidden="true"></span>
           </label>
           <label class="settings-row settings-toggle">
-            <span class="settings-label">Highlight connections (hover)</span>
-            <input type="checkbox" id="settingsLineageHoverInput" />
+            <span class="settings-label">Show arrow on card connections</span>
+            <input type="checkbox" id="settingsLinkArrowsInput" />
             <span class="settings-switch" aria-hidden="true"></span>
+          </label>
+          <label class="settings-row settings-row-stack">
+            <span class="settings-label">Gemini API Key (AI Transcription)</span>
+            <input type="password" class="settings-text-input" id="settingsGeminiKeyInput" placeholder="AIzaSy..." autocomplete="off" spellcheck="false" />
           </label>
           <footer>
             <button class="modal-button secondary" id="settingsDoneButton" type="button">Close</button>
@@ -396,6 +411,30 @@
             <button class="modal-button primary" type="submit">Save</button>
           </footer>
         </form>
+      </div>
+
+      <!-- Modal de Imagem em Tela Cheia com Zoom e Pan -->
+      <div class="modal-backdrop image-fullscreen-modal" id="imageFullscreenModal" hidden>
+        <div class="image-fullscreen-bar">
+          <div class="image-fullscreen-zoom-group">
+            <button class="image-fullscreen-btn" id="imageFullscreenZoomOut" type="button" aria-label="Diminuir zoom" title="Diminuir zoom (-)">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
+            </button>
+            <span class="image-fullscreen-zoom-badge" id="imageFullscreenZoomBadge">100%</span>
+            <button class="image-fullscreen-btn" id="imageFullscreenZoomIn" type="button" aria-label="Aumentar zoom" title="Aumentar zoom (+)">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+            <button class="image-fullscreen-btn" id="imageFullscreenZoomReset" type="button" aria-label="Ajustar à tela" title="Ajustar à tela (1:1)">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+            </button>
+          </div>
+          <button class="image-fullscreen-close" id="imageFullscreenClose" type="button" aria-label="Fechar" title="Fechar (Esc)">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="image-fullscreen-canvas" id="imageFullscreenCanvas">
+          <img class="image-fullscreen-img" id="imageFullscreenImg" src="" alt="Tela cheia" draggable="false" />
+        </div>
       </div>
     </div>
 

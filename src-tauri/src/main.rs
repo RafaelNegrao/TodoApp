@@ -5,10 +5,14 @@ use std::fs;
 use std::collections::HashMap;
 use std::io::{BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex, OnceLock,
+};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::{
@@ -97,6 +101,527 @@ fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
     Ok(buffer)
+}
+
+fn parse_dotenv_content(content: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let key = k.trim().to_string();
+            let val = v
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .trim()
+                .to_string();
+            if !key.is_empty() && !val.is_empty() {
+                map.insert(key, val);
+            }
+        }
+    }
+    map
+}
+
+fn load_dotenv_vars() -> HashMap<String, String> {
+    let mut vars = parse_dotenv_content(include_str!("../../.env"));
+
+    let mut candidate_paths: Vec<PathBuf> = Vec::new();
+    if let Ok(cwd) = env::current_dir() {
+        candidate_paths.push(cwd.join(".env"));
+        if let Some(parent) = cwd.parent() {
+            candidate_paths.push(parent.join(".env"));
+        }
+    }
+    if let Ok(exe) = env::current_exe() {
+        let mut dir_opt = exe.parent();
+        for _ in 0..5 {
+            if let Some(dir) = dir_opt {
+                candidate_paths.push(dir.join(".env"));
+                dir_opt = dir.parent();
+            }
+        }
+    }
+
+    for path in candidate_paths {
+        if let Ok(content) = fs::read_to_string(&path) {
+            for (k, v) in parse_dotenv_content(&content) {
+                vars.insert(k, v);
+            }
+            break;
+        }
+    }
+
+    if let Ok(k) = env::var("GEMINI_API_KEY") {
+        if !k.trim().is_empty() {
+            vars.insert("GEMINI_API_KEY".to_string(), k.trim().to_string());
+        }
+    }
+    if let Ok(m) = env::var("GEMINI_MODEL") {
+        if !m.trim().is_empty() {
+            vars.insert("GEMINI_MODEL".to_string(), m.trim().to_string());
+        }
+    }
+
+    vars
+}
+
+const TARGET_SAMPLE_RATE: u32 = 16_000;
+
+struct ActiveAiAudioCapture {
+    running: Arc<AtomicBool>,
+    mic_samples: Arc<Mutex<Vec<f32>>>,
+    sys_samples: Arc<Mutex<Vec<f32>>>,
+    chunk_start: Arc<Mutex<Instant>>,
+    join_handle: Option<thread::JoinHandle<()>>,
+}
+
+#[derive(Default)]
+struct AiAudioCaptureState(Mutex<Option<ActiveAiAudioCapture>>);
+
+fn push_resampled_mono(
+    dest: &Arc<Mutex<Vec<f32>>>,
+    mono_chunk: &[f32],
+    in_rate: u32,
+    chunk_start: &Arc<Mutex<Instant>>,
+) {
+    if mono_chunk.is_empty() || in_rate == 0 {
+        return;
+    }
+
+    let ratio = TARGET_SAMPLE_RATE as f64 / in_rate as f64;
+    let out_len = ((mono_chunk.len() as f64) * ratio).max(1.0).round() as usize;
+    let mut resampled = Vec::with_capacity(out_len);
+
+    for i in 0..out_len {
+        let src_pos = (i as f64) / ratio;
+        let idx = src_pos.floor() as usize;
+        let frac = (src_pos - (idx as f64)) as f32;
+        let s0 = mono_chunk.get(idx).copied().unwrap_or(0.0);
+        let s1 = mono_chunk.get(idx + 1).copied().unwrap_or(s0);
+        resampled.push(s0 + (s1 - s0) * frac);
+    }
+
+    let elapsed_secs = chunk_start
+        .lock()
+        .map(|t| t.elapsed().as_secs_f64())
+        .unwrap_or(0.0);
+
+    if let Ok(mut buf) = dest.lock() {
+        let expected_total = (elapsed_secs * (TARGET_SAMPLE_RATE as f64)) as usize;
+        // Se houve silencio longo (comum no WASAPI loopback quando nenhum som toca no PC),
+        // preenche com silencio para manter sincronia temporal com o microfone.
+        if buf.len() + resampled.len() + (TARGET_SAMPLE_RATE as usize / 5) < expected_total {
+            let target_len = expected_total.saturating_sub(resampled.len());
+            if target_len > buf.len() && target_len - buf.len() < TARGET_SAMPLE_RATE as usize * 600 {
+                buf.resize(target_len, 0.0);
+            }
+        }
+        buf.extend_from_slice(&resampled);
+    }
+}
+
+fn build_cpal_capture_stream(
+    device: &cpal::Device,
+    config: &cpal::SupportedStreamConfig,
+    dest: Arc<Mutex<Vec<f32>>>,
+    chunk_start: Arc<Mutex<Instant>>,
+) -> Option<cpal::Stream> {
+    let channels = config.channels() as usize;
+    let in_rate = config.sample_rate().0;
+    let sample_format = config.sample_format();
+    let stream_config: cpal::StreamConfig = config.clone().into();
+    let err_fn = |err| eprintln!("[ai-audio] stream error: {err}");
+
+    match sample_format {
+        cpal::SampleFormat::F32 => device
+            .build_input_stream(
+                &stream_config,
+                move |data: &[f32], _| {
+                    if channels == 0 {
+                        return;
+                    }
+                    let mono: Vec<f32> = data
+                        .chunks(channels)
+                        .map(|frame| frame.iter().copied().sum::<f32>() / (frame.len() as f32))
+                        .collect();
+                    push_resampled_mono(&dest, &mono, in_rate, &chunk_start);
+                },
+                err_fn,
+                None,
+            )
+            .ok(),
+        cpal::SampleFormat::I16 => device
+            .build_input_stream(
+                &stream_config,
+                move |data: &[i16], _| {
+                    if channels == 0 {
+                        return;
+                    }
+                    let mono: Vec<f32> = data
+                        .chunks(channels)
+                        .map(|frame| {
+                            let sum: f32 = frame.iter().map(|&s| (s as f32) / 32768.0).sum();
+                            sum / (frame.len() as f32)
+                        })
+                        .collect();
+                    push_resampled_mono(&dest, &mono, in_rate, &chunk_start);
+                },
+                err_fn,
+                None,
+            )
+            .ok(),
+        cpal::SampleFormat::U16 => device
+            .build_input_stream(
+                &stream_config,
+                move |data: &[u16], _| {
+                    if channels == 0 {
+                        return;
+                    }
+                    let mono: Vec<f32> = data
+                        .chunks(channels)
+                        .map(|frame| {
+                            let sum: f32 = frame
+                                .iter()
+                                .map(|&s| ((s as f32) - 32768.0) / 32768.0)
+                                .sum();
+                            sum / (frame.len() as f32)
+                        })
+                        .collect();
+                    push_resampled_mono(&dest, &mono, in_rate, &chunk_start);
+                },
+                err_fn,
+                None,
+            )
+            .ok(),
+        _ => None,
+    }
+}
+
+fn normalize_channel_peak(samples: &mut [f32], min_peak_threshold: f32, target_peak: f32) {
+    let peak = samples
+        .iter()
+        .fold(0.0_f32, |acc, &x| acc.max(x.abs()));
+    if peak >= min_peak_threshold && peak > 0.0 {
+        let gain = (target_peak / peak).min(12.0);
+        for s in samples.iter_mut() {
+            *s = (*s * gain).clamp(-1.0, 1.0);
+        }
+    }
+}
+
+fn encode_wav_16khz_mono(mut mic: Vec<f32>, mut sys: Vec<f32>) -> Vec<u8> {
+    normalize_channel_peak(&mut mic, 0.006, 0.82);
+    normalize_channel_peak(&mut sys, 0.003, 0.82);
+
+    let total_len = mic.len().max(sys.len());
+    let mut pcm_bytes = Vec::with_capacity(total_len * 2);
+
+    for i in 0..total_len {
+        let m = mic.get(i).copied().unwrap_or(0.0);
+        let s = sys.get(i).copied().unwrap_or(0.0);
+        let mixed = if m.abs() > 0.001 && s.abs() > 0.001 {
+            (m + s) * 0.72
+        } else {
+            m + s
+        };
+        let clamped = mixed.clamp(-1.0, 1.0);
+        let sample_i16 = (clamped * 32767.0) as i16;
+        pcm_bytes.extend_from_slice(&sample_i16.to_le_bytes());
+    }
+
+    let data_len = pcm_bytes.len() as u32;
+    let file_len = 36 + data_len;
+    let byte_rate = TARGET_SAMPLE_RATE * 2;
+    let block_align: u16 = 2;
+
+    let mut wav = Vec::with_capacity(44 + pcm_bytes.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&file_len.to_le_bytes());
+    wav.extend_from_slice(b"WAVE");
+    wav.extend_from_slice(b"fmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    wav.extend_from_slice(&1u16.to_le_bytes()); // 1 channel (mixed & normalized)
+    wav.extend_from_slice(&TARGET_SAMPLE_RATE.to_le_bytes());
+    wav.extend_from_slice(&byte_rate.to_le_bytes());
+    wav.extend_from_slice(&block_align.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes()); // 16-bit
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    wav.extend_from_slice(&pcm_bytes);
+    wav
+}
+
+fn encode_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+
+        out.push(TABLE[((triple >> 18) & 0x3F) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[(triple & 0x3F) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+#[tauri::command]
+fn ai_audio_capture_start(state: State<'_, AiAudioCaptureState>) -> Result<(), String> {
+    let mut guard = state.0.lock().map_err(|_| "Audio capture lock poisoned".to_string())?;
+    if let Some(mut prev) = guard.take() {
+        prev.running.store(false, Ordering::Relaxed);
+        if let Some(handle) = prev.join_handle.take() {
+            let _ = handle.join();
+        }
+    }
+
+    let running = Arc::new(AtomicBool::new(true));
+    let mic_samples = Arc::new(Mutex::new(Vec::with_capacity(TARGET_SAMPLE_RATE as usize * 15)));
+    let sys_samples = Arc::new(Mutex::new(Vec::with_capacity(TARGET_SAMPLE_RATE as usize * 15)));
+    let chunk_start = Arc::new(Mutex::new(Instant::now()));
+
+    let run_flag = Arc::clone(&running);
+    let mic_buf = Arc::clone(&mic_samples);
+    let sys_buf = Arc::clone(&sys_samples);
+    let mic_clock = Arc::clone(&chunk_start);
+    let sys_clock = Arc::clone(&chunk_start);
+
+    let join_handle = thread::spawn(move || {
+        let host = cpal::default_host();
+
+        let _mic_stream = host
+            .default_input_device()
+            .and_then(|dev| {
+                let cfg = dev.default_input_config().ok()?;
+                let s = build_cpal_capture_stream(&dev, &cfg, mic_buf, mic_clock)?;
+                s.play().ok()?;
+                Some(s)
+            });
+
+        // No Windows (WASAPI), abrir um input_stream no default_output_device ativa
+        // automaticamente AUDCLNT_STREAMFLAGS_LOOPBACK, capturando todo o audio do PC/videos/reunioes
+        // sem precisar de nenhum popup de compartilhamento de tela!
+        let _sys_stream = host
+            .default_output_device()
+            .and_then(|dev| {
+                let cfg = dev.default_output_config().ok()?;
+                let s = build_cpal_capture_stream(&dev, &cfg, sys_buf, sys_clock)?;
+                s.play().ok()?;
+                Some(s)
+            });
+
+        while run_flag.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(25));
+        }
+    });
+
+    *guard = Some(ActiveAiAudioCapture {
+        running,
+        mic_samples,
+        sys_samples,
+        chunk_start,
+        join_handle: Some(join_handle),
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn ai_audio_capture_flush_and_transcribe(
+    state: State<'_, AiAudioCaptureState>,
+    stop: bool,
+    fallback_mime_type: Option<String>,
+    fallback_audio_base64: Option<String>,
+) -> Result<String, String> {
+    let (mic_vec, sys_vec) = {
+        let mut guard = state.0.lock().map_err(|_| "Audio capture lock poisoned".to_string())?;
+        if stop {
+            if let Some(mut active) = guard.take() {
+                active.running.store(false, Ordering::Relaxed);
+                if let Some(handle) = active.join_handle.take() {
+                    let _ = handle.join();
+                }
+                let m = active.mic_samples.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+                let s = active.sys_samples.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+                (m, s)
+            } else {
+                (Vec::new(), Vec::new())
+            }
+        } else if let Some(active) = guard.as_ref() {
+            let m = active.mic_samples.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+            let s = active.sys_samples.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+            if let Ok(mut clock) = active.chunk_start.lock() {
+                *clock = Instant::now();
+            }
+            (m, s)
+        } else {
+            (Vec::new(), Vec::new())
+        }
+    };
+
+    let mic_peak = mic_vec.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()));
+    let sys_peak = sys_vec.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()));
+
+    let has_native_speech = (mic_vec.len() > (TARGET_SAMPLE_RATE as usize / 4) && mic_peak >= 0.008)
+        || (sys_vec.len() > (TARGET_SAMPLE_RATE as usize / 4) && sys_peak >= 0.003);
+
+    if has_native_speech {
+        let wav_bytes = encode_wav_16khz_mono(mic_vec, sys_vec);
+        let b64 = encode_base64(&wav_bytes);
+        return transcribe_audio_gemini(None, "audio/wav".to_string(), b64).await;
+    }
+
+    if let Some(fb_b64) = fallback_audio_base64 {
+        if !fb_b64.trim().is_empty() {
+            let mime = fallback_mime_type.unwrap_or_else(|| "audio/webm".to_string());
+            return transcribe_audio_gemini(None, mime, fb_b64).await;
+        }
+    }
+
+    Ok(String::new())
+}
+
+#[tauri::command]
+async fn ai_audio_capture_stop_and_transcribe(
+    state: State<'_, AiAudioCaptureState>,
+    fallback_mime_type: Option<String>,
+    fallback_audio_base64: Option<String>,
+) -> Result<String, String> {
+    ai_audio_capture_flush_and_transcribe(state, true, fallback_mime_type, fallback_audio_base64).await
+}
+
+#[tauri::command]
+async fn transcribe_audio_gemini(
+    api_key: Option<String>,
+    mime_type: String,
+    audio_base64: String,
+) -> Result<String, String> {
+    let env_vars = load_dotenv_vars();
+    let provided_key = api_key.unwrap_or_default().trim().to_string();
+    let key = if !provided_key.is_empty() {
+        provided_key
+    } else {
+        env_vars.get("GEMINI_API_KEY").cloned().unwrap_or_default()
+    };
+
+    if key.is_empty() {
+        return Err("GEMINI_API_KEY nao encontrada no arquivo .env".to_string());
+    }
+
+    let env_model = env_vars
+        .get("GEMINI_MODEL")
+        .cloned()
+        .unwrap_or_else(|| "gemini-2.5-flash".to_string());
+
+    let clean_mime = mime_type
+        .split(';')
+        .next()
+        .unwrap_or("audio/webm")
+        .trim()
+        .to_string();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut models: Vec<String> = Vec::new();
+        if !env_model.trim().is_empty() {
+            models.push(env_model.trim().to_string());
+        }
+        for fallback in [
+            "gemini-3.5-flash-lite",
+            "gemini-3.8-flash",
+            "gemini-3.1-flash-lite-preview",
+        ] {
+            if !models.iter().any(|m| m == fallback) {
+                models.push(fallback.to_string());
+            }
+        }
+
+        let prompt = "Transcreva fielmente todo o áudio a seguir no idioma original falado.\n\
+                      Regras obrigatórias:\n\
+                      1. Diferencie quem está falando (diarização de locutores). Sempre que houver mais de uma pessoa falando (por exemplo, diálogo entre pessoas, reunião ou vídeo com diferentes vozes), identifique cada fala em uma nova linha colocando o identificador do locutor no início, como 'Locutor 1:', 'Locutor 2:' (ou o nome real da pessoa se for mencionado no áudio).\n\
+                      2. Se houver apenas uma única pessoa falando durante todo o áudio, transcreva o texto diretamente com pontuação adequada e parágrafos claros.\n\
+                      3. Retorne APENAS a transcrição pronta, sem introduções, sem títulos e sem comentários extras. Se não houver fala audível, retorne apenas uma string vazia.";
+
+        let payload = serde_json::json!({
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    { "text": prompt },
+                    {
+                        "inlineData": {
+                            "mimeType": clean_mime,
+                            "data": audio_base64
+                        }
+                    }
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.1
+            }
+        });
+
+        let endpoints = [
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            "https://aiplatform.googleapis.com/v1/publishers/google/models",
+        ];
+
+        let mut last_err = String::from("Falha ao contatar a API do Gemini");
+
+        for base_url in &endpoints {
+            for model in &models {
+                let url = format!("{}/{}:generateContent?key={}", base_url, model, key);
+                match ureq::post(&url)
+                    .set("Content-Type", "application/json")
+                    .timeout(Duration::from_secs(120))
+                    .send_json(payload.clone())
+                {
+                    Ok(resp) => {
+                        let body: serde_json::Value = resp
+                            .into_json()
+                            .map_err(|e| format!("Resposta invalida do Gemini: {e}"))?;
+                        let mut text_parts: Vec<String> = Vec::new();
+                        if let Some(parts) = body["candidates"][0]["content"]["parts"].as_array() {
+                            for p in parts {
+                                if let Some(t) = p["text"].as_str() {
+                                    let trimmed = t.trim();
+                                    if !trimmed.is_empty() {
+                                        text_parts.push(trimmed.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        return Ok(text_parts.join("\n"));
+                    }
+                    Err(ureq::Error::Status(code, resp)) => {
+                        let err_body = resp.into_string().unwrap_or_default();
+                        last_err = format!("Gemini HTTP {code} ({model}): {err_body}");
+                    }
+                    Err(e) => {
+                        last_err = format!("Erro de rede ao chamar Gemini ({model}): {e}");
+                    }
+                }
+            }
+        }
+
+        Err(last_err)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -862,6 +1387,7 @@ fn main() {
             })?;
             app.manage(DbState(Mutex::new(conn)));
             app.manage(RecordingState::default());
+            app.manage(AiAudioCaptureState::default());
 
             if let Some(window) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
@@ -904,6 +1430,10 @@ fn main() {
             open_url,
             hide_window,
             read_file_bytes,
+            transcribe_audio_gemini,
+            ai_audio_capture_start,
+            ai_audio_capture_flush_and_transcribe,
+            ai_audio_capture_stop_and_transcribe,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TODOCompanion");

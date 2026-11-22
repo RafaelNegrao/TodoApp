@@ -1,6 +1,6 @@
 [package]
 name = "todocompanion"
-version = "0.1.1"
+version = "0.1.2"
 description = "A right-edge task companion built with Tauri"
 authors = ["Rafael"]
 edition = "2021"
@@ -19,6 +19,7 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 ico = "0.3"
 ureq = { version = "2", features = ["json", "tls"] }
+cpal = "0.15"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"
