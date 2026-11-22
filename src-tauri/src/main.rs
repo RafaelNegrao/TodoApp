@@ -187,22 +187,44 @@ fn gemini_http_agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
     AGENT.get_or_init(|| {
         ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(8))
+            .timeout_connect(Duration::from_secs(6))
             .timeout(Duration::from_secs(45))
             .build()
     })
 }
 
+fn gemini_translate_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(3))
+            .timeout(Duration::from_secs(5))
+            .build()
+    })
+}
+
 const GEMINI_MODEL_CASCADE: &[&str] = &[
-    "gemini-3-flash-preview",
+    "gemini-flash-lite-latest",
     "gemini-3.1-flash-lite",
     "gemini-3.1-flash-lite-preview",
-    "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-3.6-flash",
     "gemini-3.5-flash",
+    "gemini-flash-latest",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
     "gemma-4-31b-it",
+    "gemma-4-26b-a4b-it",
     "gemini-3.8-flash",
 ];
+
+fn model_prefers_minimal_thinking(model: &str) -> bool {
+    matches!(model, "gemini-3-flash-preview" | "gemini-3.6-flash")
+}
 
 fn gemini_model_cooldowns() -> &'static Mutex<HashMap<String, Instant>> {
     static COOLDOWNS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
@@ -320,8 +342,13 @@ fn execute_gemini_fast_payload(
     key: &str,
     models: &[String],
     payload: serde_json::Value,
+    use_short_timeout: bool,
 ) -> Result<String, String> {
-    let agent = gemini_http_agent();
+    let agent = if use_short_timeout {
+        gemini_translate_agent()
+    } else {
+        gemini_http_agent()
+    };
     let mut last_err = String::from("Falha ao contatar a API do Gemini");
 
     let mut payload_fast_think = payload.clone();
@@ -340,8 +367,10 @@ fn execute_gemini_fast_payload(
 
         let candidates = if model.starts_with("gemma-") {
             vec![&payload_compat]
-        } else {
+        } else if model_prefers_minimal_thinking(model) {
             vec![&payload_fast_think, &payload, &payload_compat]
+        } else {
+            vec![&payload, &payload_compat]
         };
 
         for candidate_payload in candidates {
@@ -492,7 +521,7 @@ async fn ai_translate_fast(
             }
         });
 
-        let raw = execute_gemini_fast_payload(&key, &ordered_models, payload)?;
+        let raw = execute_gemini_fast_payload(&key, &ordered_models, payload, true)?;
         Ok(sanitize_translation_output(&trimmed, raw))
     })
     .await
@@ -583,7 +612,7 @@ async fn ai_chat_english(
             }
         });
 
-        execute_gemini_fast_payload(&key, &models, payload)
+        execute_gemini_fast_payload(&key, &models, payload, false)
     })
     .await
     .map_err(|e| e.to_string())?

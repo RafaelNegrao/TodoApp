@@ -178,12 +178,20 @@
               </div>
             </div>
 
-            <div class="canvas-meta-actions">
+            <div class="canvas-meta-actions" id="canvasMetaActions">
               <button class="canvas-organize-button" id="organizeCanvasButton" type="button" aria-label="Organize cards" title="Organize cards"></button>
               <button class="canvas-center-button" id="centerCanvasButton" type="button" aria-label="Center tasks" title="Center tasks"></button>
               <button class="canvas-record-button" id="recordButton" type="button" aria-label="Record screen" title="Record screen"></button>
               <button class="canvas-attach-button" id="canvasAttachButton" type="button" aria-label="Attach file" title="Attach file"></button>
             </div>
+
+            <button class="canvas-meta-overflow-btn" id="canvasMetaOverflowBtn" type="button" aria-label="Show task details and actions" title="Detalhes e ações" aria-expanded="false" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none" />
+                <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+                <circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
           </div>
           <div class="board-surface" id="boardSurface">
             <svg class="link-layer" id="linkLayer" aria-hidden="true"></svg>
@@ -294,8 +302,12 @@
             </div>
 
             <div class="ai-input-box">
-              <textarea id="aiTranslateInput" placeholder="Digite ou cole em português ou inglês para traduzir em tempo real..." spellcheck="false"></textarea>
+              <textarea id="aiTranslateInput" placeholder="Digite ou cole em português ou inglês... (Enter traduz, Shift+Enter quebra linha)" spellcheck="false"></textarea>
               <button class="ai-clear-input" id="aiTranslateClearBtn" type="button" title="Clear text" aria-label="Clear text" hidden>×</button>
+              <div class="ai-input-foot">
+                <span class="ai-input-hint">Enter traduz</span>
+                <button class="ai-translate-run-btn" id="aiTranslateRunBtn" type="button" title="Translate now (Enter)">Translate ↵</button>
+              </div>
             </div>
 
             <div class="ai-output-box">
@@ -304,7 +316,6 @@
                 <span class="ai-status-text" id="aiTranslateStatusText">Instant AI Translation</span>
                 <div class="ai-output-actions">
                   <button class="ai-mini-btn" id="aiTranslateSwapBtn" type="button" title="Use translation as input">⇅ Swap</button>
-                  <button class="ai-mini-btn" id="aiTranslateToCardBtn" type="button" title="Insert translation into card">+ Card</button>
                   <button class="ai-mini-btn primary" id="aiTranslateCopyBtn" type="button" title="Copy translation">Copy</button>
                 </div>
               </div>

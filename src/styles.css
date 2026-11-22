@@ -856,6 +856,7 @@ button {
   min-width: 0;
   flex: 0 1 auto;
   max-width: 420px;
+  overflow: hidden;
 }
 
 .overlay-user-badge {
@@ -953,6 +954,7 @@ button {
 .overlay-field-group {
   height: 28px;
   box-sizing: border-box;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -961,6 +963,110 @@ button {
   background: rgba(var(--hi-rgb),0.04);
   border: 1px solid rgba(var(--hi-rgb),0.07);
   transition: background var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out);
+}
+
+/* Botao de menu overflow na barra superior do canvas quando nao ha espaco */
+.canvas-meta-overflow-btn {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid rgba(var(--hi-rgb), 0.1);
+  background: rgba(var(--hi-rgb), 0.045);
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+}
+
+.canvas-meta-overflow-btn[hidden] {
+  display: none !important;
+}
+
+.canvas-meta-overflow-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.canvas-meta-overflow-btn:hover,
+.canvas-meta-overlay.overflow-open .canvas-meta-overflow-btn {
+  color: var(--text-strong);
+  background: rgba(var(--accent-rgb), 0.18);
+  border-color: rgba(var(--accent-strong-rgb), 0.5);
+}
+
+/* Modo compacto: sem sobreposicao, campos recolhem em lista vertical flutuante */
+.canvas-meta-overlay.compact-fields .overlay-section-divider {
+  display: none;
+}
+
+.canvas-meta-overlay.compact-fields .canvas-meta-left {
+  flex: 1 1 auto;
+  max-width: none;
+}
+
+.canvas-meta-overlay.compact-fields .canvas-meta-fields {
+  display: none;
+}
+
+.canvas-meta-overlay.compact-fields.overflow-open .canvas-meta-fields {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 12px;
+  z-index: 40;
+  width: 256px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(var(--hi-rgb), 0.14);
+  background: var(--overlay);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(14px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  overflow: visible;
+  animation: tasks-sort-menu-in var(--t-fast) var(--ease-out);
+}
+
+.canvas-meta-overlay.compact-fields.overflow-open .canvas-meta-fields .overlay-field-group {
+  height: 32px;
+  width: 100%;
+  justify-content: space-between;
+}
+
+.canvas-meta-overlay.compact-fields.overflow-open .canvas-meta-fields .overlay-field-item {
+  width: 100%;
+  justify-content: space-between;
+}
+
+/* Modo ultra-compacto: icones de acao tambem recolhem na lista vertical flutuante */
+.canvas-meta-overlay.compact-actions .canvas-meta-actions {
+  display: none;
+}
+
+.canvas-meta-overlay.compact-actions.overflow-open .canvas-meta-actions {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 12px;
+  z-index: 41;
+  width: 256px;
+  box-sizing: border-box;
+  margin-left: 0;
+  padding: 6px 10px;
+  border-radius: 12px 12px 0 0;
+  border: 1px solid rgba(var(--hi-rgb), 0.14);
+  border-bottom: 1px solid rgba(var(--hi-rgb), 0.08);
+  background: var(--overlay);
+  justify-content: space-around;
+}
+
+.canvas-meta-overlay.compact-actions.overflow-open .canvas-meta-fields {
+  top: calc(100% + 46px);
+  border-radius: 0 0 12px 12px;
+  border-top: 0;
 }
 
 .overlay-field-group:hover {
@@ -4672,9 +4778,10 @@ body.translator-floating-mode .ai-panel-head {
 
 .ai-input-box {
   position: relative;
-  flex: 0 0 38%;
-  min-height: 110px;
+  flex: 0 0 40%;
+  min-height: 120px;
   display: flex;
+  flex-direction: column;
   border-radius: 11px;
   border: 1px solid var(--line-strong);
   background: rgba(var(--hi-rgb), 0.035);
@@ -4687,9 +4794,10 @@ body.translator-floating-mode .ai-panel-head {
 }
 
 .ai-input-box textarea {
+  flex: 1 1 auto;
   width: 100%;
-  height: 100%;
-  padding: 10px 28px 10px 12px;
+  min-height: 0;
+  padding: 10px 28px 6px 12px;
   border: 0;
   outline: 0;
   resize: none;
@@ -4697,6 +4805,45 @@ body.translator-floating-mode .ai-panel-head {
   color: var(--text);
   font-size: 13px;
   line-height: 1.48;
+}
+
+.ai-input-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 7px 12px;
+  border-top: 1px solid rgba(var(--hi-rgb), 0.06);
+  background: rgba(var(--hi-rgb), 0.02);
+}
+
+.ai-input-hint {
+  font-size: 10.5px;
+  color: var(--muted);
+  opacity: 0.72;
+  user-select: none;
+}
+
+.ai-translate-run-btn {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 0;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter var(--t-fast) var(--ease-out), transform var(--t-fast) var(--ease-out), opacity var(--t-fast) var(--ease-out);
+}
+
+.ai-translate-run-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.ai-translate-run-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .ai-clear-input {

@@ -70,7 +70,7 @@ const icons = {
   formatListNumbered: `<svg class="icon" viewBox="0 0 24 24"><path d="M10 6h11M10 12h11M10 18h11"/><text x="3" y="7" font-size="6" fill="currentColor">1</text><text x="3" y="13" font-size="6" fill="currentColor">2</text><text x="3" y="19" font-size="6" fill="currentColor">3</text></svg>`,
   checkbox: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   formatClear: `<svg class="icon" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m13.3 9 5.5 5.5"/></svg>`,
-  micAi: `<svg class="icon" viewBox="0 0 24 24"><path d="M11 3C11 7.97 15.03 12 20 12C15.03 12 11 16.03 11 21C11 16.03 6.97 12 2 12C6.97 12 11 7.97 11 3Z"/><path d="M19 2C19 4.21 20.79 6 23 6C20.79 6 19 7.79 19 10C19 7.79 17.21 6 15 6C17.21 6 19 4.21 19 2Z"/></svg>`,
+  micAi: `<svg class="icon" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4M8 22h8"/></svg>`,
   menu: `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`
 };
 
@@ -206,6 +206,7 @@ async function init() {
   initUsersRail();
   initTasksSidebar();
   initTasksStatusFilter();
+  initCanvasMetaResponsive();
   initImageFullscreenModal();
   initAiTranslatorPanel();
   setupFileDrop().catch(err => console.warn("Drag-and-drop indisponivel", err));
@@ -6737,8 +6738,52 @@ function initImageFullscreenModal() {
   canvas.addEventListener("pointercancel", stopDrag);
 }
 
+function initCanvasMetaResponsive() {
+  const overlay = document.getElementById("canvasMetaOverlay");
+  const overflowBtn = document.getElementById("canvasMetaOverflowBtn");
+  if (!overlay || !overflowBtn) return;
+
+  function closeOverflow() {
+    overlay.classList.remove("overflow-open");
+    overflowBtn.setAttribute("aria-expanded", "false");
+  }
+
+  function updateLayout() {
+    const width = overlay.clientWidth || 0;
+    if (width <= 0) return;
+    const isCompactFields = width < 760;
+    const isCompactActions = width < 430;
+    overlay.classList.toggle("compact-fields", isCompactFields);
+    overlay.classList.toggle("compact-actions", isCompactActions);
+    overflowBtn.hidden = !isCompactFields;
+    if (!isCompactFields) {
+      closeOverflow();
+    }
+  }
+
+  overflowBtn.addEventListener("click", event => {
+    event.stopPropagation();
+    const nextOpen = !overlay.classList.contains("overflow-open");
+    overlay.classList.toggle("overflow-open", nextOpen);
+    overflowBtn.setAttribute("aria-expanded", String(nextOpen));
+  });
+
+  document.addEventListener("pointerdown", event => {
+    if (overlay.classList.contains("overflow-open") && !overlay.contains(event.target)) {
+      closeOverflow();
+    }
+  });
+
+  if (typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver(() => updateLayout());
+    ro.observe(overlay);
+  }
+  window.addEventListener("resize", updateLayout);
+  requestAnimationFrame(updateLayout);
+}
+
 // -------------------------------------------------------------
-// AI TRANSLATOR (TEMPO REAL) & GENERAL AI CHAT (WITH ATTACHMENTS & SESSIONS)
+// AI TRANSLATOR & GENERAL AI CHAT (WITH ATTACHMENTS & SESSIONS)
 // -------------------------------------------------------------
 const AI_TONE_STORAGE_KEY = "todocompanion.ai.formality";
 const AI_PANEL_WIDTH_STORAGE_KEY = "todocompanion.ai.panelWidth";
@@ -6900,12 +6945,12 @@ function initAiTranslatorPanel() {
 
   const trInput = document.getElementById("aiTranslateInput");
   const trClearBtn = document.getElementById("aiTranslateClearBtn");
+  const trRunBtn = document.getElementById("aiTranslateRunBtn");
   const trOutput = document.getElementById("aiTranslateOutput");
   const trStatusDot = document.getElementById("aiTranslateStatusDot");
   const trStatusText = document.getElementById("aiTranslateStatusText");
   const trCopyBtn = document.getElementById("aiTranslateCopyBtn");
   const trSwapBtn = document.getElementById("aiTranslateSwapBtn");
-  const trToCardBtn = document.getElementById("aiTranslateToCardBtn");
 
   const chatHistoryToggle = document.getElementById("aiChatHistoryToggle");
   const historyModalCloseBtn = document.getElementById("aiHistoryModalCloseBtn");
@@ -6931,6 +6976,8 @@ function initAiTranslatorPanel() {
   let formality = clamp(Number(localStorage.getItem(AI_TONE_STORAGE_KEY) ?? 40), 0, 100);
   let translateTimer = null;
   let translateSeq = 0;
+  let translateInFlight = false;
+  let queuedTranslation = null;
   const translationCache = new Map();
 
   let chatSessions = [];
@@ -7266,9 +7313,6 @@ function initAiTranslatorPanel() {
       toneBadge.textContent = describeFormalityLabel(formality);
     }
     localStorage.setItem(AI_TONE_STORAGE_KEY, String(formality));
-    if (currentMode === "translate" && trInput?.value.trim()) {
-      scheduleRealtimeTranslation(80);
-    }
   });
 
   panel.querySelectorAll("[data-tone-jump]").forEach(lbl => {
@@ -7278,9 +7322,6 @@ function initAiTranslatorPanel() {
       if (toneSlider) toneSlider.value = String(targetVal);
       if (toneBadge) toneBadge.textContent = describeFormalityLabel(targetVal);
       localStorage.setItem(AI_TONE_STORAGE_KEY, String(targetVal));
-      if (currentMode === "translate" && trInput?.value.trim()) {
-        scheduleRealtimeTranslation(20);
-      }
     });
   });
 
@@ -7324,9 +7365,6 @@ function initAiTranslatorPanel() {
         dirLabel.textContent = btn.dataset.aiDirLabel || btn.textContent.trim();
       }
       closeDirDropdown();
-      if (trInput?.value.trim()) {
-        scheduleRealtimeTranslation(20);
-      }
     });
   });
 
@@ -7339,7 +7377,7 @@ function initAiTranslatorPanel() {
     }
   }
 
-  function scheduleRealtimeTranslation(delayMs = 220) {
+  function scheduleRealtimeTranslation(delayMs = 320) {
     if (translateTimer) {
       clearTimeout(translateTimer);
       translateTimer = null;
@@ -7351,6 +7389,7 @@ function initAiTranslatorPanel() {
     }
     if (!text) {
       translateSeq += 1;
+      queuedTranslation = null;
       if (trOutput) trOutput.textContent = "";
       setTranslateStatus("idle", "Instant AI Translation");
       return;
@@ -7358,6 +7397,7 @@ function initAiTranslatorPanel() {
 
     const cacheKey = `${currentDirection}|${formality}|${text}`;
     if (translationCache.has(cacheKey)) {
+      queuedTranslation = null;
       if (trOutput) trOutput.textContent = translationCache.get(cacheKey);
       setTranslateStatus("ready", `Instant · ${describeFormalityLabel(formality)}`);
       return;
@@ -7365,12 +7405,21 @@ function initAiTranslatorPanel() {
 
     setTranslateStatus("busy", "Translating...");
     translateTimer = setTimeout(() => {
-      runRealtimeTranslation(text, formality, currentDirection, cacheKey);
+      const req = { text, toneVal: formality, dir: currentDirection, cacheKey };
+      if (translateInFlight) {
+        // Single-flight gate: nunca empilha multiplas chamadas simultaneas no Gemini.
+        // Guarda apenas o estado mais recente para disparar assim que a chamada atual voltar.
+        queuedTranslation = req;
+        return;
+      }
+      runRealtimeTranslation(req.text, req.toneVal, req.dir, req.cacheKey);
     }, delayMs);
   }
 
   async function runRealtimeTranslation(text, toneVal, dir, cacheKey) {
     const seq = ++translateSeq;
+    translateInFlight = true;
+    if (trRunBtn) trRunBtn.disabled = true;
     const t0 = performance.now();
     try {
       let result = "";
@@ -7385,30 +7434,61 @@ function initAiTranslatorPanel() {
         result = await fallbackBrowserTranslate(text, toneVal, dir);
       }
 
-      if (seq !== translateSeq) return;
       const cleaned = String(result || "").trim();
       translationCache.set(cacheKey, cleaned);
       if (translationCache.size > 80) {
         const firstKey = translationCache.keys().next().value;
         translationCache.delete(firstKey);
       }
-      if (trOutput) {
-        trOutput.textContent = cleaned;
+
+      if (seq === translateSeq && !queuedTranslation) {
+        if (trOutput) {
+          trOutput.textContent = cleaned;
+        }
+        const ms = Math.round(performance.now() - t0);
+        setTranslateStatus("ready", `${ms}ms · ${describeFormalityLabel(toneVal)}`);
       }
-      const ms = Math.round(performance.now() - t0);
-      setTranslateStatus("ready", `${ms}ms · ${describeFormalityLabel(toneVal)}`);
     } catch (err) {
-      if (seq !== translateSeq) return;
-      console.warn("Erro na traducao em tempo real", err);
-      setTranslateStatus("error", "Translation error");
-      if (trOutput) {
-        trOutput.textContent = String(err?.message || err);
+      if (seq === translateSeq && !queuedTranslation) {
+        console.warn("Erro na traducao", err);
+        setTranslateStatus("error", "Translation error");
+        if (trOutput) {
+          trOutput.textContent = String(err?.message || err);
+        }
+      }
+    } finally {
+      translateInFlight = false;
+      if (trRunBtn) trRunBtn.disabled = false;
+      if (queuedTranslation) {
+        const nextReq = queuedTranslation;
+        queuedTranslation = null;
+        if (translationCache.has(nextReq.cacheKey)) {
+          if (trOutput) trOutput.textContent = translationCache.get(nextReq.cacheKey);
+          setTranslateStatus("ready", `Instant · ${describeFormalityLabel(nextReq.toneVal)}`);
+        } else {
+          runRealtimeTranslation(nextReq.text, nextReq.toneVal, nextReq.dir, nextReq.cacheKey);
+        }
       }
     }
   }
 
-  trInput?.addEventListener("input", () => scheduleRealtimeTranslation(220));
-  trInput?.addEventListener("paste", () => setTimeout(() => scheduleRealtimeTranslation(15), 0));
+  trInput?.addEventListener("input", () => {
+    const raw = trInput.value || "";
+    if (trClearBtn) {
+      trClearBtn.hidden = !raw.length;
+    }
+  });
+
+  trInput?.addEventListener("keydown", event => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      scheduleRealtimeTranslation(0);
+    }
+  });
+
+  trRunBtn?.addEventListener("click", () => {
+    scheduleRealtimeTranslation(0);
+  });
 
   trClearBtn?.addEventListener("click", () => {
     if (!trInput) return;
@@ -7421,7 +7501,7 @@ function initAiTranslatorPanel() {
     const outText = String(trOutput?.textContent || "").trim();
     if (!outText || !trInput) return;
     trInput.value = outText;
-    scheduleRealtimeTranslation(20);
+    if (trClearBtn) trClearBtn.hidden = false;
     trInput.focus();
   });
 
@@ -7436,12 +7516,6 @@ function initAiTranslatorPanel() {
         trCopyBtn.textContent = prev;
       }, 1200);
     } catch (_) {}
-  });
-
-  trToCardBtn?.addEventListener("click", () => {
-    const outText = String(trOutput?.textContent || "").trim();
-    if (!outText) return;
-    insertAiTextIntoActiveCanvas(outText);
   });
 
   // --- MODO 2: CHAT DE IA MODERNO COM ANEXOS E MODAL DE HISTORICO ---
