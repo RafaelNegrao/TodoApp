@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createDefaultTableData,
+  createTodoTableData,
   encodeTableData,
   decodeTableData,
   serializeTableToken,
@@ -132,4 +133,35 @@ test("renderCardTableHtml renderiza tabela escapada com formulas avaliadas", () 
   assert.ok(!html.includes("<script>"));
   assert.ok(html.includes('data-raw="=SUM(B2:B2)"'));
   assert.ok(html.includes(">10</td>"));
+});
+
+test("createTodoTableData cria tabela com coluna de checkbox e preserva ao adicionar linhas", () => {
+  let data = createTodoTableData(2, 3);
+  assert.equal(data.hasCheckboxes, true);
+  assert.deepEqual(data.rows[0], ["[ ]", "", ""]);
+  assert.deepEqual(data.rows[1], ["[ ]", "", ""]);
+
+  data.rows[0][0] = "[x]";
+  data.rows[0][1] = "Revisar PR";
+  data = addTableRow(data, 1);
+  assert.equal(data.hasCheckboxes, true);
+  assert.equal(data.rows.length, 3);
+  assert.equal(data.rows[2][0], "[ ]");
+
+  // Protege coluna 0 (checkbox) e exige no minimo 2 colunas
+  data = removeTableCol(data, 0);
+  assert.equal(data.rows[0].length, 2);
+  assert.equal(data.rows[0][0], "[x]");
+  data = removeTableCol(data, 0);
+  assert.equal(data.rows[0].length, 2);
+
+  // Serializacao preserva hasCheckboxes e render gera botao de checkbox + classe de linha concluida
+  const roundtrip = decodeTableData(encodeTableData(data));
+  assert.equal(roundtrip.hasCheckboxes, true);
+  assert.equal(roundtrip.rows[0][0], "[x]");
+
+  const html = renderCardTableHtml(roundtrip);
+  assert.ok(html.includes('data-has-checkboxes="true"'));
+  assert.ok(html.includes('class="card-table-check-btn checked"'));
+  assert.ok(html.includes('class="is-checked-row"'));
 });

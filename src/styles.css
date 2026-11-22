@@ -6367,6 +6367,66 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   font-variant-numeric: tabular-nums;
 }
 
+.card-excel-check-cell {
+  width: 32px !important;
+  min-width: 32px !important;
+  max-width: 32px;
+  padding: 4px !important;
+  text-align: center !important;
+  vertical-align: middle !important;
+  cursor: default !important;
+  user-select: none;
+}
+
+.card-table-check-btn {
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  margin: 0 auto;
+  border-radius: 999px;
+  border: 1.5px solid color-mix(in srgb, var(--card-complete) 52%, transparent);
+  background: color-mix(in srgb, var(--card-complete) 14%, transparent);
+  color: var(--surface-0);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: background var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out);
+}
+
+.card-table-check-btn svg {
+  width: 11px;
+  height: 11px;
+  stroke-width: 2.4;
+}
+
+.card-table-check-btn:hover {
+  border-color: var(--card-complete);
+  background: color-mix(in srgb, var(--card-complete) 24%, transparent);
+}
+
+.card-table-check-btn.checked {
+  background: var(--card-complete);
+  border-color: var(--card-complete);
+  color: var(--surface-0);
+}
+
+.card-excel-table tr.is-checked-row .card-excel-cell:not(.card-excel-check-cell) {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.new-card-popup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.new-card-popup[hidden] {
+  display: none !important;
+}
+
 
 /* CARTAO DE PERMISSAO DE ACOES DA IA NO CHAT */
 .ai-action-card {

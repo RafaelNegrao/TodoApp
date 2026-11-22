@@ -36,17 +36,23 @@ function fromBase64Url(encoded) {
 }
 
 export function normalizeTableData(data) {
+  const hasCheckboxes = Boolean(data?.hasCheckboxes);
   const rawRows = Array.isArray(data?.rows) ? data.rows : [];
   if (!rawRows.length) {
-    return createDefaultTableData(3, 3);
+    return hasCheckboxes ? createTodoTableData(3, 3) : createDefaultTableData(3, 3);
   }
-  const maxCols = Math.max(1, ...rawRows.map(r => (Array.isArray(r) ? r.length : 0)));
+  const minCols = hasCheckboxes ? 2 : 1;
+  const maxCols = Math.max(minCols, ...rawRows.map(r => (Array.isArray(r) ? r.length : 0)));
   const rows = rawRows.map(r => {
     const arr = Array.isArray(r) ? r.map(c => String(c ?? "")) : [];
     while (arr.length < maxCols) arr.push("");
+    if (hasCheckboxes) {
+      const v = arr[0].trim().toLowerCase();
+      arr[0] = v === "[x]" || v === "true" || v === "1" ? "[x]" : "[ ]";
+    }
     return arr;
   });
-  return { rows };
+  return hasCheckboxes ? { rows, hasCheckboxes: true } : { rows };
 }
 
 export function createDefaultTableData(rowCount = 3, colCount = 3) {
@@ -57,6 +63,18 @@ export function createDefaultTableData(rowCount = 3, colCount = 3) {
     rows.push(new Array(safeCols).fill(""));
   }
   return { rows };
+}
+
+export function createTodoTableData(rowCount = 3, colCount = 3) {
+  const safeRows = Math.max(1, Math.min(50, Math.floor(rowCount)));
+  const safeCols = Math.max(2, Math.min(26, Math.floor(colCount)));
+  const rows = [];
+  for (let r = 0; r < safeRows; r++) {
+    const row = new Array(safeCols).fill("");
+    row[0] = "[ ]";
+    rows.push(row);
+  }
+  return { rows, hasCheckboxes: true };
 }
 
 export function encodeTableData(data) {
@@ -85,13 +103,16 @@ export function addTableRow(data, afterIndex = null) {
   const norm = normalizeTableData(data);
   const cols = norm.rows[0].length;
   const newRow = new Array(cols).fill("");
+  if (norm.hasCheckboxes) {
+    newRow[0] = "[ ]";
+  }
   const insertAt =
     afterIndex === null || afterIndex === undefined
       ? norm.rows.length
       : Math.max(0, Math.min(norm.rows.length, afterIndex + 1));
   const rows = norm.rows.map(r => [...r]);
   rows.splice(insertAt, 0, newRow);
-  return { rows };
+  return norm.hasCheckboxes ? { rows, hasCheckboxes: true } : { rows };
 }
 
 export function removeTableRow(data, rowIndex) {
@@ -100,35 +121,38 @@ export function removeTableRow(data, rowIndex) {
   const idx = Math.max(0, Math.min(norm.rows.length - 1, rowIndex));
   const rows = norm.rows.map(r => [...r]);
   rows.splice(idx, 1);
-  return { rows };
+  return norm.hasCheckboxes ? { rows, hasCheckboxes: true } : { rows };
 }
 
 export function addTableCol(data, afterIndex = null) {
   const norm = normalizeTableData(data);
   const cols = norm.rows[0].length;
+  const minInsert = norm.hasCheckboxes ? 1 : 0;
   const insertAt =
     afterIndex === null || afterIndex === undefined
       ? cols
-      : Math.max(0, Math.min(cols, afterIndex + 1));
+      : Math.max(minInsert, Math.min(cols, afterIndex + 1));
   const rows = norm.rows.map(r => {
     const next = [...r];
     next.splice(insertAt, 0, "");
     return next;
   });
-  return { rows };
+  return norm.hasCheckboxes ? { rows, hasCheckboxes: true } : { rows };
 }
 
 export function removeTableCol(data, colIndex) {
   const norm = normalizeTableData(data);
   const cols = norm.rows[0].length;
-  if (cols <= 1) return norm;
-  const idx = Math.max(0, Math.min(cols - 1, colIndex));
+  const minCols = norm.hasCheckboxes ? 2 : 1;
+  if (cols <= minCols) return norm;
+  const minIdx = norm.hasCheckboxes ? 1 : 0;
+  const idx = Math.max(minIdx, Math.min(cols - 1, colIndex));
   const rows = norm.rows.map(r => {
     const next = [...r];
     next.splice(idx, 1);
     return next;
   });
-  return { rows };
+  return norm.hasCheckboxes ? { rows, hasCheckboxes: true } : { rows };
 }
 
 export function parseTsvToTableData(rawText) {
@@ -164,7 +188,7 @@ export function applyTsvIntoTable(data, startRow, startCol, rawText) {
       rows[startRow + r][startCol + c] = parsed.rows[r][c];
     }
   }
-  return { rows };
+  return norm.hasCheckboxes ? normalizeTableData({ rows, hasCheckboxes: true }) : { rows };
 }
 
 export function colIndexToLetter(index) {
@@ -378,13 +402,21 @@ function escapeHtmlBasic(str) {
     .replace(/"/g, "&quot;");
 }
 
+const TABLE_CHECK_SVG = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-6.5"/></svg>`;
+
 export function renderCardTableHtml(data) {
   const norm = normalizeTableData(data);
   const encoded = encodeTableData(norm);
+  const hasChecks = Boolean(norm.hasCheckboxes);
   const rowsHtml = norm.rows
     .map((row, rIdx) => {
+      const rowChecked = hasChecks && String(row[0] || "").trim().toLowerCase() === "[x]";
       const cellsHtml = row
         .map((rawVal, cIdx) => {
+          if (hasChecks && cIdx === 0) {
+            const rawFlag = rowChecked ? "[x]" : "[ ]";
+            return `<td class="card-excel-cell card-excel-check-cell" contenteditable="false" data-row="${rIdx}" data-col="0" data-raw="${rawFlag}"><button type="button" class="card-table-check-btn${rowChecked ? " checked" : ""}" role="checkbox" aria-checked="${rowChecked}" title="Concluir item">${rowChecked ? TABLE_CHECK_SVG : ""}</button></td>`;
+          }
           const isFormula = String(rawVal || "").trim().startsWith("=");
           const displayVal = isFormula ? evaluateCellFormula(rawVal, norm.rows, rIdx, cIdx) : rawVal;
           const cellRef = `${colIndexToLetter(cIdx)}${rIdx + 1}`;
@@ -392,9 +424,10 @@ export function renderCardTableHtml(data) {
           return `<td class="card-excel-cell${formulaClass}" contenteditable="true" data-row="${rIdx}" data-col="${cIdx}" data-raw="${escapeHtmlBasic(rawVal)}" title="${cellRef}${isFormula ? ` (${escapeHtmlBasic(rawVal)})` : ""}">${escapeHtmlBasic(displayVal)}</td>`;
         })
         .join("");
-      return `<tr>${cellsHtml}</tr>`;
+      return `<tr${rowChecked ? ` class="is-checked-row"` : ""}>${cellsHtml}</tr>`;
     })
     .join("");
 
-  return `<div class="card-table-wrap" contenteditable="false" data-table-encoded="${encoded}"><div class="card-table-toolbar"><button type="button" class="card-table-btn" data-table-action="addRow" title="Adicionar linha">+ Lin</button><button type="button" class="card-table-btn" data-table-action="addCol" title="Adicionar coluna">+ Col</button><button type="button" class="card-table-btn" data-table-action="delRow" title="Remover linha">- Lin</button><button type="button" class="card-table-btn" data-table-action="delCol" title="Remover coluna">- Col</button><button type="button" class="card-table-btn danger" data-table-action="delTable" title="Remover tabela">×</button></div><div class="card-table-scroll"><table class="card-excel-table"><tbody>${rowsHtml}</tbody></table></div></div>`;
+  const checkAttr = hasChecks ? ` data-has-checkboxes="true"` : "";
+  return `<div class="card-table-wrap" contenteditable="false" data-table-encoded="${encoded}"${checkAttr}><div class="card-table-toolbar"><button type="button" class="card-table-btn" data-table-action="addRow" title="Adicionar linha">+ Lin</button><button type="button" class="card-table-btn" data-table-action="addCol" title="Adicionar coluna">+ Col</button><button type="button" class="card-table-btn" data-table-action="delRow" title="Remover linha">- Lin</button><button type="button" class="card-table-btn" data-table-action="delCol" title="Remover coluna">- Col</button><button type="button" class="card-table-btn danger" data-table-action="delTable" title="Remover tabela">×</button></div><div class="card-table-scroll"><table class="card-excel-table"><tbody>${rowsHtml}</tbody></table></div></div>`;
 }

@@ -10,6 +10,7 @@ import {
 } from "./aiAppAgent.js";
 import {
   createDefaultTableData,
+  createTodoTableData,
   decodeTableData,
   encodeTableData,
   serializeTableToken,
@@ -315,6 +316,7 @@ async function init() {
   };
 
   newCardForm.addEventListener("submit", saveNewCard);
+  document.getElementById("newTodoTableButton")?.addEventListener("click", saveNewTodoTableCard);
   updateImageInput?.addEventListener("change", handleUpdateImage);
   inlineImageInput?.addEventListener("change", event => {
     const file = event.target.files[0];
@@ -1651,6 +1653,27 @@ function renderNodes() {
           event.preventDefault();
           event.stopPropagation();
           handleCardTableAction(tableBtn, bodyEditor, node, card);
+          return;
+        }
+
+        const tableCheckBtn = event.target.closest(".card-table-check-btn");
+        if (tableCheckBtn) {
+          event.preventDefault();
+          event.stopPropagation();
+          const cell = tableCheckBtn.closest(".card-excel-check-cell");
+          const wrap = tableCheckBtn.closest(".card-table-wrap");
+          const tr = tableCheckBtn.closest("tr");
+          if (cell && wrap) {
+            const nowChecked = cell.dataset.raw !== "[x]";
+            cell.dataset.raw = nowChecked ? "[x]" : "[ ]";
+            tableCheckBtn.classList.toggle("checked", nowChecked);
+            tableCheckBtn.setAttribute("aria-checked", String(nowChecked));
+            tableCheckBtn.innerHTML = nowChecked ? icons.check : "";
+            tr?.classList.toggle("is-checked-row", nowChecked);
+            wrap.dataset.tableEncoded = encodeTableData(readCardTableDataFromDom(wrap));
+            setNodeContent(node, serializeEditableContent(bodyEditor));
+            saveState();
+          }
           return;
         }
 
@@ -3628,7 +3651,7 @@ function handleBoardContextMenu(event) {
 
   const margin = 8;
   const popupW = 150;
-  const popupH = 52;
+  const popupH = 92;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const left = Math.min(event.clientX + margin, vw - popupW - margin);
@@ -3644,22 +3667,22 @@ function closeNewCardModal() {
   newCardPosition = null;
 }
 
-function saveNewCard(event) {
-  event.preventDefault();
+function createCanvasCardAtPopup(body = "", width = 288, height = 144) {
   const board = activeBoard();
-  if (!board) return;
+  if (!board) return null;
   const pos = newCardPosition ?? getViewportActionPosition();
   const id = makeId("action");
-  const GRID = 24;
+  const freePos = findFreeCardPosition(board, pos.x - width / 2, pos.y - height / 2, width, height, 48);
   board.nodes.push({
     id,
     title: "",
-    body: "",
+    body,
     status: "ongoing",
-    x: Math.round((pos.x - 144) / GRID) * GRID,
-    y: Math.round((pos.y - 72) / GRID) * GRID,
-    w: 288,
-    h: 144
+    createdAt: new Date().toISOString(),
+    x: freePos.x,
+    y: freePos.y,
+    w: width,
+    h: height
   });
   pendingCardPop.add(id);
   selectedNodeId = id;
@@ -3667,6 +3690,25 @@ function saveNewCard(event) {
   closeNewCardModal();
   saveState();
   render();
+  return id;
+}
+
+function saveNewCard(event) {
+  event.preventDefault();
+  createCanvasCardAtPopup("", 288, 144);
+}
+
+function saveNewTodoTableCard(event) {
+  event.preventDefault();
+  const token = serializeTableToken(createTodoTableData(3, 3));
+  const id = createCanvasCardAtPopup(token, 336, 192);
+  if (!id) return;
+  requestAnimationFrame(() => {
+    const cardEl = nodesLayer.querySelector(`[data-id="${id}"]`);
+    const wrap = cardEl?.querySelector(".card-table-wrap");
+    if (cardEl) scheduleNodeHeightSync(id, cardEl);
+    if (wrap) focusCardTableCell(wrap, 0, 1);
+  });
 }
 
 // Dimensiona um card de imagem a partir do tamanho natural do arquivo, limitando
@@ -4735,6 +4777,7 @@ function serializeEditableContent(el) {
 
 function readCardTableDataFromDom(wrap) {
   if (!wrap) return createDefaultTableData(3, 3);
+  const hasCheckboxes = wrap.dataset.hasCheckboxes === "true";
   const trEls = Array.from(wrap.querySelectorAll("tr"));
   if (!trEls.length) {
     return decodeTableData(wrap.dataset.tableEncoded || "");
@@ -4744,7 +4787,7 @@ function readCardTableDataFromDom(wrap) {
       cell.dataset.raw !== undefined ? cell.dataset.raw : (cell.textContent ?? "")
     )
   );
-  return { rows };
+  return hasCheckboxes ? { rows, hasCheckboxes: true } : { rows };
 }
 
 function refreshCardTableDom(wrap) {
@@ -4753,6 +4796,7 @@ function refreshCardTableDom(wrap) {
   wrap.dataset.tableEncoded = encodeTableData(data);
   const activeEl = document.activeElement;
   wrap.querySelectorAll(".card-excel-cell").forEach(cell => {
+    if (cell.classList.contains("card-excel-check-cell")) return;
     const r = parseInt(cell.dataset.row || "0", 10);
     const c = parseInt(cell.dataset.col || "0", 10);
     const raw = data.rows[r]?.[c] ?? "";
@@ -4839,24 +4883,26 @@ function handleCardTableAction(btn, editor, node, card) {
     return;
   }
   const data = readCardTableDataFromDom(wrap);
+  const minEditableCol = data.hasCheckboxes ? 1 : 0;
   const activeR = parseInt(wrap.dataset.activeRow ?? String(data.rows.length - 1), 10);
   const activeC = parseInt(wrap.dataset.activeCol ?? String((data.rows[0]?.length || 1) - 1), 10);
   let nextData = data;
   let nextFocusR = activeR;
-  let nextFocusC = activeC;
+  let nextFocusC = Math.max(minEditableCol, activeC);
 
   if (action === "addRow") {
     nextData = addTableRow(data, activeR);
     nextFocusR = activeR + 1;
+    nextFocusC = minEditableCol;
   } else if (action === "delRow") {
     nextData = removeTableRow(data, activeR);
     nextFocusR = Math.max(0, activeR - 1);
   } else if (action === "addCol") {
     nextData = addTableCol(data, activeC);
-    nextFocusC = activeC + 1;
+    nextFocusC = Math.max(minEditableCol, activeC + 1);
   } else if (action === "delCol") {
     nextData = removeTableCol(data, activeC);
-    nextFocusC = Math.max(0, activeC - 1);
+    nextFocusC = Math.max(minEditableCol, activeC - 1);
   }
 
   replaceCardTableDom(wrap, nextData, nextFocusR, nextFocusC);
@@ -4871,6 +4917,7 @@ function handleCardTableCellKeydown(event, cell, editor, node, card) {
   const r = parseInt(cell.dataset.row || "0", 10);
   const c = parseInt(cell.dataset.col || "0", 10);
   const data = readCardTableDataFromDom(wrap);
+  const minCol = data.hasCheckboxes ? 1 : 0;
   const rowCount = data.rows.length;
   const colCount = data.rows[0]?.length || 1;
 
@@ -4879,7 +4926,7 @@ function handleCardTableCellKeydown(event, cell, editor, node, card) {
     event.stopPropagation();
     cell.dataset.raw = cell.textContent ?? "";
     if (event.shiftKey) {
-      if (c > 0) {
+      if (c > minCol) {
         focusCardTableCell(wrap, r, c - 1);
       } else if (r > 0) {
         focusCardTableCell(wrap, r - 1, colCount - 1);
@@ -4887,10 +4934,10 @@ function handleCardTableCellKeydown(event, cell, editor, node, card) {
     } else if (c + 1 < colCount) {
       focusCardTableCell(wrap, r, c + 1);
     } else if (r + 1 < rowCount) {
-      focusCardTableCell(wrap, r + 1, 0);
+      focusCardTableCell(wrap, r + 1, minCol);
     } else {
       const nextData = addTableRow(readCardTableDataFromDom(wrap), rowCount - 1);
-      replaceCardTableDom(wrap, nextData, rowCount, 0);
+      replaceCardTableDom(wrap, nextData, rowCount, minCol);
       setNodeContent(node, serializeEditableContent(editor));
       saveState();
       scheduleNodeHeightSync(node.id, card);
@@ -5029,9 +5076,10 @@ function formatCreatedAt(isoString) {
   if (isNaN(date.getTime())) return "";
   const day = String(date.getDate()).padStart(2, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = String(date.getFullYear());
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${day}/${month} ${hours}:${minutes}`;
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
 
 function escapeAttr(value = "") {
