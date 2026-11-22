@@ -5649,6 +5649,62 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   user-select: text;
 }
 
+/* Tooltip de traducao por hover (1s) ou selecao de texto no tradutor */
+.ai-word-tooltip {
+  position: fixed;
+  z-index: 9999;
+  max-width: min(290px, calc(100vw - 16px));
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(var(--hi-rgb), 0.16);
+  background: var(--overlay);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+  animation: ai-word-tooltip-in 140ms var(--ease-out);
+}
+
+.ai-word-tooltip[hidden] {
+  display: none !important;
+}
+
+.ai-word-tooltip-src {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-word-tooltip-dst {
+  font-size: 12.5px;
+  font-weight: 620;
+  color: var(--text-strong);
+  line-height: 1.38;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+.ai-word-tooltip-dst.loading {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+@keyframes ai-word-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 /* MODO 2: Chat de IA Moderno (Estilo Editorial Limpo + Modal de Historico) */
 .ai-chat-view {
   flex: 1 1 auto;

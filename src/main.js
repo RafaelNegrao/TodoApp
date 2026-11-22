@@ -9,6 +9,11 @@ import {
   executeAiActionPlan
 } from "./aiAppAgent.js";
 import {
+  extractWordAtOffset,
+  resolveTooltipDirection,
+  clampTooltipPosition
+} from "./translatorTooltip.js";
+import {
   createDefaultTableData,
   createTodoTableData,
   decodeTableData,
@@ -8148,6 +8153,270 @@ function initAiTranslatorPanel() {
         trCopyBtn.innerHTML = prevHtml;
       }, 1200);
     } catch (_) {}
+  });
+
+  // --- TOOLTIP DE TRADUCAO POR HOVER (1s) E SELECAO DE RANGE ---
+  const wordTooltipEl = document.createElement("div");
+  wordTooltipEl.className = "ai-word-tooltip";
+  wordTooltipEl.id = "aiWordTooltip";
+  wordTooltipEl.hidden = true;
+  document.body.appendChild(wordTooltipEl);
+
+  const tooltipCache = new Map();
+  let tooltipHoverTimer = null;
+  let tooltipReqSeq = 0;
+  let tooltipActiveSource = "";
+  let tooltipAnchorPoint = { x: 0, y: 0 };
+
+  function hideWordTooltip() {
+    if (tooltipHoverTimer) {
+      clearTimeout(tooltipHoverTimer);
+      tooltipHoverTimer = null;
+    }
+    tooltipReqSeq += 1;
+    tooltipActiveSource = "";
+    wordTooltipEl.hidden = true;
+  }
+
+  function positionWordTooltip(anchorRect) {
+    wordTooltipEl.style.left = "-9999px";
+    wordTooltipEl.style.top = "-9999px";
+    wordTooltipEl.hidden = false;
+    const rect = wordTooltipEl.getBoundingClientRect();
+    const pos = clampTooltipPosition(
+      anchorRect,
+      Math.max(120, rect.width || 180),
+      Math.max(36, rect.height || 44),
+      window.innerWidth,
+      window.innerHeight
+    );
+    wordTooltipEl.style.left = `${pos.left}px`;
+    wordTooltipEl.style.top = `${pos.top}px`;
+    wordTooltipEl.dataset.placement = pos.placement;
+  }
+
+  async function showWordTooltip(sourceText, boxKind, anchorRect) {
+    const cleaned = String(sourceText || "").replace(/\s+/g, " ").trim();
+    if (!cleaned || cleaned.length > 300) return;
+    const dir = resolveTooltipDirection(boxKind, currentDirection);
+    const cacheKey = `${dir}|${cleaned.toLowerCase()}`;
+    const seq = ++tooltipReqSeq;
+    tooltipActiveSource = cacheKey;
+
+    if (tooltipCache.has(cacheKey)) {
+      wordTooltipEl.innerHTML = `<span class="ai-word-tooltip-dst">${escapeHtml(tooltipCache.get(cacheKey))}</span>`;
+      positionWordTooltip(anchorRect);
+      return;
+    }
+
+    wordTooltipEl.innerHTML = `<span class="ai-word-tooltip-dst loading">Traduzindo...</span>`;
+    positionWordTooltip(anchorRect);
+
+    try {
+      let translated = "";
+      if (invoke) {
+        translated = await invoke("ai_translate_fast", {
+          text: cleaned,
+          formality: 40,
+          direction: dir,
+          apiKey: localStorage.getItem(GEMINI_API_KEY_STORAGE) || null
+        });
+      } else {
+        translated = await fallbackBrowserTranslate(cleaned, 40, dir);
+      }
+      if (seq !== tooltipReqSeq || wordTooltipEl.hidden) return;
+      const finalOut = String(translated || "").trim();
+      if (!finalOut) {
+        hideWordTooltip();
+        return;
+      }
+      tooltipCache.set(cacheKey, finalOut);
+      if (tooltipCache.size > 150) {
+        const firstKey = tooltipCache.keys().next().value;
+        tooltipCache.delete(firstKey);
+      }
+      wordTooltipEl.innerHTML = `<span class="ai-word-tooltip-dst">${escapeHtml(finalOut)}</span>`;
+      positionWordTooltip(anchorRect);
+    } catch (_) {
+      if (seq === tooltipReqSeq) {
+        hideWordTooltip();
+      }
+    }
+  }
+
+  function getWordAtPointInElement(container, clientX, clientY) {
+    if (!container || !document.caretRangeFromPoint) return null;
+    const caret = document.caretRangeFromPoint(clientX, clientY);
+    if (!caret || !caret.startContainer || caret.startContainer.nodeType !== Node.TEXT_NODE) return null;
+    if (!container.contains(caret.startContainer)) return null;
+    const found = extractWordAtOffset(caret.startContainer.textContent || "", caret.startOffset);
+    if (!found) return null;
+    const range = document.createRange();
+    range.setStart(caret.startContainer, found.start);
+    range.setEnd(caret.startContainer, found.end);
+    const rect = range.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+    if (clientX < rect.left - 4 || clientX > rect.right + 4 || clientY < rect.top - 4 || clientY > rect.bottom + 4) {
+      return null;
+    }
+    return { word: found.word, rect };
+  }
+
+  function getWordAtPointInTextarea(textarea, clientX, clientY) {
+    if (!textarea || !textarea.value || !document.caretRangeFromPoint) return null;
+    const taRect = textarea.getBoundingClientRect();
+    const cs = window.getComputedStyle(textarea);
+    const mirror = document.createElement("div");
+    mirror.style.cssText = [
+      "position:fixed",
+      `left:${taRect.left}px`,
+      `top:${taRect.top}px`,
+      `width:${taRect.width}px`,
+      `height:${taRect.height}px`,
+      `padding:${cs.padding}`,
+      `font:${cs.font}`,
+      `line-height:${cs.lineHeight}`,
+      `letter-spacing:${cs.letterSpacing}`,
+      "white-space:pre-wrap",
+      "word-break:normal",
+      "overflow-wrap:break-word",
+      "overflow:hidden",
+      "visibility:hidden",
+      "pointer-events:none",
+      "box-sizing:border-box",
+      "z-index:-1"
+    ].join(";");
+    mirror.textContent = textarea.value;
+    document.body.appendChild(mirror);
+    mirror.scrollTop = textarea.scrollTop;
+    const hit = getWordAtPointInElement(mirror, clientX, clientY);
+    mirror.remove();
+    return hit;
+  }
+
+  function scheduleWordHoverTooltip(boxKind, element, clientX, clientY) {
+    if (tooltipHoverTimer) {
+      clearTimeout(tooltipHoverTimer);
+      tooltipHoverTimer = null;
+    }
+    tooltipAnchorPoint = { x: clientX, y: clientY };
+    tooltipHoverTimer = setTimeout(() => {
+      tooltipHoverTimer = null;
+      const sel = window.getSelection();
+      if (boxKind === "output" && sel && !sel.isCollapsed && trOutput?.contains(sel.anchorNode)) {
+        return;
+      }
+      if (boxKind === "input" && trInput && trInput.selectionEnd > trInput.selectionStart) {
+        return;
+      }
+      const hit =
+        boxKind === "output"
+          ? getWordAtPointInElement(element, clientX, clientY)
+          : getWordAtPointInTextarea(element, clientX, clientY);
+      if (hit) {
+        showWordTooltip(hit.word, boxKind, hit.rect);
+      } else {
+        hideWordTooltip();
+      }
+    }, 1000);
+  }
+
+  function handleSelectionTooltip(boxKind, fallbackX, fallbackY) {
+    if (tooltipHoverTimer) {
+      clearTimeout(tooltipHoverTimer);
+      tooltipHoverTimer = null;
+    }
+    if (boxKind === "output") {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !trOutput?.contains(sel.anchorNode)) {
+        return;
+      }
+      const selected = String(sel.toString() || "").trim();
+      if (selected.length < 2) return;
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      if (rect && (rect.width > 0 || rect.height > 0)) {
+        showWordTooltip(selected, "output", rect);
+      }
+      return;
+    }
+    if (boxKind === "input" && trInput) {
+      const start = trInput.selectionStart ?? 0;
+      const end = trInput.selectionEnd ?? 0;
+      if (end <= start) return;
+      const selected = trInput.value.slice(start, end).trim();
+      if (selected.length < 2) return;
+      const rect = { left: fallbackX - 10, right: fallbackX + 10, top: fallbackY - 14, bottom: fallbackY + 10 };
+      showWordTooltip(selected, "input", rect);
+    }
+  }
+
+  trOutput?.addEventListener("mousemove", event => {
+    if (event.buttons !== 0) return;
+    const dx = event.clientX - tooltipAnchorPoint.x;
+    const dy = event.clientY - tooltipAnchorPoint.y;
+    if (!wordTooltipEl.hidden && dx * dx + dy * dy > 144) {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !trOutput.contains(sel.anchorNode)) {
+        hideWordTooltip();
+      }
+    }
+    scheduleWordHoverTooltip("output", trOutput, event.clientX, event.clientY);
+  });
+
+  trOutput?.addEventListener("mouseleave", () => {
+    if (tooltipHoverTimer) {
+      clearTimeout(tooltipHoverTimer);
+      tooltipHoverTimer = null;
+    }
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !trOutput.contains(sel.anchorNode)) {
+      hideWordTooltip();
+    }
+  });
+
+  trOutput?.addEventListener("mouseup", event => {
+    setTimeout(() => handleSelectionTooltip("output", event.clientX, event.clientY), 10);
+  });
+
+  trOutput?.addEventListener("scroll", hideWordTooltip);
+
+  trInput?.addEventListener("mousemove", event => {
+    if (event.buttons !== 0) return;
+    const dx = event.clientX - tooltipAnchorPoint.x;
+    const dy = event.clientY - tooltipAnchorPoint.y;
+    if (!wordTooltipEl.hidden && dx * dx + dy * dy > 144 && trInput.selectionEnd <= trInput.selectionStart) {
+      hideWordTooltip();
+    }
+    scheduleWordHoverTooltip("input", trInput, event.clientX, event.clientY);
+  });
+
+  trInput?.addEventListener("mouseleave", () => {
+    if (tooltipHoverTimer) {
+      clearTimeout(tooltipHoverTimer);
+      tooltipHoverTimer = null;
+    }
+    if (trInput.selectionEnd <= trInput.selectionStart) {
+      hideWordTooltip();
+    }
+  });
+
+  trInput?.addEventListener("mouseup", event => {
+    setTimeout(() => handleSelectionTooltip("input", event.clientX, event.clientY), 10);
+  });
+
+  trInput?.addEventListener("input", hideWordTooltip);
+  trInput?.addEventListener("scroll", hideWordTooltip);
+
+  document.addEventListener("pointerdown", event => {
+    if (!wordTooltipEl.hidden && !trOutput?.contains(event.target) && !trInput?.contains(event.target)) {
+      hideWordTooltip();
+    }
+  });
+
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && !wordTooltipEl.hidden) {
+      hideWordTooltip();
+    }
   });
 
   // --- MODO 2: CHAT DE IA MODERNO COM ANEXOS E MODAL DE HISTORICO ---
