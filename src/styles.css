@@ -4467,7 +4467,7 @@ button {
   display: none !important;
 }
 
-/* MODO TRADUTOR SOLTO (JANELA FLUTUANTE COMPACTA ALWAYS-ON-TOP) */
+/* MODO TRADUTOR SOLTO (JANELA FLUTUANTE ULTRA-CLEAN ALWAYS-ON-TOP) */
 body.translator-floating-mode .panel {
   grid-template-rows: minmax(0, 1fr);
 }
@@ -4484,23 +4484,88 @@ body.translator-floating-mode .ai-translator-panel {
   max-width: none !important;
   min-width: 0 !important;
   height: 100vh !important;
-  padding: 10px 12px 12px 12px;
+  padding: 6px 8px 8px 8px;
+  gap: 6px;
   border: 0 !important;
   box-sizing: border-box;
   box-shadow: none;
 }
 
 body.translator-floating-mode .ai-panel-resizer,
-body.translator-floating-mode .ai-panel-close {
+body.translator-floating-mode .ai-panel-close,
+body.translator-floating-mode .ai-panel-title,
+body.translator-floating-mode .ai-translate-controls-row,
+body.translator-floating-mode .ai-input-hint,
+body.translator-floating-mode .ai-status-dot,
+body.translator-floating-mode .ai-status-text {
   display: none !important;
 }
 
 body.translator-floating-mode .ai-panel-head {
+  height: 22px;
+  padding-bottom: 0;
+  border-bottom: 0;
   cursor: move;
   user-select: none;
 }
 
+body.translator-floating-mode .ai-panel-head-left::before {
+  content: "";
+  display: block;
+  width: 32px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(var(--hi-rgb), 0.18);
+  margin-left: 4px;
+}
+
+body.translator-floating-mode .ai-translate-view {
+  gap: 6px;
+  min-height: 0;
+}
+
+body.translator-floating-mode .ai-input-box,
+body.translator-floating-mode .ai-output-box {
+  flex: 1 1 0;
+  min-height: 0;
+  position: relative;
+}
+
+body.translator-floating-mode .ai-input-box textarea {
+  padding: 8px 34px 34px 10px;
+}
+
+body.translator-floating-mode .ai-input-foot {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+body.translator-floating-mode .ai-translate-run-btn {
+  pointer-events: auto;
+}
+
+body.translator-floating-mode .ai-output-head {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+body.translator-floating-mode .ai-translate-output {
+  padding: 8px 52px 8px 10px;
+}
+
 #aiDetachTranslatorBtn.floating-active {
+  width: 22px;
+  height: 22px;
   color: var(--accent-strong);
   background: rgba(var(--accent-rgb), 0.16);
 }
@@ -4781,15 +4846,86 @@ body.translator-floating-mode .ai-panel-head {
   opacity: 1;
 }
 
+.ai-translate-boxes-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+body.translator-floating-mode .ai-translate-boxes-wrap {
+  gap: 6px;
+}
+
+.ai-flip-dir-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  width: 30px;
+  height: 24px;
+  border-radius: 7px;
+  border: 1px solid var(--line-strong);
+  background: var(--elevated);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
+  transition: color var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out), background var(--t-fast) var(--ease-out), transform 220ms var(--ease-spring);
+}
+
+.ai-flip-dir-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ai-flip-dir-btn:hover {
+  color: var(--text-strong);
+  border-color: rgba(var(--accent-strong-rgb), 0.6);
+  background: var(--surface-strong);
+  transform: translate(-50%, -50%) scale(1.08);
+}
+
+.ai-flip-dir-btn.flipped svg {
+  transform: rotate(180deg);
+  transition: transform 220ms var(--ease-spring);
+}
+
+.ai-box-lang-watermark {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  user-select: none;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-strong);
+  opacity: 0.055;
+  z-index: 0;
+}
+
 .ai-input-box {
   position: relative;
-  flex: 0 0 40%;
-  min-height: 120px;
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   border-radius: 11px;
   border: 1px solid var(--line-strong);
-  background: rgba(var(--hi-rgb), 0.035);
+  background: rgba(var(--hi-rgb), 0.04);
   overflow: hidden;
   transition: border-color var(--t-fast) var(--ease-out);
 }
@@ -4830,24 +4966,55 @@ body.translator-floating-mode .ai-panel-head {
 }
 
 .ai-translate-run-btn {
-  height: 26px;
-  padding: 0 12px;
+  width: 30px;
+  height: 24px;
+  padding: 0;
   border-radius: 7px;
-  border: 0;
+  border: 1px solid rgba(var(--hi-rgb), 0.12);
+  background: rgba(var(--hi-rgb), 0.08);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out), transform var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out);
+}
+
+.ai-translate-run-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ai-translate-run-btn.needs-translate {
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 11.5px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: filter var(--t-fast) var(--ease-out), transform var(--t-fast) var(--ease-out), opacity var(--t-fast) var(--ease-out);
+  border-color: transparent;
+}
+
+.ai-translate-run-btn.stale {
+  background: var(--warn, #f59e0b);
+  color: #111318;
+  border-color: transparent;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.22);
+}
+
+.ai-translate-run-btn.synced {
+  background: rgba(var(--hi-rgb), 0.07);
+  color: var(--green, #22c55e);
+  border-color: rgba(34, 197, 94, 0.35);
 }
 
 .ai-translate-run-btn:hover:not(:disabled) {
-  filter: brightness(1.08);
+  filter: brightness(1.1);
+  transform: scale(1.05);
 }
 
 .ai-translate-run-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: default;
 }
 
@@ -4877,13 +5044,14 @@ body.translator-floating-mode .ai-panel-head {
 }
 
 .ai-output-box {
-  flex: 1 1 auto;
-  min-height: 130px;
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   border-radius: 11px;
-  border: 1px solid var(--line);
-  background: rgba(var(--hi-rgb), 0.05);
+  border: 1px solid var(--line-strong);
+  background: rgba(var(--hi-rgb), 0.04);
   overflow: hidden;
 }
 
@@ -4959,6 +5127,25 @@ body.translator-floating-mode .ai-panel-head {
 
 .ai-mini-btn.primary:hover {
   filter: brightness(1.08);
+}
+
+.ai-copy-icon-btn {
+  width: 30px;
+  height: 24px;
+  padding: 0;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+}
+
+.ai-copy-icon-btn svg {
+  width: 13px;
+  height: 13px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .ai-translate-output {

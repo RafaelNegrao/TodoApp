@@ -6948,11 +6948,13 @@ function initAiTranslatorPanel() {
   const trInput = document.getElementById("aiTranslateInput");
   const trClearBtn = document.getElementById("aiTranslateClearBtn");
   const trRunBtn = document.getElementById("aiTranslateRunBtn");
+  const trFlipDirBtn = document.getElementById("aiFlipDirBtn");
+  const trInputWatermark = document.getElementById("aiInputLangWatermark");
+  const trOutputWatermark = document.getElementById("aiOutputLangWatermark");
   const trOutput = document.getElementById("aiTranslateOutput");
   const trStatusDot = document.getElementById("aiTranslateStatusDot");
   const trStatusText = document.getElementById("aiTranslateStatusText");
   const trCopyBtn = document.getElementById("aiTranslateCopyBtn");
-  const trSwapBtn = document.getElementById("aiTranslateSwapBtn");
 
   const chatHistoryToggle = document.getElementById("aiChatHistoryToggle");
   const historyModalCloseBtn = document.getElementById("aiHistoryModalCloseBtn");
@@ -6980,6 +6982,7 @@ function initAiTranslatorPanel() {
   let translateSeq = 0;
   let translateInFlight = false;
   let queuedTranslation = null;
+  let lastTranslatedKey = "";
   const translationCache = new Map();
 
   let chatSessions = [];
@@ -7129,8 +7132,10 @@ function initAiTranslatorPanel() {
       if (isChat) {
         const active = getActiveSession();
         panelTitleEl.textContent = active.title || "New chat";
+        panelTitleEl.hidden = false;
       } else {
-        panelTitleEl.textContent = isTranslatorFloating ? "Floating Translator" : "Instant Translator";
+        panelTitleEl.textContent = "";
+        panelTitleEl.hidden = true;
       }
     }
     updateChatTopbarIndicator();
@@ -7309,12 +7314,40 @@ function initAiTranslatorPanel() {
     });
   }
 
+  function syncTranslateButtonState() {
+    if (!trRunBtn) return;
+    const text = (trInput?.value || "").trim();
+    const hasOutput = Boolean((trOutput?.textContent || "").trim());
+    const currentKey = text ? `${currentDirection}|${formality}|${text}` : "";
+
+    trRunBtn.classList.remove("needs-translate", "stale", "synced");
+
+    if (!text) {
+      trRunBtn.disabled = true;
+      trRunBtn.title = "Digite algo para traduzir";
+      return;
+    }
+
+    trRunBtn.disabled = translateInFlight;
+    if (lastTranslatedKey && currentKey === lastTranslatedKey) {
+      trRunBtn.classList.add("synced");
+      trRunBtn.title = "Tradução atualizada";
+    } else if (hasOutput) {
+      trRunBtn.classList.add("stale");
+      trRunBtn.title = "Texto, tom ou idioma alterado — clique ou pressione Enter para atualizar a tradução";
+    } else {
+      trRunBtn.classList.add("needs-translate");
+      trRunBtn.title = "Traduzir (Enter)";
+    }
+  }
+
   toneSlider?.addEventListener("input", () => {
     formality = clamp(Number(toneSlider.value) || 0, 0, 100);
     if (toneBadge) {
       toneBadge.textContent = describeFormalityLabel(formality);
     }
     localStorage.setItem(AI_TONE_STORAGE_KEY, String(formality));
+    syncTranslateButtonState();
   });
 
   panel.querySelectorAll("[data-tone-jump]").forEach(lbl => {
@@ -7324,6 +7357,7 @@ function initAiTranslatorPanel() {
       if (toneSlider) toneSlider.value = String(targetVal);
       if (toneBadge) toneBadge.textContent = describeFormalityLabel(targetVal);
       localStorage.setItem(AI_TONE_STORAGE_KEY, String(targetVal));
+      syncTranslateButtonState();
     });
   });
 
@@ -7354,21 +7388,45 @@ function initAiTranslatorPanel() {
     }
   });
 
+  function syncDirectionUi() {
+    panel.querySelectorAll("[data-ai-dir]").forEach(b => {
+      const isSelected = b.dataset.aiDir === currentDirection;
+      b.classList.toggle("active", isSelected);
+      b.setAttribute("aria-selected", String(isSelected));
+      if (isSelected && dirLabel) {
+        dirLabel.textContent = b.dataset.aiDirLabel || b.textContent.trim();
+      }
+    });
+    if (trInputWatermark && trOutputWatermark) {
+      if (currentDirection === "en-pt") {
+        trInputWatermark.textContent = "ENGLISH";
+        trOutputWatermark.textContent = "PORTUGUÊS";
+      } else if (currentDirection === "auto") {
+        trInputWatermark.textContent = "AUTO";
+        trOutputWatermark.textContent = "PT ↔ EN";
+      } else {
+        trInputWatermark.textContent = "PORTUGUÊS";
+        trOutputWatermark.textContent = "ENGLISH";
+      }
+    }
+    syncTranslateButtonState();
+  }
+
   panel.querySelectorAll("[data-ai-dir]").forEach(btn => {
     btn.addEventListener("click", () => {
-      panel.querySelectorAll("[data-ai-dir]").forEach(b => {
-        b.classList.remove("active");
-        b.setAttribute("aria-selected", "false");
-      });
-      btn.classList.add("active");
-      btn.setAttribute("aria-selected", "true");
       currentDirection = btn.dataset.aiDir || "pt-en";
-      if (dirLabel) {
-        dirLabel.textContent = btn.dataset.aiDirLabel || btn.textContent.trim();
-      }
       closeDirDropdown();
+      syncDirectionUi();
     });
   });
+
+  trFlipDirBtn?.addEventListener("click", () => {
+    currentDirection = currentDirection === "en-pt" ? "pt-en" : "en-pt";
+    trFlipDirBtn.classList.toggle("flipped");
+    syncDirectionUi();
+  });
+
+  syncDirectionUi();
 
   function setTranslateStatus(stateName, label) {
     if (trStatusDot) {
@@ -7392,16 +7450,20 @@ function initAiTranslatorPanel() {
     if (!text) {
       translateSeq += 1;
       queuedTranslation = null;
+      lastTranslatedKey = "";
       if (trOutput) trOutput.textContent = "";
       setTranslateStatus("idle", "Instant AI Translation");
+      syncTranslateButtonState();
       return;
     }
 
     const cacheKey = `${currentDirection}|${formality}|${text}`;
     if (translationCache.has(cacheKey)) {
       queuedTranslation = null;
+      lastTranslatedKey = cacheKey;
       if (trOutput) trOutput.textContent = translationCache.get(cacheKey);
       setTranslateStatus("ready", `Instant · ${describeFormalityLabel(formality)}`);
+      syncTranslateButtonState();
       return;
     }
 
@@ -7444,6 +7506,7 @@ function initAiTranslatorPanel() {
       }
 
       if (seq === translateSeq && !queuedTranslation) {
+        lastTranslatedKey = cacheKey;
         if (trOutput) {
           trOutput.textContent = cleaned;
         }
@@ -7460,13 +7523,15 @@ function initAiTranslatorPanel() {
       }
     } finally {
       translateInFlight = false;
-      if (trRunBtn) trRunBtn.disabled = false;
+      syncTranslateButtonState();
       if (queuedTranslation) {
         const nextReq = queuedTranslation;
         queuedTranslation = null;
         if (translationCache.has(nextReq.cacheKey)) {
+          lastTranslatedKey = nextReq.cacheKey;
           if (trOutput) trOutput.textContent = translationCache.get(nextReq.cacheKey);
           setTranslateStatus("ready", `Instant · ${describeFormalityLabel(nextReq.toneVal)}`);
+          syncTranslateButtonState();
         } else {
           runRealtimeTranslation(nextReq.text, nextReq.toneVal, nextReq.dir, nextReq.cacheKey);
         }
@@ -7479,7 +7544,10 @@ function initAiTranslatorPanel() {
     if (trClearBtn) {
       trClearBtn.hidden = !raw.length;
     }
+    syncTranslateButtonState();
   });
+
+  syncTranslateButtonState();
 
   trInput?.addEventListener("keydown", event => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -7499,23 +7567,15 @@ function initAiTranslatorPanel() {
     trInput.focus();
   });
 
-  trSwapBtn?.addEventListener("click", () => {
-    const outText = String(trOutput?.textContent || "").trim();
-    if (!outText || !trInput) return;
-    trInput.value = outText;
-    if (trClearBtn) trClearBtn.hidden = false;
-    trInput.focus();
-  });
-
   trCopyBtn?.addEventListener("click", async () => {
     const outText = String(trOutput?.textContent || "").trim();
     if (!outText) return;
     try {
       await navigator.clipboard.writeText(outText);
-      const prev = trCopyBtn.textContent;
-      trCopyBtn.textContent = "Copied ✓";
+      const prevHtml = trCopyBtn.innerHTML;
+      trCopyBtn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`;
       setTimeout(() => {
-        trCopyBtn.textContent = prev;
+        trCopyBtn.innerHTML = prevHtml;
       }, 1200);
     } catch (_) {}
   });

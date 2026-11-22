@@ -301,25 +301,47 @@
               </div>
             </div>
 
-            <div class="ai-input-box">
-              <textarea id="aiTranslateInput" placeholder="Digite ou cole em português ou inglês... (Enter traduz, Shift+Enter quebra linha)" spellcheck="false"></textarea>
-              <button class="ai-clear-input" id="aiTranslateClearBtn" type="button" title="Clear text" aria-label="Clear text" hidden>×</button>
-              <div class="ai-input-foot">
-                <span class="ai-input-hint">Enter traduz</span>
-                <button class="ai-translate-run-btn" id="aiTranslateRunBtn" type="button" title="Translate now (Enter)">Translate ↵</button>
-              </div>
-            </div>
-
-            <div class="ai-output-box">
-              <div class="ai-output-head">
-                <span class="ai-status-dot" id="aiTranslateStatusDot"></span>
-                <span class="ai-status-text" id="aiTranslateStatusText">Instant AI Translation</span>
-                <div class="ai-output-actions">
-                  <button class="ai-mini-btn" id="aiTranslateSwapBtn" type="button" title="Use translation as input">⇅ Swap</button>
-                  <button class="ai-mini-btn primary" id="aiTranslateCopyBtn" type="button" title="Copy translation">Copy</button>
+            <div class="ai-translate-boxes-wrap">
+              <div class="ai-input-box">
+                <span class="ai-box-lang-watermark" id="aiInputLangWatermark" aria-hidden="true">PORTUGUÊS</span>
+                <textarea id="aiTranslateInput" placeholder="Digite ou cole aqui... (Enter traduz)" spellcheck="false"></textarea>
+                <button class="ai-clear-input" id="aiTranslateClearBtn" type="button" title="Clear text" aria-label="Clear text" hidden>×</button>
+                <div class="ai-input-foot">
+                  <span class="ai-input-hint">Enter traduz</span>
+                  <button class="ai-translate-run-btn" id="aiTranslateRunBtn" type="button" title="Traduzir (Enter)" aria-label="Traduzir">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M5 12h14" />
+                      <path d="m13 6 6 6-6 6" />
+                    </svg>
+                  </button>
                 </div>
               </div>
-              <div class="ai-translate-output" id="aiTranslateOutput" tabindex="0"></div>
+
+              <button class="ai-flip-dir-btn" id="aiFlipDirBtn" type="button" title="Inverter idiomas (PT ↔ EN)" aria-label="Inverter idiomas">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8 7l4-4 4 4" />
+                  <path d="M12 3v11" />
+                  <path d="M16 17l-4 4-4-4" />
+                  <path d="M12 21V10" />
+                </svg>
+              </button>
+
+              <div class="ai-output-box">
+                <span class="ai-box-lang-watermark" id="aiOutputLangWatermark" aria-hidden="true">ENGLISH</span>
+                <div class="ai-output-head">
+                  <span class="ai-status-dot" id="aiTranslateStatusDot"></span>
+                  <span class="ai-status-text" id="aiTranslateStatusText">Instant AI Translation</span>
+                  <div class="ai-output-actions">
+                    <button class="ai-mini-btn ai-copy-icon-btn primary" id="aiTranslateCopyBtn" type="button" title="Copy translation" aria-label="Copy translation">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect x="9" y="9" width="13" height="13" rx="2" />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <div class="ai-translate-output" id="aiTranslateOutput" tabindex="0"></div>
+              </div>
             </div>
           </div>
 

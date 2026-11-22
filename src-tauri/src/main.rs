@@ -88,8 +88,8 @@ fn set_translator_floating_mode(
                 let _ = window.unmaximize();
             }
         }
-        let _ = window.set_min_size(Some(tauri::LogicalSize::new(280.0, 340.0)));
-        let _ = window.set_size(tauri::LogicalSize::new(360.0, 490.0));
+        let _ = window.set_min_size(Some(tauri::LogicalSize::new(240.0, 220.0)));
+        let _ = window.set_size(tauri::LogicalSize::new(340.0, 320.0));
         let _ = window.set_always_on_top(true);
         let _ = window.set_resizable(true);
         let _ = window.show();
