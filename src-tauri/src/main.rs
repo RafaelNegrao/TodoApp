@@ -49,6 +49,77 @@ struct UpdateInfo {
     size: u64,
 }
 
+#[derive(Clone, Copy)]
+struct SavedMainWindowBounds {
+    was_maximized: bool,
+    position: Option<tauri::PhysicalPosition<i32>>,
+    size: Option<tauri::PhysicalSize<u32>>,
+}
+
+#[derive(Default)]
+struct FloatingTranslatorState(Mutex<Option<SavedMainWindowBounds>>);
+
+#[tauri::command]
+fn set_translator_floating_mode(
+    app: tauri::AppHandle,
+    state: State<'_, FloatingTranslatorState>,
+    floating: bool,
+) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Err("Main window not found".to_string());
+    };
+
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "Floating translator state lock poisoned".to_string())?;
+
+    if floating {
+        if guard.is_none() {
+            let was_maximized = window.is_maximized().unwrap_or(false);
+            let position = window.outer_position().ok();
+            let size = window.inner_size().ok();
+            *guard = Some(SavedMainWindowBounds {
+                was_maximized,
+                position,
+                size,
+            });
+            if was_maximized {
+                let _ = window.unmaximize();
+            }
+        }
+        let _ = window.set_min_size(Some(tauri::LogicalSize::new(280.0, 340.0)));
+        let _ = window.set_size(tauri::LogicalSize::new(360.0, 490.0));
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_resizable(true);
+        let _ = window.show();
+        let _ = window.set_focus();
+    } else {
+        let _ = window.set_always_on_top(false);
+        let _ = window.set_min_size(Some(tauri::LogicalSize::new(820.0, 540.0)));
+        if let Some(saved) = guard.take() {
+            if saved.was_maximized {
+                let _ = window.maximize();
+            } else {
+                if let Some(sz) = saved.size {
+                    let _ = window.set_size(sz);
+                } else {
+                    let _ = window.set_size(tauri::LogicalSize::new(1180.0, 760.0));
+                }
+                if let Some(pos) = saved.position {
+                    let _ = window.set_position(pos);
+                }
+            }
+        } else {
+            let _ = window.set_size(tauri::LogicalSize::new(1180.0, 760.0));
+        }
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 fn minimize_window(app: tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -92,6 +163,430 @@ fn state_save(db: State<'_, DbState>, json: String) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+struct AiChatAttachment {
+    name: String,
+    mime_type: String,
+    #[serde(default)]
+    data_base64: Option<String>,
+    #[serde(default)]
+    text_content: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct AiChatMessage {
+    role: String,
+    text: String,
+    #[serde(default)]
+    attachments: Vec<AiChatAttachment>,
+}
+
+fn gemini_http_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(8))
+            .timeout(Duration::from_secs(45))
+            .build()
+    })
+}
+
+const GEMINI_MODEL_CASCADE: &[&str] = &[
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemma-4-31b-it",
+    "gemini-3.8-flash",
+];
+
+fn gemini_model_cooldowns() -> &'static Mutex<HashMap<String, Instant>> {
+    static COOLDOWNS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    COOLDOWNS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn mark_model_cooldown(model: &str, duration: Duration) {
+    if let Ok(mut map) = gemini_model_cooldowns().lock() {
+        map.insert(model.to_string(), Instant::now() + duration);
+    }
+}
+
+fn order_models_by_availability(candidates: Vec<String>) -> Vec<String> {
+    let now = Instant::now();
+    let mut ready = Vec::new();
+    let mut cooling: Vec<(String, Instant)> = Vec::new();
+
+    if let Ok(mut map) = gemini_model_cooldowns().lock() {
+        map.retain(|_, &mut until| until > now);
+        for m in candidates {
+            if let Some(&until) = map.get(&m) {
+                if until > now {
+                    cooling.push((m, until));
+                    continue;
+                }
+            }
+            ready.push(m);
+        }
+    } else {
+        return candidates;
+    }
+
+    // Os modelos em cooldown vao para o final da fila (ordenados pelo que libera mais cedo),
+    // garantindo que o sistema desca imediatamente para um modelo disponivel sem repetir 429,
+    // mas ainda tenha fallback caso todos estejam em cooldown.
+    cooling.sort_by_key(|(_, until)| *until);
+    for (m, _) in cooling {
+        ready.push(m);
+    }
+    ready
+}
+
+fn resolve_gemini_key_and_models(api_key: Option<String>) -> Result<(String, Vec<String>), String> {
+    let env_vars = load_dotenv_vars();
+    let provided = api_key.unwrap_or_default().trim().to_string();
+    let key = if !provided.is_empty() {
+        provided
+    } else {
+        env_vars.get("GEMINI_API_KEY").cloned().unwrap_or_default()
+    };
+
+    if key.is_empty() {
+        return Err("GEMINI_API_KEY nao encontrada no .env ou Settings".to_string());
+    }
+
+    let env_model = env_vars
+        .get("GEMINI_MODEL")
+        .cloned()
+        .unwrap_or_else(|| "gemini-3-flash-preview".to_string());
+
+    let mut models = Vec::new();
+    if !env_model.trim().is_empty() {
+        models.push(env_model.trim().to_string());
+    }
+    for &fb in GEMINI_MODEL_CASCADE {
+        if !models.iter().any(|m| m == fb) {
+            models.push(fb.to_string());
+        }
+    }
+
+    Ok((key, order_models_by_availability(models)))
+}
+
+fn describe_formality(formality: u8) -> &'static str {
+    match formality {
+        0..=20 => "very natural, casual, conversational everyday native speech (contractions, idioms, relaxed tone)",
+        21..=44 => "natural and friendly everyday spoken/chat tone (clear, modern, not stiff)",
+        45..=65 => "balanced, clear, natural professional tone suitable for workplace chat (e.g. Microsoft Teams/Slack)",
+        66..=85 => "formal, polished corporate/business tone suitable for professional emails and presentations",
+        _ => "highly formal, executive, diplomatic and rigorous corporate register",
+    }
+}
+
+fn fold_system_instruction_into_user(mut payload: serde_json::Value) -> serde_json::Value {
+    let sys_text = payload
+        .get("systemInstruction")
+        .and_then(|s| s.get("parts"))
+        .and_then(|p| p.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|first| first.get("text"))
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if let Some(obj) = payload.as_object_mut() {
+        obj.remove("systemInstruction");
+    }
+
+    if !sys_text.is_empty() {
+        if let Some(parts) = payload
+            .get_mut("contents")
+            .and_then(|c| c.as_array_mut())
+            .and_then(|arr| arr.first_mut())
+            .and_then(|first| first.get_mut("parts"))
+            .and_then(|p| p.as_array_mut())
+        {
+            parts.insert(0, serde_json::json!({ "text": format!("{sys_text}\n\n---\n") }));
+        }
+    }
+    payload
+}
+
+fn execute_gemini_fast_payload(
+    key: &str,
+    models: &[String],
+    payload: serde_json::Value,
+) -> Result<String, String> {
+    let agent = gemini_http_agent();
+    let mut last_err = String::from("Falha ao contatar a API do Gemini");
+
+    let mut payload_fast_think = payload.clone();
+    payload_fast_think["generationConfig"]["thinkingConfig"] = serde_json::json!({
+        "thinkingLevel": "MINIMAL"
+    });
+    let payload_compat = fold_system_instruction_into_user(payload.clone());
+
+    let ordered = order_models_by_availability(models.to_vec());
+
+    for model in &ordered {
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model, key
+        );
+
+        let candidates = if model.starts_with("gemma-") {
+            vec![&payload_compat]
+        } else {
+            vec![&payload_fast_think, &payload, &payload_compat]
+        };
+
+        for candidate_payload in candidates {
+            match agent
+                .post(&url)
+                .set("Content-Type", "application/json")
+                .send_json(candidate_payload.clone())
+            {
+                Ok(resp) => {
+                    let body: serde_json::Value = resp
+                        .into_json()
+                        .map_err(|e| format!("Resposta invalida do Gemini: {e}"))?;
+                    let mut text_parts: Vec<String> = Vec::new();
+                    if let Some(parts) = body["candidates"][0]["content"]["parts"].as_array() {
+                        for p in parts {
+                            if p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                continue;
+                            }
+                            if let Some(t) = p["text"].as_str() {
+                                let trimmed = t.trim();
+                                if !trimmed.is_empty() {
+                                    text_parts.push(trimmed.to_string());
+                                }
+                            }
+                        }
+                    }
+                    if !text_parts.is_empty() {
+                        return Ok(text_parts.join("\n"));
+                    }
+                }
+                Err(ureq::Error::Status(code, resp)) => {
+                    let err_body = resp.into_string().unwrap_or_default();
+                    last_err = format!("Gemini HTTP {code} ({model}): {err_body}");
+                    if code == 429 {
+                        // Cota do modelo excedida: coloca esse modelo em cooldown por 30s
+                        // e desce imediatamente para o proximo modelo da lista!
+                        mark_model_cooldown(model, Duration::from_secs(30));
+                        break;
+                    }
+                    if code == 503 || code == 502 || code == 500 || code == 504 {
+                        mark_model_cooldown(model, Duration::from_secs(45));
+                        break;
+                    }
+                    if code == 404 {
+                        mark_model_cooldown(model, Duration::from_secs(600));
+                        break;
+                    }
+                    if code == 400
+                        && (err_body.contains("thinkingConfig")
+                            || err_body.contains("systemInstruction")
+                            || err_body.contains("Developer instruction"))
+                    {
+                        continue;
+                    }
+                    break;
+                }
+                Err(e) => {
+                    last_err = format!("Erro de rede ao chamar Gemini ({model}): {e}");
+                    mark_model_cooldown(model, Duration::from_secs(15));
+                    break;
+                }
+            }
+        }
+    }
+
+    Err(last_err)
+}
+
+fn sanitize_translation_output(source: &str, raw_output: String) -> String {
+    let trimmed_src = source.trim();
+    let trimmed_out = raw_output.trim();
+    if trimmed_src.is_empty() || trimmed_out.is_empty() {
+        return trimmed_out.to_string();
+    }
+
+    // Se a entrada for de linha unica e o modelo tiver repetido a frase original na primeira linha
+    // seguida da traducao na linha de baixo, remove o eco da linha original.
+    if !trimmed_src.contains('\n') && trimmed_out.contains('\n') {
+        let lines: Vec<&str> = trimmed_out
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect();
+        if lines.len() >= 2 && lines[0].eq_ignore_ascii_case(trimmed_src) {
+            return lines[1..].join("\n");
+        }
+        if lines.len() >= 2 && lines[0].to_lowercase() == trimmed_src.to_lowercase() {
+            return lines[1..].join("\n");
+        }
+    }
+
+    trimmed_out.to_string()
+}
+
+#[tauri::command]
+async fn ai_translate_fast(
+    text: String,
+    formality: u8,
+    direction: String,
+    api_key: Option<String>,
+) -> Result<String, String> {
+    let trimmed = text.trim().to_string();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+
+    let (key, mut models) = resolve_gemini_key_and_models(api_key)?;
+    // Cascata completa de modelos ordenados por velocidade e disponibilidade:
+    // Se um modelo der HTTP 429 (cota excedida) ou 503, o sistema desce automaticamente
+    // para o proximo modelo disponivel e memoriza o cooldown para nao travar as proximas traducoes.
+    let fast_priority = GEMINI_MODEL_CASCADE;
+    let mut ordered_models: Vec<String> = fast_priority.iter().map(|s| (*s).to_string()).collect();
+    for m in models.drain(..) {
+        if !ordered_models.iter().any(|existing| existing == &m) {
+            ordered_models.push(m);
+        }
+    }
+    let ordered_models = order_models_by_availability(ordered_models);
+
+    let tone = describe_formality(formality);
+    let dir_instruction = match direction.as_str() {
+        "pt-en" => "Translate the user's text from Brazilian Portuguese into English.",
+        "en-pt" => "Translate the user's text from English into Brazilian Portuguese.",
+        _ => "Auto-detect the input language: if it is in Portuguese, translate it into English. If it is in English, translate it into Brazilian Portuguese.",
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let system_prompt = format!(
+            "You are an instant real-time translator between Brazilian Portuguese and English.\n\
+             Task: {dir_instruction}\n\
+             Register / Formality ({formality}/100): Use a {tone}.\n\
+             Strict Rules:\n\
+             1. Output ONLY the translated text in the target language. NEVER repeat or echo the original input text.\n\
+             2. Even for short phrases or titles, noticeably adapt vocabulary and phrasing to match the requested register ({tone}).\n\
+             3. Preserve original line breaks when translating multi-line text."
+        );
+
+        let payload = serde_json::json!({
+            "systemInstruction": {
+                "parts": [{ "text": system_prompt }]
+            },
+            "contents": [{
+                "role": "user",
+                "parts": [{ "text": trimmed.clone() }]
+            }],
+            "generationConfig": {
+                "temperature": 0.2
+            }
+        });
+
+        let raw = execute_gemini_fast_payload(&key, &ordered_models, payload)?;
+        Ok(sanitize_translation_output(&trimmed, raw))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn ai_chat_english(
+    messages: Vec<AiChatMessage>,
+    formality: u8,
+    api_key: Option<String>,
+) -> Result<String, String> {
+    if messages.is_empty() {
+        return Ok(String::new());
+    }
+
+    let (key, models) = resolve_gemini_key_and_models(api_key)?;
+    let _ = formality;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let system_prompt = "You are a smart, fast, general-purpose AI assistant integrated into TODOCompanion. \
+             You can answer any question, analyze attached images, PDFs, audio, code, logs, and documents, \
+             help with programming, writing, problem-solving, or translate and practice English whenever asked. \
+             Always reply in the same language the user writes in (unless asked to translate or switch languages). \
+             Be clear, well-structured, and direct.";
+
+        let contents: Vec<serde_json::Value> = messages
+            .into_iter()
+            .filter(|m| !m.text.trim().is_empty() || !m.attachments.is_empty())
+            .map(|m| {
+                let role = if m.role == "model" || m.role == "assistant" {
+                    "model"
+                } else {
+                    "user"
+                };
+
+                let mut parts: Vec<serde_json::Value> = Vec::new();
+
+                for att in m.attachments {
+                    if let Some(txt) = att.text_content {
+                        if !txt.trim().is_empty() {
+                            parts.push(serde_json::json!({
+                                "text": format!("--- Attachment: {} ---\n{}\n--- End of {} ---", att.name, txt, att.name)
+                            }));
+                            continue;
+                        }
+                    }
+                    if let Some(b64) = att.data_base64 {
+                        let clean_b64 = b64.trim();
+                        if !clean_b64.is_empty() {
+                            let clean_mime = att
+                                .mime_type
+                                .split(';')
+                                .next()
+                                .unwrap_or("application/octet-stream")
+                                .trim()
+                                .to_string();
+                            parts.push(serde_json::json!({
+                                "inlineData": {
+                                    "mimeType": clean_mime,
+                                    "data": clean_b64
+                                }
+                            }));
+                        }
+                    }
+                }
+
+                if !m.text.trim().is_empty() {
+                    parts.push(serde_json::json!({ "text": m.text }));
+                } else if parts.is_empty() {
+                    parts.push(serde_json::json!({ "text": "Analyze the attached file(s)." }));
+                }
+
+                serde_json::json!({
+                    "role": role,
+                    "parts": parts
+                })
+            })
+            .collect();
+
+        let payload = serde_json::json!({
+            "systemInstruction": {
+                "parts": [{ "text": system_prompt }]
+            },
+            "contents": contents,
+            "generationConfig": {
+                "temperature": 0.4
+            }
+        });
+
+        execute_gemini_fast_payload(&key, &models, payload)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -181,6 +676,1040 @@ struct ActiveAiAudioCapture {
 
 #[derive(Default)]
 struct AiAudioCaptureState(Mutex<Option<ActiveAiAudioCapture>>);
+
+struct ActiveNativeScreenRecording {
+    running: Arc<AtomicBool>,
+    path: PathBuf,
+    relative_file: String,
+    original_name: String,
+    join_handle: Option<thread::JoinHandle<Result<(), String>>>,
+}
+
+#[derive(Default)]
+struct NativeScreenRecorderState(Mutex<Option<ActiveNativeScreenRecording>>);
+
+#[cfg(target_os = "windows")]
+mod win_screen_recorder {
+    use super::*;
+    use std::collections::VecDeque;
+    use std::ptr;
+    use std::sync::mpsc;
+    use windows::core::{Interface, PCWSTR};
+    use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
+    use windows::Win32::Graphics::Direct3D11::{
+        D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Resource, ID3D11Texture2D,
+        D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAPPED_SUBRESOURCE,
+        D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+    };
+    use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
+    use windows::Win32::Graphics::Dxgi::{
+        IDXGIAdapter, IDXGIDevice, IDXGIOutput, IDXGIOutput1, IDXGIOutputDuplication,
+        IDXGIResource, DXGI_OUTDUPL_FRAME_INFO,
+    };
+    use windows::Win32::Graphics::Gdi::{
+        BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC,
+        GetDeviceCaps, ReleaseDC, SelectObject, SetStretchBltMode, StretchBlt, BITMAPINFO,
+        BITMAPINFOHEADER, BI_RGB, COLORONCOLOR, DESKTOPHORZRES, DESKTOPVERTRES, DIB_RGB_COLORS,
+        HGDIOBJ, SRCCOPY,
+    };
+    use windows::Win32::Media::MediaFoundation::{
+        IMFAttributes, IMFMediaBuffer, IMFMediaType, IMFSample, IMFSinkWriter,
+        MFAudioFormat_AAC, MFAudioFormat_PCM, MFCreateAttributes, MFCreateMediaType,
+        MFCreateMemoryBuffer, MFCreateSample, MFCreateSinkWriterFromURL, MFMediaType_Audio,
+        MFMediaType_Video, MFShutdown, MFStartup, MFVideoFormat_H264, MFVideoFormat_RGB32,
+        MFVideoInterlace_Progressive, MFSTARTUP_NOSOCKET, MF_LOW_LATENCY,
+        MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
+        MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS,
+        MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_AVG_BITRATE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE,
+        MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_MPEG2_PROFILE, MF_MT_SUBTYPE,
+        MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SINK_WRITER_DISABLE_THROTTLING, MF_VERSION,
+    };
+    use windows::Win32::System::Com::{
+        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetCursorPos, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
+    };
+
+    // Qualidade nativa 1:1 (Full HD 1920x1080 / 1920x1200 sem downscale) com H.264 High Profile a 6.5 Mbps:
+    // - Captura 1:1 copia cada linha via memcpy (SIMD), sendo mais rapida na CPU do que redimensionar pixels
+    //   e mantendo textos, codigo e interfaces 100% nitidos!
+    // - O encoding H.264 roda via hardware (Intel QuickSync) na GPU integrada do Core i5.
+    const VIDEO_FPS: u32 = 15;
+    const VIDEO_BITRATE: u32 = 6_500_000;
+    const MAX_VIDEO_WIDTH: i32 = 1920;
+    const MAX_VIDEO_HEIGHT: i32 = 1200;
+    const H264_PROFILE_HIGH: u32 = 100;
+    const AUDIO_SAMPLE_RATE: u32 = 48_000;
+    const AUDIO_CHANNELS: u32 = 1;
+    const AUDIO_BITS_PER_SAMPLE: u32 = 16;
+    const HNS_PER_SEC: i64 = 10_000_000;
+    // Buffer circular maximo de 1 segundo por canal (evita crescimento de RAM em gravacoes longas)
+    const MAX_RING_SAMPLES: usize = AUDIO_SAMPLE_RATE as usize;
+
+    fn pack_u32_pair(hi: u32, lo: u32) -> u64 {
+        ((hi as u64) << 32) | (lo as u64)
+    }
+
+    fn push_resampled_48k(dest: &Arc<Mutex<VecDeque<f32>>>, mono_chunk: &[f32], in_rate: u32) {
+        if mono_chunk.is_empty() || in_rate == 0 {
+            return;
+        }
+        let Ok(mut buf) = dest.lock() else {
+            return;
+        };
+
+        if in_rate == AUDIO_SAMPLE_RATE {
+            for &s in mono_chunk {
+                if buf.len() >= MAX_RING_SAMPLES {
+                    buf.pop_front();
+                }
+                buf.push_back(s);
+            }
+            return;
+        }
+
+        let ratio = AUDIO_SAMPLE_RATE as f64 / in_rate as f64;
+        let out_len = ((mono_chunk.len() as f64) * ratio).max(1.0).round() as usize;
+        for i in 0..out_len {
+            let src_pos = (i as f64) / ratio;
+            let idx = src_pos.floor() as usize;
+            let frac = (src_pos - (idx as f64)) as f32;
+            let s0 = mono_chunk.get(idx).copied().unwrap_or(0.0);
+            let s1 = mono_chunk.get(idx + 1).copied().unwrap_or(s0);
+            if buf.len() >= MAX_RING_SAMPLES {
+                buf.pop_front();
+            }
+            buf.push_back(s0 + (s1 - s0) * frac);
+        }
+    }
+
+    fn build_48k_stream(
+        device: &cpal::Device,
+        config: &cpal::SupportedStreamConfig,
+        dest: Arc<Mutex<VecDeque<f32>>>,
+    ) -> Option<cpal::Stream> {
+        let channels = config.channels() as usize;
+        let in_rate = config.sample_rate().0;
+        let sample_format = config.sample_format();
+        let stream_config: cpal::StreamConfig = config.clone().into();
+        let err_fn = |err| eprintln!("[screen-rec-audio] stream error: {err}");
+
+        match sample_format {
+            cpal::SampleFormat::F32 => {
+                let mut scratch = Vec::<f32>::with_capacity(2048);
+                device
+                    .build_input_stream(
+                        &stream_config,
+                        move |data: &[f32], _| {
+                            if channels == 0 {
+                                return;
+                            }
+                            scratch.clear();
+                            scratch.extend(
+                                data.chunks(channels)
+                                    .map(|f| f.iter().copied().sum::<f32>() / (f.len() as f32)),
+                            );
+                            push_resampled_48k(&dest, &scratch, in_rate);
+                        },
+                        err_fn,
+                        None,
+                    )
+                    .ok()
+            }
+            cpal::SampleFormat::I16 => {
+                let mut scratch = Vec::<f32>::with_capacity(2048);
+                device
+                    .build_input_stream(
+                        &stream_config,
+                        move |data: &[i16], _| {
+                            if channels == 0 {
+                                return;
+                            }
+                            scratch.clear();
+                            scratch.extend(data.chunks(channels).map(|f| {
+                                let sum: f32 = f.iter().map(|&s| (s as f32) / 32768.0).sum();
+                                sum / (f.len() as f32)
+                            }));
+                            push_resampled_48k(&dest, &scratch, in_rate);
+                        },
+                        err_fn,
+                        None,
+                    )
+                    .ok()
+            }
+            cpal::SampleFormat::U16 => {
+                let mut scratch = Vec::<f32>::with_capacity(2048);
+                device
+                    .build_input_stream(
+                        &stream_config,
+                        move |data: &[u16], _| {
+                            if channels == 0 {
+                                return;
+                            }
+                            scratch.clear();
+                            scratch.extend(data.chunks(channels).map(|f| {
+                                let sum: f32 =
+                                    f.iter().map(|&s| ((s as f32) - 32768.0) / 32768.0).sum();
+                                sum / (f.len() as f32)
+                            }));
+                            push_resampled_48k(&dest, &scratch, in_rate);
+                        },
+                        err_fn,
+                        None,
+                    )
+                    .ok()
+            }
+            _ => None,
+        }
+    }
+
+    unsafe fn create_optimized_sink_writer(wide_url: &[u16]) -> Result<IMFSinkWriter, String> {
+        let mut attrs_opt: Option<IMFAttributes> = None;
+        if MFCreateAttributes(&mut attrs_opt, 3).is_ok() {
+            if let Some(ref attrs) = attrs_opt {
+                // Ativa Intel QuickSync / GPU hardware encoding quando disponivel
+                let _ = attrs.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1);
+                // Modo de baixa latencia: reduz uso de CPU/RAM desativando reordenacao longa de B-frames
+                let _ = attrs.SetUINT32(&MF_LOW_LATENCY, 1);
+                // Evita que o SinkWriter bloqueie a thread artificialmente
+                let _ = attrs.SetUINT32(&MF_SINK_WRITER_DISABLE_THROTTLING, 1);
+            }
+        }
+
+        if let Some(ref attrs) = attrs_opt {
+            if let Ok(writer) = MFCreateSinkWriterFromURL(PCWSTR(wide_url.as_ptr()), None, attrs) {
+                return Ok(writer);
+            }
+        }
+
+        MFCreateSinkWriterFromURL(PCWSTR(wide_url.as_ptr()), None, None::<&IMFAttributes>)
+            .map_err(|e| format!("Falha ao criar SinkWriter MP4: {e}"))
+    }
+
+    unsafe fn configure_video_streams(
+        writer: &IMFSinkWriter,
+        width: u32,
+        height: u32,
+    ) -> Result<u32, String> {
+        let out_type: IMFMediaType = MFCreateMediaType().map_err(|e| e.to_string())?;
+        out_type.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).map_err(|e| e.to_string())?;
+        out_type.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_H264).map_err(|e| e.to_string())?;
+        out_type.SetUINT32(&MF_MT_AVG_BITRATE, VIDEO_BITRATE).map_err(|e| e.to_string())?;
+        out_type
+            .SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)
+            .map_err(|e| e.to_string())?;
+        out_type
+            .SetUINT64(&MF_MT_FRAME_SIZE, pack_u32_pair(width, height))
+            .map_err(|e| e.to_string())?;
+        out_type
+            .SetUINT64(&MF_MT_FRAME_RATE, pack_u32_pair(VIDEO_FPS, 1))
+            .map_err(|e| e.to_string())?;
+        let _ = out_type.SetUINT32(&MF_MT_MPEG2_PROFILE, H264_PROFILE_HIGH);
+
+        let stream_index = match writer.AddStream(&out_type) {
+            Ok(idx) => idx,
+            Err(_) => {
+                let _ = out_type.DeleteItem(&MF_MT_MPEG2_PROFILE);
+                writer.AddStream(&out_type).map_err(|e| e.to_string())?
+            }
+        };
+
+        let in_type: IMFMediaType = MFCreateMediaType().map_err(|e| e.to_string())?;
+        in_type.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).map_err(|e| e.to_string())?;
+        in_type.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32).map_err(|e| e.to_string())?;
+        in_type
+            .SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)
+            .map_err(|e| e.to_string())?;
+        in_type
+            .SetUINT64(&MF_MT_FRAME_SIZE, pack_u32_pair(width, height))
+            .map_err(|e| e.to_string())?;
+        in_type
+            .SetUINT64(&MF_MT_FRAME_RATE, pack_u32_pair(VIDEO_FPS, 1))
+            .map_err(|e| e.to_string())?;
+
+        writer
+            .SetInputMediaType(stream_index, &in_type, None::<&IMFAttributes>)
+            .map_err(|e| e.to_string())?;
+
+        Ok(stream_index)
+    }
+
+    unsafe fn configure_audio_streams(writer: &IMFSinkWriter) -> Result<u32, String> {
+        let out_type: IMFMediaType = MFCreateMediaType().map_err(|e| e.to_string())?;
+        out_type.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).map_err(|e| e.to_string())?;
+        out_type.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_AAC).map_err(|e| e.to_string())?;
+        out_type
+            .SetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND, AUDIO_SAMPLE_RATE)
+            .map_err(|e| e.to_string())?;
+        out_type
+            .SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, AUDIO_CHANNELS)
+            .map_err(|e| e.to_string())?;
+        out_type
+            .SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, AUDIO_BITS_PER_SAMPLE)
+            .map_err(|e| e.to_string())?;
+        out_type
+            .SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 12_000)
+            .map_err(|e| e.to_string())?;
+
+        let stream_index = writer.AddStream(&out_type).map_err(|e| e.to_string())?;
+
+        let block_align = AUDIO_CHANNELS * (AUDIO_BITS_PER_SAMPLE / 8);
+        let avg_bytes = AUDIO_SAMPLE_RATE * block_align;
+
+        let in_type: IMFMediaType = MFCreateMediaType().map_err(|e| e.to_string())?;
+        in_type.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).map_err(|e| e.to_string())?;
+        in_type.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_PCM).map_err(|e| e.to_string())?;
+        in_type
+            .SetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND, AUDIO_SAMPLE_RATE)
+            .map_err(|e| e.to_string())?;
+        in_type
+            .SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, AUDIO_CHANNELS)
+            .map_err(|e| e.to_string())?;
+        in_type
+            .SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, AUDIO_BITS_PER_SAMPLE)
+            .map_err(|e| e.to_string())?;
+        in_type
+            .SetUINT32(&MF_MT_AUDIO_BLOCK_ALIGNMENT, block_align)
+            .map_err(|e| e.to_string())?;
+        in_type
+            .SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, avg_bytes)
+            .map_err(|e| e.to_string())?;
+        in_type
+            .SetUINT32(&MF_MT_ALL_SAMPLES_INDEPENDENT, 1)
+            .map_err(|e| e.to_string())?;
+
+        writer
+            .SetInputMediaType(stream_index, &in_type, None::<&IMFAttributes>)
+            .map_err(|e| e.to_string())?;
+
+        Ok(stream_index)
+    }
+
+    unsafe fn write_mf_sample(
+        writer: &IMFSinkWriter,
+        stream_index: u32,
+        bytes: &[u8],
+        timestamp_hns: i64,
+        duration_hns: i64,
+    ) -> Result<(), String> {
+        let buffer: IMFMediaBuffer =
+            MFCreateMemoryBuffer(bytes.len() as u32).map_err(|e| e.to_string())?;
+        let mut dest_ptr: *mut u8 = ptr::null_mut();
+        buffer
+            .Lock(&mut dest_ptr, None, None)
+            .map_err(|e| e.to_string())?;
+        ptr::copy_nonoverlapping(bytes.as_ptr(), dest_ptr, bytes.len());
+        buffer.Unlock().map_err(|e| e.to_string())?;
+        buffer
+            .SetCurrentLength(bytes.len() as u32)
+            .map_err(|e| e.to_string())?;
+
+        let sample: IMFSample = MFCreateSample().map_err(|e| e.to_string())?;
+        sample.AddBuffer(&buffer).map_err(|e| e.to_string())?;
+        sample
+            .SetSampleTime(timestamp_hns)
+            .map_err(|e| e.to_string())?;
+        sample
+            .SetSampleDuration(duration_hns.max(1))
+            .map_err(|e| e.to_string())?;
+
+        writer
+            .WriteSample(stream_index, &sample)
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    struct DxgiDuplicator {
+        context: ID3D11DeviceContext,
+        dupl: IDXGIOutputDuplication,
+        staging: ID3D11Texture2D,
+        src_w: u32,
+        src_h: u32,
+        has_frame: bool,
+    }
+
+    unsafe fn init_dxgi_duplicator() -> Option<DxgiDuplicator> {
+        let mut device_opt: Option<ID3D11Device> = None;
+        let mut context_opt: Option<ID3D11DeviceContext> = None;
+        D3D11CreateDevice(
+            None,
+            D3D_DRIVER_TYPE_HARDWARE,
+            windows::Win32::Foundation::HMODULE::default(),
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            None,
+            D3D11_SDK_VERSION,
+            Some(&mut device_opt),
+            None,
+            Some(&mut context_opt),
+        )
+        .ok()?;
+
+        let device = device_opt?;
+        let context = context_opt?;
+        let dxgi_device: IDXGIDevice = device.cast().ok()?;
+        let adapter: IDXGIAdapter = dxgi_device.GetAdapter().ok()?;
+        let output: IDXGIOutput = adapter.EnumOutputs(0).ok()?;
+        let output_desc = output.GetDesc().ok()?;
+        let rect = output_desc.DesktopCoordinates;
+        let src_w = (rect.right - rect.left).max(1) as u32;
+        let src_h = (rect.bottom - rect.top).max(1) as u32;
+
+        let output1: IDXGIOutput1 = output.cast().ok()?;
+        let dupl: IDXGIOutputDuplication = output1.DuplicateOutput(&device).ok()?;
+
+        let desc = D3D11_TEXTURE2D_DESC {
+            Width: src_w,
+            Height: src_h,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: D3D11_USAGE_STAGING,
+            BindFlags: 0,
+            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+            MiscFlags: 0,
+        };
+
+        let mut staging_opt: Option<ID3D11Texture2D> = None;
+        device
+            .CreateTexture2D(&desc, None, Some(&mut staging_opt))
+            .ok()?;
+        let staging = staging_opt?;
+
+        Some(DxgiDuplicator {
+            context,
+            dupl,
+            staging,
+            src_w,
+            src_h,
+            has_frame: false,
+        })
+    }
+
+    // Desenha um cursor vetorial limpo (seta branca com contorno escuro) diretamente no buffer de memoria
+    // bottom-up (BGRA), sem tocar em GDI/DrawIconEx/GetCursorInfo — eliminando 100% da piscada do cursor na tela!
+    fn draw_synthetic_cursor_bottom_up(
+        buf: &mut [u8],
+        out_w: i32,
+        out_h: i32,
+        cx: i32,
+        cy: i32,
+    ) {
+        // Mapa 12x18 de seta de cursor (1 = borda preta, 2 = preenchimento branco)
+        const ARROW: [&[u8]; 18] = [
+            b"100000000000",
+            b"110000000000",
+            b"121000000000",
+            b"122100000000",
+            b"122210000000",
+            b"122221000000",
+            b"122222100000",
+            b"122222210000",
+            b"122222221000",
+            b"122222222100",
+            b"122222222210",
+            b"122222111111",
+            b"122122100000",
+            b"121012210000",
+            b"110012210000",
+            b"100001221000",
+            b"000001221000",
+            b"000000110000",
+        ];
+
+        for (dy, row) in ARROW.iter().enumerate() {
+            let py = cy + (dy as i32);
+            if py < 0 || py >= out_h {
+                continue;
+            }
+            // No buffer bottom-up, a linha Y da tela fica em (out_h - 1 - py)
+            let buf_row = (out_h - 1 - py) as usize;
+            for (dx, &cell) in row.iter().enumerate() {
+                if cell == b'0' {
+                    continue;
+                }
+                let px = cx + (dx as i32);
+                if px < 0 || px >= out_w {
+                    continue;
+                }
+                let offset = (buf_row * (out_w as usize) + (px as usize)) * 4;
+                if offset + 3 < buf.len() {
+                    if cell == b'1' {
+                        buf[offset] = 18;
+                        buf[offset + 1] = 18;
+                        buf[offset + 2] = 20;
+                        buf[offset + 3] = 255;
+                    } else {
+                        buf[offset] = 255;
+                        buf[offset + 1] = 255;
+                        buf[offset + 2] = 255;
+                        buf[offset + 3] = 255;
+                    }
+                }
+            }
+        }
+    }
+
+    unsafe fn capture_dxgi_into_bottom_up(
+        dxgi: &mut DxgiDuplicator,
+        dest_bottom_up: &mut [u8],
+        out_w: u32,
+        out_h: u32,
+    ) -> bool {
+        let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
+        let mut resource_opt: Option<IDXGIResource> = None;
+
+        if dxgi
+            .dupl
+            .AcquireNextFrame(0, &mut frame_info, &mut resource_opt)
+            .is_ok()
+        {
+            if let Some(res) = resource_opt {
+                if let Ok(tex) = res.cast::<ID3D11Texture2D>() {
+                    let staging_res: Result<ID3D11Resource, _> = dxgi.staging.cast();
+                    let tex_res: Result<ID3D11Resource, _> = tex.cast();
+                    if let (Ok(dst), Ok(src)) = (staging_res, tex_res) {
+                        dxgi.context.CopyResource(&dst, &src);
+                        dxgi.has_frame = true;
+                    }
+                }
+            }
+            let _ = dxgi.dupl.ReleaseFrame();
+        }
+
+        if !dxgi.has_frame {
+            return false;
+        }
+
+        let Ok(staging_res) = dxgi.staging.cast::<ID3D11Resource>() else {
+            return false;
+        };
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        if dxgi
+            .context
+            .Map(&staging_res, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+            .is_err()
+        {
+            return false;
+        }
+
+        let src_ptr = mapped.pData as *const u8;
+        let pitch = mapped.RowPitch as usize;
+        let src_w = dxgi.src_w as usize;
+        let src_h = dxgi.src_h as usize;
+        let dst_w = out_w as usize;
+        let dst_h = out_h as usize;
+
+        if !src_ptr.is_null() && dst_w > 0 && dst_h > 0 {
+            if src_w == dst_w && src_h == dst_h {
+                let row_bytes = dst_w * 4;
+                for y in 0..dst_h {
+                    let src_row = src_ptr.add(y * pitch);
+                    let dst_row_idx = (dst_h - 1 - y) * row_bytes;
+                    ptr::copy_nonoverlapping(
+                        src_row,
+                        dest_bottom_up.as_mut_ptr().add(dst_row_idx),
+                        row_bytes,
+                    );
+                }
+            } else {
+                // Filtro bilinear 2x2 suave caso o monitor seja 4K (>1920x1200) para manter textos legiveis
+                for y in 0..dst_h {
+                    let sy0 = ((y * src_h) / dst_h).min(src_h - 1);
+                    let sy1 = (sy0 + 1).min(src_h - 1);
+                    let row0 = src_ptr.add(sy0 * pitch);
+                    let row1 = src_ptr.add(sy1 * pitch);
+                    let dst_row_offset = (dst_h - 1 - y) * dst_w * 4;
+                    for x in 0..dst_w {
+                        let sx0 = ((x * src_w) / dst_w).min(src_w - 1);
+                        let sx1 = (sx0 + 1).min(src_w - 1);
+                        let p00 = row0.add(sx0 * 4);
+                        let p10 = row0.add(sx1 * 4);
+                        let p01 = row1.add(sx0 * 4);
+                        let p11 = row1.add(sx1 * 4);
+                        let d = dest_bottom_up.as_mut_ptr().add(dst_row_offset + x * 4);
+                        for c in 0..3 {
+                            let avg = ((*p00.add(c) as u32)
+                                + (*p10.add(c) as u32)
+                                + (*p01.add(c) as u32)
+                                + (*p11.add(c) as u32)
+                                + 2)
+                                >> 2;
+                            *d.add(c) = avg as u8;
+                        }
+                        *d.add(3) = 255;
+                    }
+                }
+            }
+        }
+
+        dxgi.context.Unmap(&staging_res, 0);
+        true
+    }
+
+    pub fn spawn_screen_recorder(
+        output_path: PathBuf,
+        running: Arc<AtomicBool>,
+        ready_tx: mpsc::Sender<Result<(), String>>,
+    ) -> thread::JoinHandle<Result<(), String>> {
+        thread::spawn(move || unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let result = run_recorder_loop(&output_path, &running, &ready_tx);
+            CoUninitialize();
+            result
+        })
+    }
+
+    unsafe fn run_recorder_loop(
+        output_path: &Path,
+        running: &Arc<AtomicBool>,
+        ready_tx: &mpsc::Sender<Result<(), String>>,
+    ) -> Result<(), String> {
+        MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET).map_err(|e| {
+            let msg = format!("MFStartup falhou: {e}");
+            let _ = ready_tx.send(Err(msg.clone()));
+            msg
+        })?;
+
+        let res = run_recorder_inner(output_path, running, ready_tx);
+        let _ = MFShutdown();
+        res
+    }
+
+    unsafe fn run_recorder_inner(
+        output_path: &Path,
+        running: &Arc<AtomicBool>,
+        ready_tx: &mpsc::Sender<Result<(), String>>,
+    ) -> Result<(), String> {
+        // Inicializa o DXGI Desktop Duplication primeiro para usar a resolucao fisica exata da GPU
+        let mut dxgi_opt = init_dxgi_duplicator();
+
+        let hdc_screen = GetDC(None);
+        if hdc_screen.is_invalid() {
+            let err = "Nao foi possivel obter o DC da tela".to_string();
+            let _ = ready_tx.send(Err(err.clone()));
+            return Err(err);
+        }
+
+        let phys_w = GetDeviceCaps(Some(hdc_screen), DESKTOPHORZRES);
+        let phys_h = GetDeviceCaps(Some(hdc_screen), DESKTOPVERTRES);
+        let log_w = GetSystemMetrics(SM_CXSCREEN);
+        let log_h = GetSystemMetrics(SM_CYSCREEN);
+
+        let (src_w, src_h) = if let Some(ref dxgi) = dxgi_opt {
+            (dxgi.src_w as i32, dxgi.src_h as i32)
+        } else {
+            (
+                if phys_w > 0 { phys_w } else { log_w.max(640) },
+                if phys_h > 0 { phys_h } else { log_h.max(480) },
+            )
+        };
+
+        // Mantem a resolucao nativa 1:1 (ate 1920x1200 Full HD/WUXGA) para nitidez perfeita pixel-a-pixel!
+        let (mut out_w, mut out_h) = if src_w > MAX_VIDEO_WIDTH || src_h > MAX_VIDEO_HEIGHT {
+            let scale =
+                (MAX_VIDEO_WIDTH as f64 / (src_w as f64)).min(MAX_VIDEO_HEIGHT as f64 / (src_h as f64));
+            (
+                ((src_w as f64) * scale).round() as i32,
+                ((src_h as f64) * scale).round() as i32,
+            )
+        } else {
+            (src_w, src_h)
+        };
+        out_w = (out_w & !1).max(320);
+        out_h = (out_h & !1).max(240);
+
+        let hdc_mem = CreateCompatibleDC(Some(hdc_screen));
+        if hdc_mem.is_invalid() {
+            let _ = ReleaseDC(None, hdc_screen);
+            let err = "Falha ao criar DC em memoria".to_string();
+            let _ = ready_tx.send(Err(err.clone()));
+            return Err(err);
+        }
+
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: out_w,
+                biHeight: out_h, // Positivo = bottom-up DIB, layout nativo esperado pelo MFVideoFormat_RGB32
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                biSizeImage: (out_w * out_h * 4) as u32,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let mut dib_bits: *mut std::ffi::c_void = ptr::null_mut();
+        let hbitmap_res = CreateDIBSection(
+            Some(hdc_mem),
+            &bmi,
+            DIB_RGB_COLORS,
+            &mut dib_bits,
+            None,
+            0,
+        );
+        let Ok(hbitmap) = hbitmap_res else {
+            let _ = DeleteDC(hdc_mem);
+            let _ = ReleaseDC(None, hdc_screen);
+            let err = "Falha ao alocar DIBSection da tela".to_string();
+            let _ = ready_tx.send(Err(err.clone()));
+            return Err(err);
+        };
+        if hbitmap.is_invalid() || dib_bits.is_null() {
+            let _ = DeleteDC(hdc_mem);
+            let _ = ReleaseDC(None, hdc_screen);
+            let err = "DIBSection invalida".to_string();
+            let _ = ready_tx.send(Err(err.clone()));
+            return Err(err);
+        }
+
+        let old_obj: HGDIOBJ = SelectObject(hdc_mem, hbitmap.into());
+        // COLORONCOLOR e ~5x mais leve que HALFTONE na CPU a cada frame
+        let _ = SetStretchBltMode(hdc_mem, COLORONCOLOR);
+
+        let wide_url: Vec<u16> = output_path
+            .as_os_str()
+            .to_string_lossy()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let writer: IMFSinkWriter = match create_optimized_sink_writer(&wide_url) {
+            Ok(w) => w,
+            Err(err) => {
+                SelectObject(hdc_mem, old_obj);
+                let _ = DeleteObject(hbitmap.into());
+                let _ = DeleteDC(hdc_mem);
+                let _ = ReleaseDC(None, hdc_screen);
+                let _ = ready_tx.send(Err(err.clone()));
+                return Err(err);
+            }
+        };
+
+        let video_stream = match configure_video_streams(&writer, out_w as u32, out_h as u32) {
+            Ok(idx) => idx,
+            Err(err) => {
+                SelectObject(hdc_mem, old_obj);
+                let _ = DeleteObject(hbitmap.into());
+                let _ = DeleteDC(hdc_mem);
+                let _ = ReleaseDC(None, hdc_screen);
+                let _ = ready_tx.send(Err(err.clone()));
+                return Err(err);
+            }
+        };
+
+        let audio_stream = configure_audio_streams(&writer).ok();
+
+        if let Err(e) = writer.BeginWriting() {
+            SelectObject(hdc_mem, old_obj);
+            let _ = DeleteObject(hbitmap.into());
+            let _ = DeleteDC(hdc_mem);
+            let _ = ReleaseDC(None, hdc_screen);
+            let err = format!("BeginWriting falhou: {e}");
+            let _ = ready_tx.send(Err(err.clone()));
+            return Err(err);
+        }
+
+        // Inicia a captura simultanea de Microfone + Audio do Sistema (WASAPI Loopback)
+        let mic_buf = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(MAX_RING_SAMPLES)));
+        let sys_buf = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(MAX_RING_SAMPLES)));
+        let host = cpal::default_host();
+
+        let _mic_stream = host.default_input_device().and_then(|dev| {
+            let cfg = dev.default_input_config().ok()?;
+            let s = build_48k_stream(&dev, &cfg, Arc::clone(&mic_buf))?;
+            s.play().ok()?;
+            Some(s)
+        });
+
+        let _sys_stream = host.default_output_device().and_then(|dev| {
+            let cfg = dev.default_output_config().ok()?;
+            let s = build_48k_stream(&dev, &cfg, Arc::clone(&sys_buf))?;
+            s.play().ok()?;
+            Some(s)
+        });
+
+        // Sinaliza que a gravacao comecou com sucesso!
+        let _ = ready_tx.send(Ok(()));
+
+        let start_instant = Instant::now();
+        let frame_interval = Duration::from_micros(1_000_000 / (VIDEO_FPS as u64));
+        let frame_byte_len = (out_w * out_h * 4) as usize;
+
+        // Linha do tempo unica e estritamente sincrona entre Audio e Video:
+        // Garante que o muxer MP4 (FMPEG4Sink) descarregue os pacotes no disco a cada frame
+        // sem acumular filas de interleaving na RAM durante gravacoes longas (1h+).
+        let mut prev_wall_hns: i64 = 0;
+        let mut media_cursor_hns: i64 = 0;
+        let mut pcm_bytes = Vec::<u8>::with_capacity((AUDIO_SAMPLE_RATE as usize / 2) * 2);
+
+        while running.load(Ordering::Relaxed) {
+            let loop_tick = Instant::now();
+            let now_wall_hns = (start_instant.elapsed().as_secs_f64() * (HNS_PER_SEC as f64)) as i64;
+            let raw_delta_hns = (now_wall_hns - prev_wall_hns).max(HNS_PER_SEC / 60);
+            prev_wall_hns = now_wall_hns;
+
+            // Limita saltos individuais a no maximo 350ms caso a CPU tenha congelado momentaneamente,
+            // evitando pacotes gigantes ou buracos que corrompem o Finalize() do MP4
+            let step_hns_approx = raw_delta_hns.clamp(HNS_PER_SEC / 30, HNS_PER_SEC / 3);
+            let step_samples = (((step_hns_approx as i128) * (AUDIO_SAMPLE_RATE as i128))
+                / (HNS_PER_SEC as i128))
+                .max(480) as usize;
+            let exact_step_hns =
+                ((step_samples as i64) * HNS_PER_SEC) / (AUDIO_SAMPLE_RATE as i64);
+
+            let frame_slice_mut =
+                std::slice::from_raw_parts_mut(dib_bits as *mut u8, frame_byte_len);
+
+            // 1. Captura a tela via DXGI Desktop Duplication (sem tocar no GDI da tela)
+            let mut captured_via_dxgi = false;
+            if let Some(ref mut dxgi) = dxgi_opt {
+                captured_via_dxgi = capture_dxgi_into_bottom_up(
+                    dxgi,
+                    frame_slice_mut,
+                    out_w as u32,
+                    out_h as u32,
+                );
+            }
+
+            // Fallback GDI apenas se o primeiro frame DXGI ainda nao tiver chegado
+            if !captured_via_dxgi {
+                if out_w == src_w && out_h == src_h {
+                    let _ = BitBlt(
+                        hdc_mem,
+                        0,
+                        0,
+                        out_w,
+                        out_h,
+                        Some(hdc_screen),
+                        0,
+                        0,
+                        SRCCOPY,
+                    );
+                } else {
+                    let _ = StretchBlt(
+                        hdc_mem,
+                        0,
+                        0,
+                        out_w,
+                        out_h,
+                        Some(hdc_screen),
+                        0,
+                        0,
+                        src_w,
+                        src_h,
+                        SRCCOPY,
+                    );
+                }
+            }
+
+            // Desenha o cursor diretamente em memoria usando apenas GetCursorPos (nao bloqueia o hardware cursor!)
+            let mut pt = windows::Win32::Foundation::POINT::default();
+            if GetCursorPos(&mut pt).is_ok() {
+                let cx = ((pt.x as i64 * out_w as i64) / (src_w.max(1) as i64)) as i32;
+                let cy = ((pt.y as i64 * out_h as i64) / (src_h.max(1) as i64)) as i32;
+                draw_synthetic_cursor_bottom_up(frame_slice_mut, out_w, out_h, cx, cy);
+            }
+
+            let _ = write_mf_sample(
+                &writer,
+                video_stream,
+                frame_slice_mut,
+                media_cursor_hns,
+                exact_step_hns,
+            );
+
+            // 2. Mixa o audio (Microfone + Audio do PC) no mesmo timestamp e duracao exata do frame de video
+            if let Some(a_stream) = audio_stream {
+                pcm_bytes.clear();
+                let mut mb_guard = mic_buf.lock().ok();
+                let mut sb_guard = sys_buf.lock().ok();
+
+                for _ in 0..step_samples {
+                    let m_raw = mb_guard.as_mut().and_then(|q| q.pop_front()).unwrap_or(0.0);
+                    let s_raw = sb_guard.as_mut().and_then(|q| q.pop_front()).unwrap_or(0.0);
+                    let m = (m_raw * 1.6).clamp(-1.0, 1.0);
+                    let s = s_raw.clamp(-1.0, 1.0);
+                    let mixed = if m.abs() > 0.001 && s.abs() > 0.001 {
+                        (m + s) * 0.75
+                    } else {
+                        m + s
+                    };
+                    let sample_i16 = (mixed.clamp(-1.0, 1.0) * 32767.0) as i16;
+                    pcm_bytes.extend_from_slice(&sample_i16.to_le_bytes());
+                }
+
+                drop(mb_guard);
+                drop(sb_guard);
+
+                let _ = write_mf_sample(
+                    &writer,
+                    a_stream,
+                    &pcm_bytes,
+                    media_cursor_hns,
+                    exact_step_hns,
+                );
+            }
+
+            media_cursor_hns += exact_step_hns;
+
+            let spent = loop_tick.elapsed();
+            if spent < frame_interval {
+                thread::sleep(frame_interval - spent);
+            }
+        }
+
+        // Para os streams de audio antes do Finalize para liberar a CPU imediatamente
+        drop(_mic_stream);
+        drop(_sys_stream);
+
+        if let Err(e) = writer.Finalize() {
+            eprintln!("[screen-rec] writer.Finalize warning/error: {e}");
+        }
+
+        SelectObject(hdc_mem, old_obj);
+        let _ = DeleteObject(hbitmap.into());
+        let _ = DeleteDC(hdc_mem);
+        let _ = ReleaseDC(None, hdc_screen);
+
+        Ok(())
+    }
+}
+
+#[tauri::command]
+async fn native_screen_recording_start(
+    app: tauri::AppHandle,
+    state: State<'_, NativeScreenRecorderState>,
+    user_id: String,
+    sub_dir: Option<String>,
+    file_name: String,
+) -> Result<RecordingTarget, String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, state, user_id, sub_dir, file_name);
+        return Err("Gravacao nativa disponivel apenas no Windows".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|_| "NativeScreenRecorderState poisoned".to_string())?;
+        if let Some(mut prev) = guard.take() {
+            prev.running.store(false, Ordering::Relaxed);
+            if let Some(h) = prev.join_handle.take() {
+                let _ = h.join();
+            }
+        }
+
+        let user_dir = ensure_user_dir(&app, &user_id)?;
+        let relative_dir = sanitize_sub_dir(sub_dir.as_deref());
+        let mut dir = user_dir;
+        for segment in &relative_dir {
+            dir = dir.join(segment);
+        }
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+        let mp4_name = if file_name.to_lowercase().ends_with(".mp4") {
+            file_name
+        } else {
+            let stem = Path::new(&file_name)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Recording".to_string());
+            format!("{stem}.mp4")
+        };
+
+        let stored_name = unique_filename(&dir, &mp4_name);
+        let path = dir.join(&stored_name);
+
+        let mut parts = relative_dir;
+        parts.push(stored_name.clone());
+        let relative_file = parts.join("/");
+
+        let running = Arc::new(AtomicBool::new(true));
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let join_handle = win_screen_recorder::spawn_screen_recorder(
+            path.clone(),
+            Arc::clone(&running),
+            ready_tx,
+        );
+
+        match ready_rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                running.store(false, Ordering::Relaxed);
+                let _ = join_handle.join();
+                let _ = fs::remove_file(&path);
+                return Err(err);
+            }
+            Err(_) => {
+                running.store(false, Ordering::Relaxed);
+                let _ = join_handle.join();
+                let _ = fs::remove_file(&path);
+                return Err("Timeout ao iniciar gravador nativo de tela".to_string());
+            }
+        }
+
+        *guard = Some(ActiveNativeScreenRecording {
+            running,
+            path,
+            relative_file: relative_file.clone(),
+            original_name: mp4_name,
+            join_handle: Some(join_handle),
+        });
+
+        Ok(RecordingTarget {
+            session_id: "native".to_string(),
+            file: relative_file,
+            stored_name,
+        })
+    }
+}
+
+#[tauri::command]
+async fn native_screen_recording_stop(
+    state: State<'_, NativeScreenRecorderState>,
+) -> Result<AttachmentInfo, String> {
+    let active_opt = {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|_| "NativeScreenRecorderState poisoned".to_string())?;
+        guard.take()
+    };
+
+    let Some(mut active) = active_opt else {
+        return Err("Nenhuma gravacao nativa em andamento".to_string());
+    };
+
+    active.running.store(false, Ordering::Relaxed);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(handle) = active.join_handle.take() {
+            let _ = handle.join();
+        }
+        let size = fs::metadata(&active.path).map(|m| m.len()).unwrap_or(0);
+        if size == 0 {
+            let _ = fs::remove_file(&active.path);
+            return Err("Arquivo de gravacao vazio".to_string());
+        }
+        Ok(AttachmentInfo {
+            file: active.relative_file,
+            original_name: active.original_name,
+            size,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
 fn push_resampled_mono(
     dest: &Arc<Mutex<Vec<f32>>>,
@@ -541,15 +2070,12 @@ async fn transcribe_audio_gemini(
         if !env_model.trim().is_empty() {
             models.push(env_model.trim().to_string());
         }
-        for fallback in [
-            "gemini-3.5-flash-lite",
-            "gemini-3.8-flash",
-            "gemini-3.1-flash-lite-preview",
-        ] {
+        for &fallback in GEMINI_MODEL_CASCADE {
             if !models.iter().any(|m| m == fallback) {
                 models.push(fallback.to_string());
             }
         }
+        let models = order_models_by_availability(models);
 
         let prompt = "Transcreva fielmente todo o áudio a seguir no idioma original falado.\n\
                       Regras obrigatórias:\n\
@@ -610,6 +2136,13 @@ async fn transcribe_audio_gemini(
                     Err(ureq::Error::Status(code, resp)) => {
                         let err_body = resp.into_string().unwrap_or_default();
                         last_err = format!("Gemini HTTP {code} ({model}): {err_body}");
+                        if code == 429 {
+                            mark_model_cooldown(model, Duration::from_secs(30));
+                        } else if code == 503 || code == 502 || code == 500 || code == 504 {
+                            mark_model_cooldown(model, Duration::from_secs(45));
+                        } else if code == 404 {
+                            mark_model_cooldown(model, Duration::from_secs(600));
+                        }
                     }
                     Err(e) => {
                         last_err = format!("Erro de rede ao chamar Gemini ({model}): {e}");
@@ -1388,6 +2921,8 @@ fn main() {
             app.manage(DbState(Mutex::new(conn)));
             app.manage(RecordingState::default());
             app.manage(AiAudioCaptureState::default());
+            app.manage(NativeScreenRecorderState::default());
+            app.manage(FloatingTranslatorState::default());
 
             if let Some(window) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
@@ -1410,6 +2945,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             minimize_window,
             toggle_maximize_window,
+            set_translator_floating_mode,
             state_load,
             state_save,
             attachment_save_from_path,
@@ -1421,6 +2957,8 @@ fn main() {
             recording_append,
             recording_finish,
             recording_abort,
+            native_screen_recording_start,
+            native_screen_recording_stop,
             check_for_update,
             download_and_apply_update,
             get_app_version,
@@ -1430,6 +2968,8 @@ fn main() {
             open_url,
             hide_window,
             read_file_bytes,
+            ai_translate_fast,
+            ai_chat_english,
             transcribe_audio_gemini,
             ai_audio_capture_start,
             ai_audio_capture_flush_and_transcribe,

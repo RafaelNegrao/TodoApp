@@ -70,7 +70,7 @@ const icons = {
   formatListNumbered: `<svg class="icon" viewBox="0 0 24 24"><path d="M10 6h11M10 12h11M10 18h11"/><text x="3" y="7" font-size="6" fill="currentColor">1</text><text x="3" y="13" font-size="6" fill="currentColor">2</text><text x="3" y="19" font-size="6" fill="currentColor">3</text></svg>`,
   checkbox: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   formatClear: `<svg class="icon" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m13.3 9 5.5 5.5"/></svg>`,
-  micAi: `<svg class="icon" viewBox="0 0 24 24"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/><path d="M5 16l.6 1.4L7 18l-1.4.6L5 20l-.6-1.4L3 18l1.4-.6L5 16z"/></svg>`,
+  micAi: `<svg class="icon" viewBox="0 0 24 24"><path d="M11 3C11 7.97 15.03 12 20 12C15.03 12 11 16.03 11 21C11 16.03 6.97 12 2 12C6.97 12 11 7.97 11 3Z"/><path d="M19 2C19 4.21 20.79 6 23 6C20.79 6 19 7.79 19 10C19 7.79 17.21 6 15 6C17.21 6 19 4.21 19 2Z"/></svg>`,
   menu: `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`
 };
 
@@ -207,6 +207,7 @@ async function init() {
   initTasksSidebar();
   initTasksStatusFilter();
   initImageFullscreenModal();
+  initAiTranslatorPanel();
   setupFileDrop().catch(err => console.warn("Drag-and-drop indisponivel", err));
 
   maximizeAppButton?.addEventListener("click", toggleMaximizeWindow);
@@ -338,6 +339,12 @@ async function init() {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
       event.preventDefault();
       openSearchModal();
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "t") {
+      event.preventDefault();
+      window.toggleAiTranslatorPanel?.();
       return;
     }
 
@@ -5415,21 +5422,48 @@ async function toggleScreenRecording() {
 async function startScreenRecording() {
   if (recordingState || isStartingRecording) return;
 
-  if (!navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === "undefined") {
-    console.warn("Gravacao de tela nao suportada neste ambiente");
-    return;
-  }
-  if (!invoke) {
-    console.warn("Backend indisponivel; gravacao nao foi iniciada");
-    return;
-  }
-
   const user = activeUser();
   const task = activeMainTask();
   if (!user || !task) return;
 
   isStartingRecording = true;
   try {
+    const nativeFileName = buildRecordingFileName(".mp4");
+    const subDir = `task${task.number}/anexos`;
+
+    // 1. Gravacao nativa em 1 clique (Tela inteira + Microfone + Audio do PC via Media Foundation/WASAPI, zero popups)
+    if (invoke) {
+      try {
+        const target = await invoke("native_screen_recording_start", {
+          userId: user.id,
+          subDir,
+          fileName: nativeFileName
+        });
+        recordingState = {
+          isNative: true,
+          targetFile: target?.file || "",
+          userId: user.id,
+          taskId: task.id,
+          startedAt: Date.now(),
+          userStopped: false,
+          finalized: false
+        };
+        updateRecordingUi(true);
+        return;
+      } catch (nativeErr) {
+        console.warn("Gravacao nativa indisponivel, usando fallback getDisplayMedia", nativeErr);
+      }
+    }
+
+    if (!navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === "undefined") {
+      console.warn("Gravacao de tela nao suportada neste ambiente");
+      return;
+    }
+    if (!invoke) {
+      console.warn("Backend indisponivel; gravacao nao foi iniciada");
+      return;
+    }
+
     let displayStream;
     try {
       displayStream = await navigator.mediaDevices.getDisplayMedia({
@@ -5470,7 +5504,6 @@ async function startScreenRecording() {
     // aqui, mesmo que o usuario troque de task durante a gravacao.
     const sessionId = makeId("rec");
     const fileName = buildRecordingFileName();
-    const subDir = `task${task.number}/anexos`;
     let target = null;
     let useMemoryFallback = false;
     try {
@@ -5644,6 +5677,12 @@ function stopScreenRecording() {
   // Zera ja para evitar reentrancia (clique + evento "ended" do track).
   recordingState = null;
   updateRecordingUi(false);
+
+  if (recState.isNative) {
+    finalizeNativeRecording(recState);
+    return;
+  }
+
   try {
     if (recState.recorder && recState.recorder.state !== "inactive") {
       recState.recorder.stop();
@@ -5654,6 +5693,31 @@ function stopScreenRecording() {
     console.warn("Falha ao parar o gravador", error);
     finalizeRecording(recState);
   }
+}
+
+async function finalizeNativeRecording(recState) {
+  if (recState.finalized) return;
+  recState.finalized = true;
+  showRecordingSavingState();
+
+  let info = null;
+  try {
+    info = await invoke("native_screen_recording_stop");
+  } catch (error) {
+    console.warn("Falha ao finalizar gravacao nativa de tela", error);
+  }
+
+  hideRecordingIndicator();
+  if (!info) return;
+
+  const targetUser = state.users.find(u => u.id === recState.userId) || null;
+  const targetTask = targetUser?.tasks.find(t => t.id === recState.taskId) || null;
+  if (!targetUser || !targetTask) {
+    console.warn(`Task original nao encontrada; a gravacao ficou salva em ${info.file}`);
+    return;
+  }
+
+  pushAttachment(targetTask, info, "video/mp4");
 }
 
 // Cada pedaco vai para o disco assim que sai do gravador, na ordem.
@@ -5827,11 +5891,11 @@ function pickRecorderMimeType(hasAudio = true) {
   return candidates.find(type => MediaRecorder.isTypeSupported(type)) || "";
 }
 
-function buildRecordingFileName() {
+function buildRecordingFileName(ext = ".webm") {
   const now = new Date();
   const pad = n => String(n).padStart(2, "0");
   const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-  return `Recording-${stamp}.webm`;
+  return `Recording-${stamp}${ext}`;
 }
 
 function updateRecordingUi(active) {
@@ -6671,4 +6735,1203 @@ function initImageFullscreenModal() {
 
   canvas.addEventListener("pointerup", stopDrag);
   canvas.addEventListener("pointercancel", stopDrag);
+}
+
+// -------------------------------------------------------------
+// AI TRANSLATOR (TEMPO REAL) & GENERAL AI CHAT (WITH ATTACHMENTS & SESSIONS)
+// -------------------------------------------------------------
+const AI_TONE_STORAGE_KEY = "todocompanion.ai.formality";
+const AI_PANEL_WIDTH_STORAGE_KEY = "todocompanion.ai.panelWidth";
+const AI_CHAT_LEGACY_STORAGE_KEY = "todocompanion.ai.chatHistory.v1";
+const AI_CHAT_SESSIONS_KEY = "todocompanion.ai.chatSessions.v2";
+const AI_CHAT_ACTIVE_SESSION_KEY = "todocompanion.ai.activeChatId.v2";
+const AI_PANEL_DEFAULT_WIDTH = 360;
+const AI_PANEL_MIN_WIDTH = 280;
+const AI_PANEL_MAX_WIDTH = 780;
+
+function describeFormalityLabel(val) {
+  const num = Number(val) || 0;
+  if (num <= 20) return "Very Natural";
+  if (num <= 40) return "Natural";
+  if (num <= 60) return "Balanced";
+  if (num <= 80) return "Formal";
+  return "Very Formal";
+}
+
+function isTextualAttachment(mimeType, fileName) {
+  const mime = String(mimeType || "").toLowerCase();
+  const name = String(fileName || "").toLowerCase();
+  if (
+    mime.startsWith("text/") ||
+    mime.includes("json") ||
+    mime.includes("xml") ||
+    mime.includes("javascript") ||
+    mime.includes("typescript") ||
+    mime.includes("yaml") ||
+    mime.includes("csv") ||
+    mime.includes("sql")
+  ) {
+    return true;
+  }
+  return /\.(txt|md|json|csv|tsv|log|js|ts|jsx|tsx|py|rs|cs|java|c|cpp|h|html|css|scss|sql|xml|yml|yaml|toml|ini|env|sh|bat|ps1)$/i.test(
+    name
+  );
+}
+
+function readFileAsAttachment(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      reject(new Error("Empty file"));
+      return;
+    }
+    const name = file.name || `attachment-${Date.now()}`;
+    const mimeType = file.type || (isTextualAttachment("", name) ? "text/plain" : "application/octet-stream");
+
+    if (isTextualAttachment(mimeType, name)) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve({
+          name,
+          mime_type: mimeType,
+          data_base64: "",
+          text_content: String(reader.result || "").slice(0, 120000)
+        });
+      };
+      reader.onerror = () => reject(reader.error || new Error("Failed to read text file"));
+      reader.readAsText(file);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      const commaIdx = dataUrl.indexOf(",");
+      const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+      resolve({
+        name,
+        mime_type: mimeType,
+        data_base64: base64,
+        text_content: ""
+      });
+    };
+    reader.onerror = () => reject(reader.error || new Error("Failed to read binary file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatSessionTimestamp(isoStr) {
+  if (!isoStr) return "";
+  try {
+    const d = new Date(isoStr);
+    if (Number.isNaN(d.getTime())) return "";
+    const pad = n => String(n).padStart(2, "0");
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch (_) {
+    return "";
+  }
+}
+
+function buildAutoSessionTitle(firstText, attachments = []) {
+  const cleaned = String(firstText || "").replace(/\s+/g, " ").trim();
+  if (cleaned) {
+    return cleaned.length > 36 ? `${cleaned.slice(0, 36)}…` : cleaned;
+  }
+  if (attachments.length > 0) {
+    return `📎 ${attachments[0].name}`;
+  }
+  return "New chat";
+}
+
+function renderAiMarkdownHtml(rawText) {
+  const safe = escapeHtml(String(rawText || ""));
+  const codeBlocks = [];
+  const withCodePlaceholders = safe.replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g, (_, _lang, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(`<pre class="ai-code-block"><code>${code.trim()}</code></pre>`);
+    return `@@AICODEBLOCK_${idx}@@`;
+  });
+
+  const blocks = withCodePlaceholders.split(/\n{2,}/);
+  const htmlBlocks = blocks.map(block => {
+    const trimmed = block.trim();
+    if (!trimmed) return "";
+    if (/^@@AICODEBLOCK_\d+@@$/.test(trimmed)) {
+      return trimmed;
+    }
+    const lines = trimmed.split("\n");
+    const isBulletList = lines.length > 0 && lines.every(l => /^\s*[-*•]\s+/.test(l));
+    if (isBulletList) {
+      const items = lines
+        .map(l => formatInlineMarkdown(l.replace(/^\s*[-*•]\s+/, "")))
+        .map(li => `<li>${li}</li>`)
+        .join("");
+      return `<ul>${items}</ul>`;
+    }
+    return `<p>${formatInlineMarkdown(trimmed)}</p>`;
+  });
+
+  let finalHtml = htmlBlocks.filter(Boolean).join("");
+  codeBlocks.forEach((cb, idx) => {
+    finalHtml = finalHtml.replace(`@@AICODEBLOCK_${idx}@@`, cb);
+  });
+  return `<div class="ai-markdown-body">${finalHtml}</div>`;
+}
+
+function formatInlineMarkdown(str) {
+  return str
+    .replace(/`([^`\n]+)`/g, '<code class="ai-inline-code">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+}
+
+function initAiTranslatorPanel() {
+  const openTranslateBtn = document.getElementById("openAiTranslatorButton");
+  const openChatBtn = document.getElementById("openAiChatButton");
+  const closeBtn = document.getElementById("closeAiTranslatorButton");
+  const detachTranslatorBtn = document.getElementById("aiDetachTranslatorBtn");
+  const panelHead = document.getElementById("aiPanelHead");
+  const panel = document.getElementById("aiTranslatorPanel");
+  const panelResizer = document.getElementById("aiPanelResizer");
+  const panelTitleEl = document.getElementById("aiPanelTitle");
+  const translateView = document.getElementById("aiTranslateView");
+  const chatView = document.getElementById("aiChatView");
+  const toneSlider = document.getElementById("aiToneSlider");
+  const toneBadge = document.getElementById("aiToneBadge");
+
+  const trInput = document.getElementById("aiTranslateInput");
+  const trClearBtn = document.getElementById("aiTranslateClearBtn");
+  const trOutput = document.getElementById("aiTranslateOutput");
+  const trStatusDot = document.getElementById("aiTranslateStatusDot");
+  const trStatusText = document.getElementById("aiTranslateStatusText");
+  const trCopyBtn = document.getElementById("aiTranslateCopyBtn");
+  const trSwapBtn = document.getElementById("aiTranslateSwapBtn");
+  const trToCardBtn = document.getElementById("aiTranslateToCardBtn");
+
+  const chatHistoryToggle = document.getElementById("aiChatHistoryToggle");
+  const historyModalCloseBtn = document.getElementById("aiHistoryModalCloseBtn");
+  const historySearchInput = document.getElementById("aiHistorySearchInput");
+  const newChatBtn = document.getElementById("aiNewChatBtn");
+  const sessionsDrawer = document.getElementById("aiChatSessionsDrawer");
+  const sessionsCountEl = document.getElementById("aiChatSessionsCount");
+  const sessionsListEl = document.getElementById("aiChatSessionsList");
+
+  const chatMessagesEl = document.getElementById("aiChatMessages");
+  const chatForm = document.getElementById("aiChatForm");
+  const chatPendingListEl = document.getElementById("aiChatPendingList");
+  const chatInput = document.getElementById("aiChatInput");
+  const chatFileInput = document.getElementById("aiChatFileInput");
+  const chatAttachBtn = document.getElementById("aiChatAttachBtn");
+  const chatSendBtn = document.getElementById("aiChatSendBtn");
+
+  if (!panel) return;
+
+  let currentMode = "translate";
+  let currentDirection = "pt-en";
+  let isTranslatorFloating = false;
+  let formality = clamp(Number(localStorage.getItem(AI_TONE_STORAGE_KEY) ?? 40), 0, 100);
+  let translateTimer = null;
+  let translateSeq = 0;
+  const translationCache = new Map();
+
+  let chatSessions = [];
+  let activeSessionId = "";
+  let pendingAttachments = [];
+  let chatBusy = false;
+  let chatHasUnread = false;
+
+  const savedWidth = Number(localStorage.getItem(AI_PANEL_WIDTH_STORAGE_KEY));
+  if (Number.isFinite(savedWidth) && savedWidth >= AI_PANEL_MIN_WIDTH && savedWidth <= AI_PANEL_MAX_WIDTH) {
+    panel.style.width = `${Math.round(savedWidth)}px`;
+  } else {
+    panel.style.width = `${AI_PANEL_DEFAULT_WIDTH}px`;
+  }
+
+  function updateChatTopbarIndicator() {
+    if (!openChatBtn) return;
+    const isChatVisible = !panel.hidden && currentMode === "chat";
+    if (isChatVisible) {
+      chatHasUnread = false;
+    }
+    openChatBtn.classList.toggle("thinking", chatBusy);
+    openChatBtn.classList.toggle("has-unread", !chatBusy && chatHasUnread && !isChatVisible);
+    if (chatBusy) {
+      openChatBtn.title = "AI Chat (IA pensando...)";
+    } else if (chatHasUnread && !isChatVisible) {
+      openChatBtn.title = "AI Chat (Nova resposta pronta)";
+    } else {
+      openChatBtn.title = "AI Chat";
+    }
+  }
+
+  function createEmptySession() {
+    const now = new Date().toISOString();
+    return {
+      id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      title: "New chat",
+      createdAt: now,
+      updatedAt: now,
+      messages: []
+    };
+  }
+
+  function loadChatSessions() {
+    try {
+      const raw = localStorage.getItem(AI_CHAT_SESSIONS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          chatSessions = parsed;
+        }
+      }
+      if (!chatSessions.length) {
+        const legacyRaw = localStorage.getItem(AI_CHAT_LEGACY_STORAGE_KEY);
+        if (legacyRaw) {
+          const legacyMsgs = JSON.parse(legacyRaw);
+          if (Array.isArray(legacyMsgs) && legacyMsgs.length > 0) {
+            const migrated = createEmptySession();
+            migrated.messages = legacyMsgs.map(m => ({
+              role: m.role === "model" ? "model" : "user",
+              text: String(m.text || ""),
+              attachments: Array.isArray(m.attachments) ? m.attachments : []
+            }));
+            const firstUser = migrated.messages.find(m => m.role === "user");
+            migrated.title = buildAutoSessionTitle(firstUser?.text || "Previous chat");
+            chatSessions = [migrated];
+          }
+        }
+      }
+    } catch (_) {}
+
+    if (!chatSessions.length) {
+      chatSessions = [createEmptySession()];
+    }
+
+    const savedActiveId = localStorage.getItem(AI_CHAT_ACTIVE_SESSION_KEY);
+    if (savedActiveId && chatSessions.some(s => s.id === savedActiveId)) {
+      activeSessionId = savedActiveId;
+    } else {
+      activeSessionId = chatSessions[0].id;
+    }
+  }
+
+  function saveChatSessions() {
+    try {
+      localStorage.setItem(AI_CHAT_SESSIONS_KEY, JSON.stringify(chatSessions.slice(0, 40)));
+      localStorage.setItem(AI_CHAT_ACTIVE_SESSION_KEY, activeSessionId);
+    } catch (_) {
+      try {
+        const slimmed = chatSessions.slice(0, 25).map((s, idx) => ({
+          ...s,
+          messages: (s.messages || []).slice(-30).map(m => ({
+            role: m.role,
+            text: m.text,
+            attachments: (m.attachments || []).map(att => ({
+              name: att.name,
+              mime_type: att.mime_type,
+              data_base64: idx === 0 ? att.data_base64 : "",
+              text_content: att.text_content || ""
+            }))
+          }))
+        }));
+        localStorage.setItem(AI_CHAT_SESSIONS_KEY, JSON.stringify(slimmed));
+      } catch (__) {}
+    }
+  }
+
+  function getActiveSession() {
+    let session = chatSessions.find(s => s.id === activeSessionId);
+    if (!session) {
+      session = chatSessions[0] || createEmptySession();
+      if (!chatSessions.includes(session)) {
+        chatSessions.unshift(session);
+      }
+      activeSessionId = session.id;
+    }
+    return session;
+  }
+
+  loadChatSessions();
+
+  if (toneSlider) {
+    toneSlider.value = String(formality);
+  }
+  if (toneBadge) {
+    toneBadge.textContent = describeFormalityLabel(formality);
+  }
+
+  function syncTopbarActiveButtons() {
+    const isOpen = !panel.hidden;
+    const isChat = currentMode === "chat";
+    openTranslateBtn?.classList.toggle("active", isOpen && !isChat);
+    openChatBtn?.classList.toggle("active", isOpen && isChat);
+    if (chatHistoryToggle) chatHistoryToggle.hidden = !isChat;
+    if (newChatBtn) newChatBtn.hidden = !isChat;
+    if (detachTranslatorBtn) {
+      detachTranslatorBtn.hidden = isChat;
+      detachTranslatorBtn.classList.toggle("floating-active", isTranslatorFloating);
+      detachTranslatorBtn.title = isTranslatorFloating
+        ? "Acoplar tradutor de volta na janela do TODO"
+        : "Soltar tradutor em janela flutuante sobre todos os apps (ou arraste o topo)";
+      detachTranslatorBtn.innerHTML = isTranslatorFloating
+        ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H3v-6"/><path d="M14 10 3 21"/><path d="M6 11V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-6"/></svg>`
+        : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
+    }
+    if (panelTitleEl) {
+      if (isChat) {
+        const active = getActiveSession();
+        panelTitleEl.textContent = active.title || "New chat";
+      } else {
+        panelTitleEl.textContent = isTranslatorFloating ? "Floating Translator" : "Instant Translator";
+      }
+    }
+    updateChatTopbarIndicator();
+  }
+
+  async function setTranslatorFloating(nextFloating) {
+    const target = Boolean(nextFloating);
+    if (isTranslatorFloating === target) return;
+    isTranslatorFloating = target;
+    document.body.classList.toggle("translator-floating-mode", isTranslatorFloating);
+
+    if (isTranslatorFloating) {
+      currentMode = "translate";
+      panel.hidden = false;
+      if (translateView) translateView.hidden = false;
+      if (chatView) chatView.hidden = true;
+    }
+
+    syncTopbarActiveButtons();
+
+    try {
+      if (invoke) {
+        await invoke("set_translator_floating_mode", { floating: isTranslatorFloating });
+      }
+    } catch (err) {
+      console.warn("Falha ao alternar modo flutuante do tradutor:", err);
+    }
+
+    requestAnimationFrame(() => {
+      applyViewport();
+      renderLinks();
+      trInput?.focus();
+    });
+  }
+
+  function setMode(mode) {
+    currentMode = mode === "chat" ? "chat" : "translate";
+    const isChat = currentMode === "chat";
+    if (translateView) translateView.hidden = isChat;
+    if (chatView) chatView.hidden = !isChat;
+    syncTopbarActiveButtons();
+
+    requestAnimationFrame(() => {
+      if (isChat) {
+        renderSessionsList();
+        renderChatMessages();
+        chatInput?.focus();
+      } else {
+        trInput?.focus();
+      }
+    });
+  }
+
+  function togglePanel(forceOpen = null, targetMode = null) {
+    if (targetMode && (targetMode === "translate" || targetMode === "chat")) {
+      if (!panel.hidden && currentMode === targetMode && forceOpen === null) {
+        panel.hidden = true;
+      } else {
+        currentMode = targetMode;
+        panel.hidden = forceOpen !== null ? !forceOpen : false;
+      }
+    } else {
+      const shouldOpen = forceOpen !== null ? forceOpen : panel.hidden;
+      panel.hidden = !shouldOpen;
+    }
+
+    const isChat = currentMode === "chat";
+    if (translateView) translateView.hidden = isChat;
+    if (chatView) chatView.hidden = !isChat;
+    syncTopbarActiveButtons();
+
+    if (!panel.hidden) {
+      requestAnimationFrame(() => {
+        if (currentMode === "chat") {
+          renderSessionsList();
+          renderChatMessages();
+          chatInput?.focus();
+        } else {
+          trInput?.focus();
+        }
+      });
+    }
+    requestAnimationFrame(() => {
+      applyViewport();
+      renderLinks();
+    });
+  }
+
+  window.toggleAiTranslatorPanel = togglePanel;
+
+  openTranslateBtn?.addEventListener("click", () => togglePanel(null, "translate"));
+  openChatBtn?.addEventListener("click", () => togglePanel(null, "chat"));
+  closeBtn?.addEventListener("click", () => {
+    if (isTranslatorFloating) {
+      setTranslatorFloating(false);
+    } else {
+      togglePanel(false);
+    }
+  });
+
+  detachTranslatorBtn?.addEventListener("click", () => {
+    setTranslatorFloating(!isTranslatorFloating);
+  });
+
+  // Permite "soltar" o modulo de traducao simplesmente puxando/arrastando o cabecalho dele para fora
+  if (panelHead) {
+    let headDragStart = null;
+    panelHead.addEventListener("pointerdown", event => {
+      if (isTranslatorFloating || currentMode !== "translate") return;
+      if (event.button !== 0 || event.target.closest("button")) return;
+      headDragStart = { x: event.clientX, y: event.clientY };
+    });
+    window.addEventListener("pointermove", event => {
+      if (!headDragStart || isTranslatorFloating) return;
+      const dist = Math.hypot(event.clientX - headDragStart.x, event.clientY - headDragStart.y);
+      if (dist > 36) {
+        headDragStart = null;
+        setTranslatorFloating(true);
+      }
+    });
+    window.addEventListener("pointerup", () => {
+      headDragStart = null;
+    });
+  }
+
+  if (panelResizer) {
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = AI_PANEL_DEFAULT_WIDTH;
+
+    panelResizer.addEventListener("pointerdown", event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      isResizing = true;
+      startX = event.clientX;
+      startWidth = panel.getBoundingClientRect().width || AI_PANEL_DEFAULT_WIDTH;
+      panel.classList.add("resizing");
+      document.body.style.cursor = "col-resize";
+      try {
+        panelResizer.setPointerCapture(event.pointerId);
+      } catch (_) {}
+    });
+
+    panelResizer.addEventListener("pointermove", event => {
+      if (!isResizing) return;
+      const deltaX = startX - event.clientX;
+      const maxAllowed = Math.min(AI_PANEL_MAX_WIDTH, Math.max(AI_PANEL_MIN_WIDTH, window.innerWidth - 260));
+      const nextWidth = clamp(Math.round(startWidth + deltaX), AI_PANEL_MIN_WIDTH, maxAllowed);
+      panel.style.width = `${nextWidth}px`;
+      applyViewport();
+      renderLinks();
+    });
+
+    const stopResize = event => {
+      if (!isResizing) return;
+      isResizing = false;
+      panel.classList.remove("resizing");
+      document.body.style.cursor = "";
+      try {
+        panelResizer.releasePointerCapture(event.pointerId);
+      } catch (_) {}
+      const finalWidth = Math.round(panel.getBoundingClientRect().width || AI_PANEL_DEFAULT_WIDTH);
+      localStorage.setItem(AI_PANEL_WIDTH_STORAGE_KEY, String(finalWidth));
+      applyViewport();
+      renderLinks();
+    };
+
+    panelResizer.addEventListener("pointerup", stopResize);
+    panelResizer.addEventListener("pointercancel", stopResize);
+
+    panelResizer.addEventListener("dblclick", () => {
+      panel.style.width = `${AI_PANEL_DEFAULT_WIDTH}px`;
+      localStorage.setItem(AI_PANEL_WIDTH_STORAGE_KEY, String(AI_PANEL_DEFAULT_WIDTH));
+      applyViewport();
+      renderLinks();
+    });
+  }
+
+  toneSlider?.addEventListener("input", () => {
+    formality = clamp(Number(toneSlider.value) || 0, 0, 100);
+    if (toneBadge) {
+      toneBadge.textContent = describeFormalityLabel(formality);
+    }
+    localStorage.setItem(AI_TONE_STORAGE_KEY, String(formality));
+    if (currentMode === "translate" && trInput?.value.trim()) {
+      scheduleRealtimeTranslation(80);
+    }
+  });
+
+  panel.querySelectorAll("[data-tone-jump]").forEach(lbl => {
+    lbl.addEventListener("click", () => {
+      const targetVal = clamp(Number(lbl.dataset.toneJump) || 0, 0, 100);
+      formality = targetVal;
+      if (toneSlider) toneSlider.value = String(targetVal);
+      if (toneBadge) toneBadge.textContent = describeFormalityLabel(targetVal);
+      localStorage.setItem(AI_TONE_STORAGE_KEY, String(targetVal));
+      if (currentMode === "translate" && trInput?.value.trim()) {
+        scheduleRealtimeTranslation(20);
+      }
+    });
+  });
+
+  panel.querySelectorAll("[data-ai-dir]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      panel.querySelectorAll("[data-ai-dir]").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentDirection = btn.dataset.aiDir || "auto";
+      if (trInput?.value.trim()) {
+        scheduleRealtimeTranslation(20);
+      }
+    });
+  });
+
+  function setTranslateStatus(stateName, label) {
+    if (trStatusDot) {
+      trStatusDot.className = `ai-status-dot ${stateName}`;
+    }
+    if (trStatusText) {
+      trStatusText.textContent = label;
+    }
+  }
+
+  function scheduleRealtimeTranslation(delayMs = 220) {
+    if (translateTimer) {
+      clearTimeout(translateTimer);
+      translateTimer = null;
+    }
+    const raw = trInput?.value || "";
+    const text = raw.trim();
+    if (trClearBtn) {
+      trClearBtn.hidden = !raw.length;
+    }
+    if (!text) {
+      translateSeq += 1;
+      if (trOutput) trOutput.textContent = "";
+      setTranslateStatus("idle", "Instant AI Translation");
+      return;
+    }
+
+    const cacheKey = `${currentDirection}|${formality}|${text}`;
+    if (translationCache.has(cacheKey)) {
+      if (trOutput) trOutput.textContent = translationCache.get(cacheKey);
+      setTranslateStatus("ready", `Instant · ${describeFormalityLabel(formality)}`);
+      return;
+    }
+
+    setTranslateStatus("busy", "Translating...");
+    translateTimer = setTimeout(() => {
+      runRealtimeTranslation(text, formality, currentDirection, cacheKey);
+    }, delayMs);
+  }
+
+  async function runRealtimeTranslation(text, toneVal, dir, cacheKey) {
+    const seq = ++translateSeq;
+    const t0 = performance.now();
+    try {
+      let result = "";
+      if (invoke) {
+        result = await invoke("ai_translate_fast", {
+          text,
+          formality: toneVal,
+          direction: dir,
+          apiKey: localStorage.getItem(GEMINI_API_KEY_STORAGE) || null
+        });
+      } else {
+        result = await fallbackBrowserTranslate(text, toneVal, dir);
+      }
+
+      if (seq !== translateSeq) return;
+      const cleaned = String(result || "").trim();
+      translationCache.set(cacheKey, cleaned);
+      if (translationCache.size > 80) {
+        const firstKey = translationCache.keys().next().value;
+        translationCache.delete(firstKey);
+      }
+      if (trOutput) {
+        trOutput.textContent = cleaned;
+      }
+      const ms = Math.round(performance.now() - t0);
+      setTranslateStatus("ready", `${ms}ms · ${describeFormalityLabel(toneVal)}`);
+    } catch (err) {
+      if (seq !== translateSeq) return;
+      console.warn("Erro na traducao em tempo real", err);
+      setTranslateStatus("error", "Translation error");
+      if (trOutput) {
+        trOutput.textContent = String(err?.message || err);
+      }
+    }
+  }
+
+  trInput?.addEventListener("input", () => scheduleRealtimeTranslation(220));
+  trInput?.addEventListener("paste", () => setTimeout(() => scheduleRealtimeTranslation(15), 0));
+
+  trClearBtn?.addEventListener("click", () => {
+    if (!trInput) return;
+    trInput.value = "";
+    scheduleRealtimeTranslation(0);
+    trInput.focus();
+  });
+
+  trSwapBtn?.addEventListener("click", () => {
+    const outText = String(trOutput?.textContent || "").trim();
+    if (!outText || !trInput) return;
+    trInput.value = outText;
+    scheduleRealtimeTranslation(20);
+    trInput.focus();
+  });
+
+  trCopyBtn?.addEventListener("click", async () => {
+    const outText = String(trOutput?.textContent || "").trim();
+    if (!outText) return;
+    try {
+      await navigator.clipboard.writeText(outText);
+      const prev = trCopyBtn.textContent;
+      trCopyBtn.textContent = "Copied ✓";
+      setTimeout(() => {
+        trCopyBtn.textContent = prev;
+      }, 1200);
+    } catch (_) {}
+  });
+
+  trToCardBtn?.addEventListener("click", () => {
+    const outText = String(trOutput?.textContent || "").trim();
+    if (!outText) return;
+    insertAiTextIntoActiveCanvas(outText);
+  });
+
+  // --- MODO 2: CHAT DE IA MODERNO COM ANEXOS E MODAL DE HISTORICO ---
+  function closeHistoryModal() {
+    if (sessionsDrawer) sessionsDrawer.hidden = true;
+    chatHistoryToggle?.classList.remove("open");
+  }
+
+  function openHistoryModal() {
+    if (!sessionsDrawer) return;
+    sessionsDrawer.hidden = false;
+    chatHistoryToggle?.classList.add("open");
+    if (historySearchInput) {
+      historySearchInput.value = "";
+    }
+    renderSessionsList("");
+    requestAnimationFrame(() => historySearchInput?.focus());
+  }
+
+  function renderSessionsList(filterQuery = "") {
+    const active = getActiveSession();
+    if (currentMode === "chat" && panelTitleEl) {
+      panelTitleEl.textContent = active.title || "New chat";
+    }
+    const q = String(filterQuery || historySearchInput?.value || "").trim().toLowerCase();
+    const allSaved = chatSessions.filter(s => s.messages.length > 0 || s.id === active.id);
+    if (sessionsCountEl) {
+      sessionsCountEl.textContent = String(allSaved.length);
+    }
+    if (!sessionsListEl) return;
+    sessionsListEl.innerHTML = "";
+
+    const filtered = q
+      ? allSaved.filter(s =>
+          String(s.title || "").toLowerCase().includes(q) ||
+          (s.messages || []).some(m => String(m.text || "").toLowerCase().includes(q))
+        )
+      : allSaved;
+
+    filtered.forEach(session => {
+      const item = document.createElement("div");
+      item.className = `ai-chat-session-item ${session.id === active.id ? "active" : ""}`;
+
+      const infoBtn = document.createElement("button");
+      infoBtn.type = "button";
+      infoBtn.className = "ai-chat-session-select";
+
+      const titleSpan = document.createElement("span");
+      titleSpan.className = "ai-chat-session-title";
+      titleSpan.textContent = session.title || "New chat";
+
+      const metaSpan = document.createElement("span");
+      metaSpan.className = "ai-chat-session-meta";
+      const count = session.messages?.length || 0;
+      const dateStr = formatSessionTimestamp(session.updatedAt || session.createdAt);
+      metaSpan.textContent = `${count} msg${count === 1 ? "" : "s"}${dateStr ? ` · ${dateStr}` : ""}`;
+
+      infoBtn.append(titleSpan, metaSpan);
+      infoBtn.addEventListener("click", () => {
+        activeSessionId = session.id;
+        saveChatSessions();
+        closeHistoryModal();
+        renderSessionsList();
+        renderChatMessages();
+      });
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "ai-chat-session-del";
+      delBtn.title = "Delete conversation";
+      delBtn.textContent = "×";
+      delBtn.addEventListener("click", event => {
+        event.stopPropagation();
+        chatSessions = chatSessions.filter(s => s.id !== session.id);
+        if (!chatSessions.length) {
+          chatSessions = [createEmptySession()];
+        }
+        if (activeSessionId === session.id) {
+          activeSessionId = chatSessions[0].id;
+        }
+        saveChatSessions();
+        renderSessionsList();
+        renderChatMessages();
+      });
+
+      item.append(infoBtn, delBtn);
+      sessionsListEl.appendChild(item);
+    });
+  }
+
+  chatHistoryToggle?.addEventListener("click", () => {
+    if (!sessionsDrawer) return;
+    if (sessionsDrawer.hidden) {
+      openHistoryModal();
+    } else {
+      closeHistoryModal();
+    }
+  });
+
+  historyModalCloseBtn?.addEventListener("click", closeHistoryModal);
+
+  sessionsDrawer?.addEventListener("pointerdown", event => {
+    if (event.target === sessionsDrawer) {
+      closeHistoryModal();
+    }
+  });
+
+  historySearchInput?.addEventListener("input", () => {
+    renderSessionsList(historySearchInput.value);
+  });
+
+  newChatBtn?.addEventListener("click", () => {
+    const current = getActiveSession();
+    if (current.messages.length === 0) {
+      closeHistoryModal();
+      chatInput?.focus();
+      return;
+    }
+    const fresh = createEmptySession();
+    chatSessions.unshift(fresh);
+    activeSessionId = fresh.id;
+    pendingAttachments = [];
+    renderPendingAttachments();
+    saveChatSessions();
+    closeHistoryModal();
+    renderSessionsList();
+    renderChatMessages();
+    chatInput?.focus();
+  });
+
+  function renderPendingAttachments() {
+    if (!chatPendingListEl) return;
+    chatPendingListEl.innerHTML = "";
+    if (!pendingAttachments.length) {
+      chatPendingListEl.hidden = true;
+      return;
+    }
+    chatPendingListEl.hidden = false;
+
+    pendingAttachments.forEach((att, idx) => {
+      const tile = document.createElement("div");
+      tile.className = "ai-pending-tile";
+      tile.title = att.name;
+
+      if (att.mime_type?.startsWith("image/") && att.data_base64) {
+        const thumb = document.createElement("img");
+        thumb.className = "ai-pending-thumb";
+        thumb.src = `data:${att.mime_type};base64,${att.data_base64}`;
+        thumb.alt = att.name;
+        tile.appendChild(thumb);
+      } else {
+        const extSpan = document.createElement("span");
+        extSpan.className = "ai-pending-file-ext";
+        const ext = (att.name || "").split(".").pop() || "FILE";
+        extSpan.textContent = ext.slice(0, 5);
+        tile.appendChild(extSpan);
+      }
+
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "ai-pending-remove";
+      removeBtn.textContent = "×";
+      removeBtn.title = "Remove attachment";
+      removeBtn.addEventListener("click", () => {
+        pendingAttachments.splice(idx, 1);
+        renderPendingAttachments();
+      });
+      tile.appendChild(removeBtn);
+
+      chatPendingListEl.appendChild(tile);
+    });
+  }
+
+  async function addFilesToPending(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    for (const file of files) {
+      try {
+        const att = await readFileAsAttachment(file);
+        pendingAttachments.push(att);
+      } catch (err) {
+        console.warn("Falha ao ler anexo:", err);
+      }
+    }
+    renderPendingAttachments();
+    chatInput?.focus();
+  }
+
+  chatAttachBtn?.addEventListener("click", () => {
+    chatFileInput?.click();
+  });
+
+  chatFileInput?.addEventListener("change", async () => {
+    if (chatFileInput.files?.length) {
+      await addFilesToPending(chatFileInput.files);
+      chatFileInput.value = "";
+    }
+  });
+
+  chatInput?.addEventListener("paste", async event => {
+    const items = Array.from(event.clipboardData?.items || []);
+    const fileItems = items.filter(item => item.kind === "file");
+    if (!fileItems.length) return;
+    const files = fileItems.map(item => item.getAsFile()).filter(Boolean);
+    if (files.length) {
+      event.preventDefault();
+      await addFilesToPending(files);
+    }
+  });
+
+  chatView?.addEventListener("dragover", event => {
+    event.preventDefault();
+  });
+
+  chatView?.addEventListener("drop", async event => {
+    if (event.dataTransfer?.files?.length) {
+      event.preventDefault();
+      await addFilesToPending(event.dataTransfer.files);
+    }
+  });
+
+  function renderChatMessages() {
+    if (!chatMessagesEl) return;
+    chatMessagesEl.innerHTML = "";
+    const session = getActiveSession();
+    const messages = session.messages || [];
+
+    if (!messages.length) {
+      const empty = document.createElement("div");
+      empty.className = "ai-chat-empty";
+      empty.innerHTML = `
+        <div class="ai-chat-empty-icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M11 3C11 7.97 15.03 12 20 12C15.03 12 11 16.03 11 21C11 16.03 6.97 12 2 12C6.97 12 11 7.97 11 3Z"/>
+            <path d="M19 2C19 4.21 20.79 6 23 6C20.79 6 19 7.79 19 10C19 7.79 17.21 6 15 6C17.21 6 19 4.21 19 2Z"/>
+          </svg>
+        </div>
+        <strong>How can I help you today?</strong>
+        <span>Ask anything, paste screenshots (Ctrl+V), or attach files for instant analysis.</span>
+      `;
+      chatMessagesEl.appendChild(empty);
+      return;
+    }
+
+    const copySvg = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+    const cardSvg = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M12 8v8M8 12h8"/></svg>`;
+    const checkSvg = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`;
+
+    messages.forEach(msg => {
+      const isModel = msg.role === "model";
+      const row = document.createElement("div");
+      row.className = `ai-chat-msg ${isModel ? "ai" : "user"}`;
+
+      if (Array.isArray(msg.attachments) && msg.attachments.length > 0) {
+        const attWrap = document.createElement("div");
+        attWrap.className = "ai-msg-attachments";
+
+        msg.attachments.forEach(att => {
+          if (att.mime_type?.startsWith("image/") && att.data_base64) {
+            const img = document.createElement("img");
+            img.className = "ai-msg-img-thumb";
+            const srcUrl = `data:${att.mime_type};base64,${att.data_base64}`;
+            img.src = srcUrl;
+            img.alt = att.name || "Attached image";
+            img.title = "Click to zoom";
+            img.addEventListener("click", () => {
+              if (typeof window.openFullscreenImage === "function") {
+                window.openFullscreenImage(srcUrl);
+              }
+            });
+            attWrap.appendChild(img);
+          } else {
+            const badge = document.createElement("div");
+            badge.className = "ai-msg-file-chip";
+            badge.textContent = `📎 ${att.name || "Attachment"}`;
+            attWrap.appendChild(badge);
+          }
+        });
+
+        row.appendChild(attWrap);
+      }
+
+      if (msg.text) {
+        const bubble = document.createElement("div");
+        bubble.className = "ai-chat-bubble";
+        if (isModel) {
+          bubble.innerHTML = renderAiMarkdownHtml(msg.text);
+        } else {
+          bubble.textContent = msg.text;
+        }
+        row.appendChild(bubble);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "ai-chat-msg-actions";
+
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "ai-msg-icon-btn";
+      copyBtn.title = "Copy message";
+      copyBtn.innerHTML = copySvg;
+      copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(msg.text || "");
+          copyBtn.innerHTML = checkSvg;
+          setTimeout(() => {
+            copyBtn.innerHTML = copySvg;
+          }, 1100);
+        } catch (_) {}
+      });
+
+      if (isModel) {
+        const cardBtn = document.createElement("button");
+        cardBtn.type = "button";
+        cardBtn.className = "ai-msg-icon-btn";
+        cardBtn.title = "Insert into active card";
+        cardBtn.innerHTML = cardSvg;
+        cardBtn.addEventListener("click", () => insertAiTextIntoActiveCanvas(msg.text || ""));
+
+        const timeSpan = document.createElement("span");
+        timeSpan.className = "ai-msg-time";
+        timeSpan.textContent = "just now";
+
+        actions.append(copyBtn, cardBtn, timeSpan);
+      } else {
+        const timeSpan = document.createElement("span");
+        timeSpan.className = "ai-msg-time";
+        timeSpan.textContent = "just now";
+        actions.append(timeSpan, copyBtn);
+      }
+
+      row.appendChild(actions);
+      chatMessagesEl.appendChild(row);
+    });
+
+    if (chatBusy) {
+      const working = document.createElement("div");
+      working.className = "ai-chat-working";
+      working.textContent = "Working...";
+      chatMessagesEl.appendChild(working);
+    }
+
+    chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+  }
+
+  async function sendChatMessage(rawText) {
+    const text = String(rawText || "").trim();
+    if ((!text && !pendingAttachments.length) || chatBusy) return;
+
+    const session = getActiveSession();
+    const currentAttachments = pendingAttachments.map(att => ({
+      name: att.name,
+      mime_type: att.mime_type,
+      data_base64: att.data_base64 || "",
+      text_content: att.text_content || ""
+    }));
+    pendingAttachments = [];
+    renderPendingAttachments();
+
+    if (session.messages.length === 0) {
+      session.title = buildAutoSessionTitle(text, currentAttachments);
+    }
+
+    session.messages.push({
+      role: "user",
+      text,
+      attachments: currentAttachments
+    });
+    session.updatedAt = new Date().toISOString();
+
+    chatSessions = [session, ...chatSessions.filter(s => s.id !== session.id)];
+    saveChatSessions();
+    renderSessionsList();
+
+    if (chatInput) chatInput.value = "";
+    chatBusy = true;
+    chatHasUnread = false;
+    if (chatSendBtn) chatSendBtn.disabled = true;
+    updateChatTopbarIndicator();
+    renderChatMessages();
+
+    try {
+      let reply = "";
+      if (invoke) {
+        const payloadMessages = session.messages.slice(-18).map(m => ({
+          role: m.role,
+          text: m.text || "",
+          attachments: (m.attachments || []).map(a => ({
+            name: a.name || "",
+            mime_type: a.mime_type || "",
+            data_base64: a.data_base64 || "",
+            text_content: a.text_content || ""
+          }))
+        }));
+        reply = await invoke("ai_chat_english", {
+          messages: payloadMessages,
+          formality,
+          apiKey: localStorage.getItem(GEMINI_API_KEY_STORAGE) || null
+        });
+      } else {
+        reply = await fallbackBrowserTranslate(text || "Analyze attached file", formality, "auto");
+      }
+
+      const cleaned = String(reply || "").trim() || "(No response)";
+      session.messages.push({
+        role: "model",
+        text: cleaned,
+        attachments: []
+      });
+      session.updatedAt = new Date().toISOString();
+      if (panel.hidden || currentMode !== "chat") {
+        chatHasUnread = true;
+      }
+      saveChatSessions();
+      renderSessionsList();
+    } catch (err) {
+      session.messages.push({
+        role: "model",
+        text: `Error: ${String(err?.message || err)}`,
+        attachments: []
+      });
+      if (panel.hidden || currentMode !== "chat") {
+        chatHasUnread = true;
+      }
+      saveChatSessions();
+    } finally {
+      chatBusy = false;
+      if (chatSendBtn) chatSendBtn.disabled = false;
+      updateChatTopbarIndicator();
+      renderChatMessages();
+      if (!panel.hidden && currentMode === "chat") {
+        chatInput?.focus();
+      }
+    }
+  }
+
+  chatForm?.addEventListener("submit", event => {
+    event.preventDefault();
+    sendChatMessage(chatInput?.value);
+  });
+
+  chatInput?.addEventListener("input", () => {
+    chatInput.style.height = "auto";
+    chatInput.style.height = `${Math.min(130, chatInput.scrollHeight)}px`;
+  });
+
+  chatInput?.addEventListener("keydown", event => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendChatMessage(chatInput.value);
+      chatInput.style.height = "auto";
+    }
+  });
+}
+
+function insertAiTextIntoActiveCanvas(text) {
+  const board = activeBoard();
+  if (!board || !text) return;
+
+  const targetNode =
+    selectedNodeId
+      ? board.nodes.find(n => n.id === selectedNodeId && n.type !== "image" && !isRootNode(board, n.id))
+      : null;
+
+  if (targetNode) {
+    const existing = String(getNodeContent(targetNode) || "").trim();
+    setNodeContent(targetNode, existing ? `${existing}\n${text}` : text);
+    saveState();
+    renderNodes();
+    renderLinks();
+    const cardEl = nodesLayer.querySelector(`[data-id="${targetNode.id}"]`);
+    if (cardEl) scheduleNodeHeightSync(targetNode.id, cardEl);
+    return;
+  }
+
+  const parentId = board.nodes[0]?.id || null;
+  const id = makeId("action");
+  const GRID = 24;
+  const pos = parentId ? getReplyActionPosition(board, parentId) : getViewportActionPosition();
+  const newNode = {
+    id,
+    title: "",
+    body: text,
+    status: "ongoing",
+    createdAt: new Date().toISOString(),
+    x: Math.round(pos.x / GRID) * GRID,
+    y: Math.round(pos.y / GRID) * GRID,
+    w: 288,
+    h: 144
+  };
+  if (parentId) {
+    board.nodes.splice(getReplyInsertionIndex(board, parentId), 0, newNode);
+    addLink(parentId, id, "out", "in");
+  } else {
+    board.nodes.push(newNode);
+  }
+  pendingCardPop.add(id);
+  selectedNodeId = id;
+  saveState();
+  render();
+  const cardEl = nodesLayer.querySelector(`[data-id="${id}"]`);
+  if (cardEl) scheduleNodeHeightSync(id, cardEl);
+}
+
+async function fallbackBrowserTranslate(text, formality, direction) {
+  const key = localStorage.getItem(GEMINI_API_KEY_STORAGE) || DEFAULT_ENV_GEMINI_KEY;
+  if (!key) throw new Error("Configure GEMINI_API_KEY in .env or Settings");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${DEFAULT_ENV_GEMINI_MODEL}:generateContent?key=${encodeURIComponent(key)}`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: `Translate between Portuguese and English (${direction}, formality ${formality}/100). Output ONLY the translation:\n${text}`
+            }
+          ]
+        }
+      ],
+      generationConfig: { temperature: 0.2 }
+    })
+  });
+  const data = await resp.json();
+  return data?.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("\n") || "";
 }
