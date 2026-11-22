@@ -12,14 +12,12 @@ const linkArrowsInput = document.querySelector("#settingsLinkArrowsInput");
 const themeInput = document.querySelector("#settingsThemeInput");
 const cardFontSizeInput = document.querySelector("#settingsCardFontSizeInput");
 const lineageHoverInput = document.querySelector("#settingsLineageHoverInput");
-const geminiKeyInput = document.querySelector("#settingsGeminiKeyInput");
 
 const LINK_STYLE_KEY = "todocompanion.settings.linkStyle";
 const LINK_ARROWS_KEY = "todocompanion.settings.linkArrows";
 const LINEAGE_HOVER_KEY = "todocompanion.settings.lineageHover";
 const THEME_KEY = "todocompanion.settings.theme";
 const CARD_FONT_SIZE_KEY = "todocompanion.settings.cardFontSize";
-const GEMINI_API_KEY_STORAGE = "todocompanion.settings.geminiApiKey";
 const THEMES = ["claude-dark", "light-claude", "dracula"];
 const DEFAULT_THEME = "claude-dark";
 const MIN_CARD_FONT_SIZE = 1;
@@ -107,9 +105,6 @@ async function loadSettings() {
   if (cardFontSizeInput) {
     cardFontSizeInput.value = currentCardFontSize();
   }
-  if (geminiKeyInput) {
-    geminiKeyInput.value = localStorage.getItem(GEMINI_API_KEY_STORAGE) || "";
-  }
 
   if (!invoke) return;
 
@@ -166,16 +161,6 @@ function persistLineageHover(event) {
   localStorage.setItem(LINEAGE_HOVER_KEY, event.target.checked ? "true" : "false");
 }
 
-function persistGeminiApiKey(event) {
-  const value = String(event.target.value || "").trim();
-  if (value) {
-    localStorage.setItem(GEMINI_API_KEY_STORAGE, value);
-  } else {
-    localStorage.removeItem(GEMINI_API_KEY_STORAGE);
-  }
-  event.target.classList.remove("needs-key");
-}
-
 function hideApp() {
   if (invoke) {
     invoke("hide_window").catch(err => console.warn("[settings] hide_window failed", err));
@@ -198,17 +183,6 @@ export function initSettings() {
   lineageHoverInput?.addEventListener("change", persistLineageHover);
   cardFontSizeInput?.addEventListener("change", persistCardFontSize);
   cardFontSizeInput?.addEventListener("input", persistCardFontSize);
-  geminiKeyInput?.addEventListener("change", persistGeminiApiKey);
-  geminiKeyInput?.addEventListener("input", persistGeminiApiKey);
-  window.addEventListener("app:open-settings-gemini-key", () => {
-    open();
-    requestAnimationFrame(() => {
-      if (geminiKeyInput) {
-        geminiKeyInput.classList.add("needs-key");
-        geminiKeyInput.focus();
-      }
-    });
-  });
   applyTheme(currentTheme());
   applyCardFontSize(currentCardFontSize());
 
