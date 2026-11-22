@@ -437,12 +437,19 @@ async function init() {
   initSettingsModule();
 }
 
+function triggerAutoUpdateCheck() {
+  import("./updater/index.js")
+    .then(({ runUpdaterFlow }) => runUpdaterFlow({ manual: false }))
+    .catch(error => console.warn("[updater] failed to load", error));
+}
+
 function scheduleUpdaterCheck() {
-  setTimeout(() => {
-    import("./updater/index.js")
-      .then(({ runUpdaterFlow }) => runUpdaterFlow())
-      .catch(error => console.warn("[updater] failed to load", error));
-  }, 600);
+  setTimeout(triggerAutoUpdateCheck, 600);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      triggerAutoUpdateCheck();
+    }
+  });
 }
 
 function initSettingsModule() {

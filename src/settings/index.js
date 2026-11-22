@@ -14,6 +14,8 @@ const cardFontSizeInput = document.querySelector("#settingsCardFontSizeInput");
 const cardFontSizeValue = document.querySelector("#settingsCardFontSizeValue");
 const lineageHoverInput = document.querySelector("#settingsLineageHoverInput");
 const translatorAutoInput = document.querySelector("#settingsTranslatorAutoInput");
+const checkUpdateButton = document.querySelector("#settingsCheckUpdateButton");
+const updateStatusEl = document.querySelector("#settingsUpdateStatus");
 
 const LINK_STYLE_KEY = "todocompanion.settings.linkStyle";
 const LINK_ARROWS_KEY = "todocompanion.settings.linkArrows";
@@ -193,6 +195,42 @@ function selectSettingsTab(tabName) {
   });
 }
 
+function setUpdateStatus(text, tone = "") {
+  if (!updateStatusEl) return;
+  updateStatusEl.textContent = text;
+  updateStatusEl.classList.remove("status-ok", "status-error");
+  if (tone) updateStatusEl.classList.add(tone);
+}
+
+async function handleManualUpdateCheck() {
+  if (!checkUpdateButton || checkUpdateButton.disabled) return;
+  checkUpdateButton.disabled = true;
+  checkUpdateButton.textContent = "Verificando...";
+  setUpdateStatus("Consultando o GitHub...");
+
+  try {
+    const { runUpdaterFlow } = await import("../updater/index.js");
+    const result = await runUpdaterFlow({ manual: true, onBeforeModal: close });
+    if (result?.status === "up-to-date") {
+      setUpdateStatus("Você já está na versão mais recente ✓", "status-ok");
+    } else if (result?.status === "declined") {
+      setUpdateStatus(`Nova versão v${result.version} disponível`, "status-ok");
+    } else if (result?.status === "unavailable") {
+      setUpdateStatus("Verificação disponível apenas no app instalado");
+    } else if (result?.status === "error") {
+      setUpdateStatus("Não foi possível verificar agora", "status-error");
+    } else {
+      setUpdateStatus("Verifica automaticamente ao abrir o app");
+    }
+  } catch (err) {
+    console.warn("[settings] manual update check failed", err);
+    setUpdateStatus("Não foi possível verificar agora", "status-error");
+  } finally {
+    checkUpdateButton.disabled = false;
+    checkUpdateButton.textContent = "Verificar agora";
+  }
+}
+
 function hideApp() {
   if (invoke) {
     invoke("hide_window").catch(err => console.warn("[settings] hide_window failed", err));
@@ -216,6 +254,7 @@ export function initSettings() {
   cardFontSizeInput?.addEventListener("change", persistCardFontSize);
   cardFontSizeInput?.addEventListener("input", persistCardFontSize);
   translatorAutoInput?.addEventListener("change", persistTranslatorMode);
+  checkUpdateButton?.addEventListener("click", handleManualUpdateCheck);
   modal.querySelectorAll("[data-settings-tab]").forEach((btn) => {
     btn.addEventListener("click", () => selectSettingsTab(btn.dataset.settingsTab));
   });

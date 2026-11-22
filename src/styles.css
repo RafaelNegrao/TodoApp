@@ -4345,6 +4345,38 @@ button {
   background: rgba(var(--hi-rgb), 0.12);
 }
 
+.settings-action-btn {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(var(--hi-rgb), 0.08);
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 620;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--t-fast) var(--ease-out), opacity var(--t-fast) var(--ease-out);
+}
+
+.settings-action-btn:hover:not(:disabled) {
+  background: rgba(var(--hi-rgb), 0.15);
+}
+
+.settings-action-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.settings-desc.status-ok {
+  color: var(--green, #22c55e);
+}
+
+.settings-desc.status-error {
+  color: #f87171;
+}
+
 .settings-slider-control {
   display: flex;
   align-items: center;

@@ -27,54 +27,82 @@ function describeError(error) {
   return error.message || String(error);
 }
 
-export async function runUpdaterFlow() {
+let updaterInFlight = false;
+let lastAutoCheckAt = 0;
+const AUTO_CHECK_COOLDOWN_MS = 30_000;
+
+export async function runUpdaterFlow({ manual = false, onBeforeModal = null } = {}) {
   if (!isUpdaterAvailable()) {
-    return;
+    return { status: "unavailable" };
+  }
+  if (updaterInFlight) {
+    return { status: "busy" };
+  }
+  if (!manual && lastAutoCheckAt > 0 && Date.now() - lastAutoCheckAt < AUTO_CHECK_COOLDOWN_MS) {
+    return { status: "throttled" };
   }
 
-  let update = null;
-  try {
-    update = await checkForUpdate();
-  } catch (error) {
-    console.warn("[updater] check failed:", describeError(error));
-    return;
-  }
-
-  if (!update) {
-    return;
-  }
-
-  let accepted = false;
-  try {
-    accepted = await showUpdateAvailableModal({
-      currentVersion: update.currentVersion,
-      version: update.latestVersion,
-    });
-  } catch (error) {
-    console.warn("[updater] available modal failed:", describeError(error));
-    return;
-  }
-
-  if (!accepted) {
-    return;
-  }
-
-  openUpdateProgressModal();
-  setUpdateProgressPhase("preparing");
+  updaterInFlight = true;
+  lastAutoCheckAt = Date.now();
 
   try {
-    await downloadAndApplyUpdate(update, (event) => {
+    let update = null;
+    try {
+      update = await checkForUpdate();
+    } catch (error) {
+      const msg = describeError(error);
+      console.warn("[updater] check failed:", msg);
+      return { status: "error", error: msg };
+    }
+
+    if (!update) {
+      return { status: "up-to-date" };
+    }
+
+    if (typeof onBeforeModal === "function") {
       try {
-        updateProgressFromDownload(event);
-      } catch (renderError) {
-        console.warn("[updater] progress render failed:", describeError(renderError));
-      }
-    });
-    setUpdateProgressPhase("restarting");
-  } catch (error) {
-    console.error("[updater] install failed:", describeError(error));
-    await showUpdateProgressError(
-      "Unable to download update. Check your connection and try again."
-    );
+        onBeforeModal();
+      } catch (_) { }
+    }
+
+    let accepted = false;
+    try {
+      accepted = await showUpdateAvailableModal({
+        currentVersion: update.currentVersion,
+        version: update.latestVersion,
+      });
+    } catch (error) {
+      const msg = describeError(error);
+      console.warn("[updater] available modal failed:", msg);
+      return { status: "error", error: msg };
+    }
+
+    if (!accepted) {
+      return { status: "declined", version: update.latestVersion };
+    }
+
+    openUpdateProgressModal();
+    setUpdateProgressPhase("preparing");
+
+    try {
+      await downloadAndApplyUpdate(update, (event) => {
+        try {
+          updateProgressFromDownload(event);
+        } catch (renderError) {
+          console.warn("[updater] progress render failed:", describeError(renderError));
+        }
+      });
+      setUpdateProgressPhase("restarting");
+      return { status: "accepted", version: update.latestVersion };
+    } catch (error) {
+      const msg = describeError(error);
+      console.error("[updater] install failed:", msg);
+      await showUpdateProgressError(
+        "Unable to download update. Check your connection and try again."
+      );
+      return { status: "error", error: msg };
+    }
+  } finally {
+    updaterInFlight = false;
   }
 }
