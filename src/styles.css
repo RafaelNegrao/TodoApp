@@ -4379,7 +4379,8 @@ body.translator-floating-mode .ai-translator-panel {
   box-shadow: none;
 }
 
-body.translator-floating-mode .ai-panel-resizer {
+body.translator-floating-mode .ai-panel-resizer,
+body.translator-floating-mode .ai-panel-close {
   display: none !important;
 }
 
@@ -4472,12 +4473,22 @@ body.translator-floating-mode .ai-panel-head {
   background: rgba(var(--hi-rgb), 0.08);
 }
 
+/* Linha combinada: Slider de Tom + Dropdown de Idioma */
+.ai-translate-controls-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
 /* Tone Slider (Natural <-> Formal) */
 .ai-tone-bar {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border-radius: 10px;
   background: rgba(var(--hi-rgb), 0.04);
   border: 1px solid var(--line);
@@ -4551,33 +4562,112 @@ body.translator-floating-mode .ai-panel-head {
   display: none !important;
 }
 
-.ai-dir-bar {
+/* Dropdown personalizado de direcao do idioma (ao lado do slider de tom) */
+.ai-dir-dropdown {
+  position: relative;
+  flex: 0 0 auto;
   display: flex;
-  gap: 4px;
 }
 
-.ai-dir-pill {
-  flex: 1 1 0;
-  height: 26px;
-  border-radius: 6px;
+.ai-dir-trigger {
+  height: 100%;
+  min-width: 84px;
+  padding: 0 10px;
+  border-radius: 10px;
   border: 1px solid var(--line);
-  background: rgba(var(--hi-rgb), 0.03);
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 660;
-  cursor: pointer;
-  transition: all var(--t-fast) var(--ease-out);
-}
-
-.ai-dir-pill:hover {
-  color: var(--text);
-  border-color: var(--line-strong);
-}
-
-.ai-dir-pill.active {
+  background: rgba(var(--hi-rgb), 0.04);
   color: var(--text-strong);
-  background: rgba(var(--accent-rgb), 0.22);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 680;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--t-fast) var(--ease-out), background var(--t-fast) var(--ease-out);
+}
+
+.ai-dir-trigger:hover,
+.ai-dir-dropdown.open .ai-dir-trigger {
   border-color: rgba(var(--accent-strong-rgb), 0.55);
+  background: rgba(var(--accent-rgb), 0.14);
+}
+
+.ai-dir-chevron {
+  width: 13px;
+  height: 13px;
+  stroke: var(--muted);
+  stroke-width: 2.2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--t-fast) var(--ease-out), stroke var(--t-fast) var(--ease-out);
+}
+
+.ai-dir-dropdown.open .ai-dir-chevron {
+  transform: rotate(180deg);
+  stroke: var(--text-strong);
+}
+
+.ai-dir-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 50;
+  min-width: 146px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(var(--hi-rgb), 0.14);
+  background: var(--overlay);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: tasks-sort-menu-in var(--t-fast) var(--ease-out);
+}
+
+.ai-dir-menu[hidden] {
+  display: none !important;
+}
+
+.ai-dir-option {
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+}
+
+.ai-dir-option:hover {
+  background: rgba(var(--hi-rgb), 0.08);
+  color: var(--text-strong);
+}
+
+.ai-dir-option.active {
+  background: rgba(var(--accent-rgb), 0.2);
+  color: var(--text-strong);
+}
+
+.ai-dir-check {
+  font-size: 11px;
+  color: var(--accent-strong);
+  opacity: 0;
+}
+
+.ai-dir-option.active .ai-dir-check {
+  opacity: 1;
 }
 
 .ai-input-box {

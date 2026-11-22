@@ -7284,11 +7284,46 @@ function initAiTranslatorPanel() {
     });
   });
 
+  const dirDropdown = document.getElementById("aiDirDropdown");
+  const dirTrigger = document.getElementById("aiDirDropdownTrigger");
+  const dirLabel = document.getElementById("aiDirDropdownLabel");
+  const dirMenu = document.getElementById("aiDirDropdownMenu");
+
+  function closeDirDropdown() {
+    if (!dirMenu || !dirDropdown) return;
+    dirMenu.hidden = true;
+    dirDropdown.classList.remove("open");
+    dirTrigger?.setAttribute("aria-expanded", "false");
+  }
+
+  dirTrigger?.addEventListener("click", event => {
+    event.stopPropagation();
+    if (!dirMenu || !dirDropdown) return;
+    const willOpen = dirMenu.hidden;
+    dirMenu.hidden = !willOpen;
+    dirDropdown.classList.toggle("open", willOpen);
+    dirTrigger.setAttribute("aria-expanded", String(willOpen));
+  });
+
+  document.addEventListener("pointerdown", event => {
+    if (dirDropdown && !dirDropdown.contains(event.target)) {
+      closeDirDropdown();
+    }
+  });
+
   panel.querySelectorAll("[data-ai-dir]").forEach(btn => {
     btn.addEventListener("click", () => {
-      panel.querySelectorAll("[data-ai-dir]").forEach(b => b.classList.remove("active"));
+      panel.querySelectorAll("[data-ai-dir]").forEach(b => {
+        b.classList.remove("active");
+        b.setAttribute("aria-selected", "false");
+      });
       btn.classList.add("active");
-      currentDirection = btn.dataset.aiDir || "auto";
+      btn.setAttribute("aria-selected", "true");
+      currentDirection = btn.dataset.aiDir || "pt-en";
+      if (dirLabel) {
+        dirLabel.textContent = btn.dataset.aiDirLabel || btn.textContent.trim();
+      }
+      closeDirDropdown();
       if (trInput?.value.trim()) {
         scheduleRealtimeTranslation(20);
       }

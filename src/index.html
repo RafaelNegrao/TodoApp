@@ -259,19 +259,38 @@
 
           <!-- MODO 1: TRADUCAO EM TEMPO REAL -->
           <div class="ai-translate-view" id="aiTranslateView">
-            <div class="ai-tone-bar">
-              <div class="ai-tone-labels">
-                <span class="ai-tone-end" data-tone-jump="0">Natural</span>
-                <span class="ai-tone-badge" id="aiToneBadge">Balanced</span>
-                <span class="ai-tone-end" data-tone-jump="100">Formal</span>
+            <div class="ai-translate-controls-row">
+              <div class="ai-tone-bar">
+                <div class="ai-tone-labels">
+                  <span class="ai-tone-end" data-tone-jump="0">Natural</span>
+                  <span class="ai-tone-badge" id="aiToneBadge">Balanced</span>
+                  <span class="ai-tone-end" data-tone-jump="100">Formal</span>
+                </div>
+                <input class="ai-tone-slider" id="aiToneSlider" type="range" min="0" max="100" step="5" value="40" aria-label="Tone between Natural and Formal" />
               </div>
-              <input class="ai-tone-slider" id="aiToneSlider" type="range" min="0" max="100" step="5" value="40" aria-label="Tone between Natural and Formal" />
-            </div>
 
-            <div class="ai-dir-bar" role="group" aria-label="Translation direction">
-              <button class="ai-dir-pill" type="button" data-ai-dir="auto">Auto (PT ↔ EN)</button>
-              <button class="ai-dir-pill active" type="button" data-ai-dir="pt-en">PT → EN</button>
-              <button class="ai-dir-pill" type="button" data-ai-dir="en-pt">EN → PT</button>
+              <div class="ai-dir-dropdown" id="aiDirDropdown">
+                <button class="ai-dir-trigger" id="aiDirDropdownTrigger" type="button" aria-haspopup="listbox" aria-expanded="false" title="Translation language">
+                  <span class="ai-dir-trigger-label" id="aiDirDropdownLabel">PT → EN</span>
+                  <svg class="ai-dir-chevron" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
+                <div class="ai-dir-menu" id="aiDirDropdownMenu" role="listbox" aria-label="Translation direction" hidden>
+                  <button class="ai-dir-option active" type="button" role="option" aria-selected="true" data-ai-dir="pt-en" data-ai-dir-label="PT → EN">
+                    <span>PT → EN</span>
+                    <span class="ai-dir-check" aria-hidden="true">✓</span>
+                  </button>
+                  <button class="ai-dir-option" type="button" role="option" aria-selected="false" data-ai-dir="en-pt" data-ai-dir-label="EN → PT">
+                    <span>EN → PT</span>
+                    <span class="ai-dir-check" aria-hidden="true">✓</span>
+                  </button>
+                  <button class="ai-dir-option" type="button" role="option" aria-selected="false" data-ai-dir="auto" data-ai-dir-label="Auto">
+                    <span>Auto (PT ↔ EN)</span>
+                    <span class="ai-dir-check" aria-hidden="true">✓</span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div class="ai-input-box">
