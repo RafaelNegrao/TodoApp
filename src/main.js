@@ -1,4 +1,28 @@
 import { routeLinkPath } from "./linkRouting.js";
+import {
+  extractAiActionProposal,
+  extractAiQuestions,
+  formatQuestionAnswersMessage,
+  isDestructiveAction,
+  describeAiAction,
+  buildAppContextSnapshot,
+  executeAiActionPlan
+} from "./aiAppAgent.js";
+import {
+  createDefaultTableData,
+  decodeTableData,
+  encodeTableData,
+  serializeTableToken,
+  addTableRow,
+  removeTableRow,
+  addTableCol,
+  removeTableCol,
+  parseTsvToTableData,
+  applyTsvIntoTable,
+  evaluateCellFormula,
+  renderCardTableHtml,
+  colIndexToLetter
+} from "./cardTable.js";
 
 const STORAGE_KEY = "todocompanion.state.v4";
 const LEGACY_STORAGE_KEYS = ["todocompanion.state.v3", "todocompanion.state.v2", "todocompanion.state.v1"];
@@ -69,6 +93,7 @@ const icons = {
   formatListBulleted: `<svg class="icon" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>`,
   formatListNumbered: `<svg class="icon" viewBox="0 0 24 24"><path d="M10 6h11M10 12h11M10 18h11"/><text x="3" y="7" font-size="6" fill="currentColor">1</text><text x="3" y="13" font-size="6" fill="currentColor">2</text><text x="3" y="19" font-size="6" fill="currentColor">3</text></svg>`,
   checkbox: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  table: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>`,
   formatClear: `<svg class="icon" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m13.3 9 5.5 5.5"/></svg>`,
   micAi: `<svg class="icon" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4M8 22h8"/></svg>`,
   menu: `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`
@@ -1470,6 +1495,7 @@ function renderNodes() {
             <button class="card-format-btn" type="button" data-command="insertUnorderedList" title="Bulleted List">${icons.formatListBulleted}</button>
             <button class="card-format-btn" type="button" data-command="insertOrderedList" title="Numbered List">${icons.formatListNumbered}</button>
             <button class="card-format-btn" type="button" data-command="insertCheckbox" title="Checkbox">${icons.checkbox}</button>
+            <button class="card-format-btn" type="button" data-command="insertTable" title="Insert Table (Excel)">${icons.table}</button>
             <div class="card-format-bar-sep"></div>
             <button class="card-format-btn" type="button" data-command="insertImageInline" title="Insert Image">${icons.image}</button>
             <button class="card-format-btn" type="button" data-command="removeFormat" title="Clear Formatting">${icons.formatClear}</button>
@@ -1594,12 +1620,20 @@ function renderNodes() {
 
     if (bodyEditor) {
       bodyEditor.addEventListener("pointerdown", event => {
-        if (event.target.closest(".card-todo-btn, .card-todo-wrap, .card-inline-img-del")) {
+        if (event.target.closest(".card-todo-btn, .card-todo-wrap, .card-inline-img-del, .card-table-wrap")) {
           event.stopPropagation();
         }
       });
 
       bodyEditor.addEventListener("click", event => {
+        const tableBtn = event.target.closest(".card-table-btn");
+        if (tableBtn) {
+          event.preventDefault();
+          event.stopPropagation();
+          handleCardTableAction(tableBtn, bodyEditor, node, card);
+          return;
+        }
+
         const imgDelBtn = event.target.closest(".card-inline-img-del");
         if (imgDelBtn) {
           event.preventDefault();
@@ -1662,15 +1696,88 @@ function renderNodes() {
         closeAttachmentReferencePicker(bodyEditor);
       });
 
+      bodyEditor.addEventListener("focusin", event => {
+        const cell = event.target.closest?.(".card-excel-cell");
+        if (cell) {
+          const wrap = cell.closest(".card-table-wrap");
+          if (wrap) {
+            wrap.dataset.activeRow = cell.dataset.row || "0";
+            wrap.dataset.activeCol = cell.dataset.col || "0";
+          }
+          const raw = cell.dataset.raw ?? "";
+          if (raw.trim().startsWith("=")) {
+            cell.textContent = raw;
+          }
+        }
+      });
+
+      bodyEditor.addEventListener("focusout", event => {
+        const cell = event.target.closest?.(".card-excel-cell");
+        if (cell) {
+          const wrap = cell.closest(".card-table-wrap");
+          if (wrap) {
+            cell.dataset.raw = cell.textContent ?? "";
+            refreshCardTableDom(wrap);
+            setNodeContent(node, serializeEditableContent(bodyEditor));
+            saveState();
+          }
+        }
+      });
+
+      bodyEditor.addEventListener("paste", event => {
+        const plain = event.clipboardData?.getData("text/plain") || "";
+        if (!plain.includes("\t")) return;
+        const cell = event.target.closest?.(".card-excel-cell");
+        if (cell) {
+          const wrap = cell.closest(".card-table-wrap");
+          if (wrap) {
+            const r = parseInt(cell.dataset.row || "0", 10);
+            const c = parseInt(cell.dataset.col || "0", 10);
+            const currentData = readCardTableDataFromDom(wrap);
+            const updated = applyTsvIntoTable(currentData, r, c, plain);
+            if (updated) {
+              event.preventDefault();
+              event.stopPropagation();
+              replaceCardTableDom(wrap, updated, r, c);
+              setNodeContent(node, serializeEditableContent(bodyEditor));
+              saveState();
+              scheduleNodeHeightSync(node.id, card);
+            }
+          }
+          return;
+        }
+        const parsedTable = parseTsvToTableData(plain);
+        if (parsedTable) {
+          event.preventDefault();
+          event.stopPropagation();
+          insertCardTableInEditor(bodyEditor, parsedTable, node, card);
+        }
+      });
+
       bodyEditor.addEventListener("keydown", event => {
+        const cell = event.target.closest?.(".card-excel-cell");
+        if (cell) {
+          handleCardTableCellKeydown(event, cell, bodyEditor, node, card);
+          return;
+        }
         handleAttachmentReferenceKeydown(event);
         if (event.defaultPrevented) return;
         handleTodoKeydown(event, bodyEditor, node);
       });
-      bodyEditor.addEventListener("input", () => {
+      bodyEditor.addEventListener("input", event => {
+        const cell = event.target.closest?.(".card-excel-cell");
+        if (cell) {
+          cell.dataset.raw = cell.textContent ?? "";
+          const wrap = cell.closest(".card-table-wrap");
+          if (wrap) {
+            wrap.dataset.tableEncoded = encodeTableData(readCardTableDataFromDom(wrap));
+          }
+        }
         setNodeContent(node, serializeEditableContent(bodyEditor));
         saveState();
-        syncAttachmentReferencePicker(bodyEditor);
+        if (!cell) {
+          syncAttachmentReferencePicker(bodyEditor);
+        }
         scheduleNodeHeightSync(node.id, card);
       });
     }
@@ -1718,6 +1825,10 @@ function renderNodes() {
             window.inlineImageEditorTarget = editor;
             window.inlineImageNodeTarget = node;
             document.getElementById('inlineImageInput').click();
+            return;
+          }
+          if (command === "insertTable") {
+            insertCardTableInEditor(editor, createDefaultTableData(3, 3), node, card);
             return;
           }
           if (command === "insertCheckbox") {
@@ -4484,7 +4595,7 @@ function makeId(prefix) {
 }
 
 const URL_PATTERN = /(?:https?:\/\/|www\.)[^\s<>"]+/g;
-const BODY_TOKEN_PATTERN = /!\[image\]\(([^)]+)\)|@\[([^\]\r\n]+)\]\(attachment:([^)]+)\)|\[([ xX])\] |(?:https?:\/\/|www\.)(?:(?!@\[)[^\s<>"])+/g;
+const BODY_TOKEN_PATTERN = /\[\[table:([A-Za-z0-9_-]+)\]\]|!\[image\]\(([^)]+)\)|@\[([^\]\r\n]+)\]\(attachment:([^)]+)\)|\[([ xX])\] |(?:https?:\/\/|www\.)(?:(?!@\[)[^\s<>"])+/g;
 
 function extractUrl(text) {
   const match = String(text || "").match(URL_PATTERN);
@@ -4512,12 +4623,14 @@ function renderBodyHtml(text) {
     const index = match.index ?? 0;
     html += preserveFormatTags(escapeHtmlPreservingFormats(source.slice(lastIndex, index)));
 
-    if (match[0].startsWith("![image](")) {
-      html += `<span class="card-inline-img-wrap" contenteditable="false"><img src="${escapeAttr(match[1])}" alt="Card image" draggable="false" /><button type="button" class="card-inline-img-del" title="Apagar imagem" aria-label="Apagar imagem">${icons.close}</button></span>`;
-    } else if (match[3]) {
-      html += renderAttachmentReferenceHtml(match[2], match[3], match[0]);
-    } else if (match[4] !== undefined) {
-      const isChecked = match[4].toLowerCase() === "x";
+    if (match[1] !== undefined) {
+      html += renderCardTableHtml(decodeTableData(match[1]));
+    } else if (match[0].startsWith("![image](")) {
+      html += `<span class="card-inline-img-wrap" contenteditable="false"><img src="${escapeAttr(match[2])}" alt="Card image" draggable="false" /><button type="button" class="card-inline-img-del" title="Apagar imagem" aria-label="Apagar imagem">${icons.close}</button></span>`;
+    } else if (match[4]) {
+      html += renderAttachmentReferenceHtml(match[3], match[4], match[0]);
+    } else if (match[5] !== undefined) {
+      const isChecked = match[5].toLowerCase() === "x";
       html += `<span class="card-todo-wrap" contenteditable="false" data-checked="${isChecked}"><button type="button" class="card-todo-btn${isChecked ? " checked" : ""}" role="checkbox" aria-checked="${isChecked}">${isChecked ? icons.check : ""}</button></span> `;
     } else {
       const url = match[0];
@@ -4562,7 +4675,11 @@ function serializeEditableContent(el) {
     if (node.nodeType === Node.TEXT_NODE) {
       result += node.textContent;
     } else if (node.nodeType === Node.ELEMENT_NODE) {
-      if (node.matches?.(".card-inline-img-wrap")) {
+      if (node.matches?.(".card-table-wrap")) {
+        const data = readCardTableDataFromDom(node);
+        if (result && !result.endsWith("\n")) result += "\n";
+        result += `${serializeTableToken(data)}\n`;
+      } else if (node.matches?.(".card-inline-img-wrap")) {
         const img = node.querySelector("img");
         if (img) result += `![image](${img.getAttribute("src")})`;
       } else if (node.matches?.(".card-attachment-link")) {
@@ -4590,6 +4707,196 @@ function serializeEditableContent(el) {
     }
   });
   return result;
+}
+
+function readCardTableDataFromDom(wrap) {
+  if (!wrap) return createDefaultTableData(3, 3);
+  const trEls = Array.from(wrap.querySelectorAll("tr"));
+  if (!trEls.length) {
+    return decodeTableData(wrap.dataset.tableEncoded || "");
+  }
+  const rows = trEls.map(tr =>
+    Array.from(tr.querySelectorAll(".card-excel-cell")).map(cell =>
+      cell.dataset.raw !== undefined ? cell.dataset.raw : (cell.textContent ?? "")
+    )
+  );
+  return { rows };
+}
+
+function refreshCardTableDom(wrap) {
+  if (!wrap) return;
+  const data = readCardTableDataFromDom(wrap);
+  wrap.dataset.tableEncoded = encodeTableData(data);
+  const activeEl = document.activeElement;
+  wrap.querySelectorAll(".card-excel-cell").forEach(cell => {
+    const r = parseInt(cell.dataset.row || "0", 10);
+    const c = parseInt(cell.dataset.col || "0", 10);
+    const raw = data.rows[r]?.[c] ?? "";
+    const isFormula = String(raw).trim().startsWith("=");
+    cell.dataset.raw = raw;
+    cell.classList.toggle("is-formula", isFormula);
+    const cellRef = `${colIndexToLetter(c)}${r + 1}`;
+    cell.title = isFormula ? `${cellRef} (${raw})` : cellRef;
+    if (cell !== activeEl) {
+      cell.textContent = isFormula ? evaluateCellFormula(raw, data.rows, r, c) : raw;
+    }
+  });
+}
+
+function focusCardTableCell(wrap, rowIdx, colIdx) {
+  if (!wrap) return;
+  const target = wrap.querySelector(`.card-excel-cell[data-row="${rowIdx}"][data-col="${colIdx}"]`);
+  if (!target) return;
+  target.focus();
+  const sel = window.getSelection();
+  if (sel) {
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+}
+
+function replaceCardTableDom(wrap, nextData, focusRow = null, focusCol = null) {
+  if (!wrap) return null;
+  const temp = document.createElement("div");
+  temp.innerHTML = renderCardTableHtml(nextData);
+  const nextWrap = temp.firstElementChild;
+  if (!nextWrap) return null;
+  wrap.replaceWith(nextWrap);
+  if (focusRow !== null && focusCol !== null) {
+    const safeR = clamp(focusRow, 0, nextData.rows.length - 1);
+    const safeC = clamp(focusCol, 0, (nextData.rows[0]?.length || 1) - 1);
+    nextWrap.dataset.activeRow = String(safeR);
+    nextWrap.dataset.activeCol = String(safeC);
+    requestAnimationFrame(() => focusCardTableCell(nextWrap, safeR, safeC));
+  }
+  return nextWrap;
+}
+
+function insertCardTableInEditor(editor, tableData, node, card) {
+  if (!editor) return;
+  editor.focus();
+  const temp = document.createElement("div");
+  temp.innerHTML = `${renderCardTableHtml(tableData)}<br>`;
+  const insertedWrap = temp.querySelector(".card-table-wrap");
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    const frag = document.createDocumentFragment();
+    while (temp.firstChild) {
+      frag.appendChild(temp.firstChild);
+    }
+    range.insertNode(frag);
+  } else {
+    while (temp.firstChild) {
+      editor.appendChild(temp.firstChild);
+    }
+  }
+  setNodeContent(node, serializeEditableContent(editor));
+  saveState();
+  scheduleNodeHeightSync(node.id, card);
+  if (insertedWrap) {
+    requestAnimationFrame(() => focusCardTableCell(insertedWrap, 0, 0));
+  }
+}
+
+function handleCardTableAction(btn, editor, node, card) {
+  const wrap = btn.closest(".card-table-wrap");
+  if (!wrap) return;
+  const action = btn.dataset.tableAction;
+  if (action === "delTable") {
+    wrap.remove();
+    setNodeContent(node, serializeEditableContent(editor));
+    saveState();
+    scheduleNodeHeightSync(node.id, card);
+    return;
+  }
+  const data = readCardTableDataFromDom(wrap);
+  const activeR = parseInt(wrap.dataset.activeRow ?? String(data.rows.length - 1), 10);
+  const activeC = parseInt(wrap.dataset.activeCol ?? String((data.rows[0]?.length || 1) - 1), 10);
+  let nextData = data;
+  let nextFocusR = activeR;
+  let nextFocusC = activeC;
+
+  if (action === "addRow") {
+    nextData = addTableRow(data, activeR);
+    nextFocusR = activeR + 1;
+  } else if (action === "delRow") {
+    nextData = removeTableRow(data, activeR);
+    nextFocusR = Math.max(0, activeR - 1);
+  } else if (action === "addCol") {
+    nextData = addTableCol(data, activeC);
+    nextFocusC = activeC + 1;
+  } else if (action === "delCol") {
+    nextData = removeTableCol(data, activeC);
+    nextFocusC = Math.max(0, activeC - 1);
+  }
+
+  replaceCardTableDom(wrap, nextData, nextFocusR, nextFocusC);
+  setNodeContent(node, serializeEditableContent(editor));
+  saveState();
+  scheduleNodeHeightSync(node.id, card);
+}
+
+function handleCardTableCellKeydown(event, cell, editor, node, card) {
+  const wrap = cell.closest(".card-table-wrap");
+  if (!wrap) return;
+  const r = parseInt(cell.dataset.row || "0", 10);
+  const c = parseInt(cell.dataset.col || "0", 10);
+  const data = readCardTableDataFromDom(wrap);
+  const rowCount = data.rows.length;
+  const colCount = data.rows[0]?.length || 1;
+
+  if (event.key === "Tab") {
+    event.preventDefault();
+    event.stopPropagation();
+    cell.dataset.raw = cell.textContent ?? "";
+    if (event.shiftKey) {
+      if (c > 0) {
+        focusCardTableCell(wrap, r, c - 1);
+      } else if (r > 0) {
+        focusCardTableCell(wrap, r - 1, colCount - 1);
+      }
+    } else if (c + 1 < colCount) {
+      focusCardTableCell(wrap, r, c + 1);
+    } else if (r + 1 < rowCount) {
+      focusCardTableCell(wrap, r + 1, 0);
+    } else {
+      const nextData = addTableRow(readCardTableDataFromDom(wrap), rowCount - 1);
+      replaceCardTableDom(wrap, nextData, rowCount, 0);
+      setNodeContent(node, serializeEditableContent(editor));
+      saveState();
+      scheduleNodeHeightSync(node.id, card);
+    }
+    return;
+  }
+
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    event.stopPropagation();
+    cell.dataset.raw = cell.textContent ?? "";
+    if (r + 1 < rowCount) {
+      focusCardTableCell(wrap, r + 1, c);
+    } else {
+      const nextData = addTableRow(readCardTableDataFromDom(wrap), rowCount - 1);
+      replaceCardTableDom(wrap, nextData, rowCount, c);
+      setNodeContent(node, serializeEditableContent(editor));
+      saveState();
+      scheduleNodeHeightSync(node.id, card);
+    }
+    return;
+  }
+
+  if (event.key === "ArrowUp" && r > 0) {
+    event.preventDefault();
+    focusCardTableCell(wrap, r - 1, c);
+  } else if (event.key === "ArrowDown" && r + 1 < rowCount) {
+    event.preventDefault();
+    focusCardTableCell(wrap, r + 1, c);
+  }
 }
 
 function getFormatTag(tagName) {
@@ -6788,6 +7095,7 @@ function initCanvasMetaResponsive() {
 // AI TRANSLATOR & GENERAL AI CHAT (WITH ATTACHMENTS & SESSIONS)
 // -------------------------------------------------------------
 const AI_TONE_STORAGE_KEY = "todocompanion.ai.formality";
+const AI_TRANSLATOR_MODE_STORAGE_KEY = "todocompanion.settings.translatorMode";
 const AI_PANEL_WIDTH_STORAGE_KEY = "todocompanion.ai.panelWidth";
 const AI_CHAT_LEGACY_STORAGE_KEY = "todocompanion.ai.chatHistory.v1";
 const AI_CHAT_SESSIONS_KEY = "todocompanion.ai.chatSessions.v2";
@@ -7341,6 +7649,23 @@ function initAiTranslatorPanel() {
     }
   }
 
+  function isTranslatorAutoMode() {
+    return localStorage.getItem(AI_TRANSLATOR_MODE_STORAGE_KEY) === "auto";
+  }
+
+  function applyTranslatorModeUi() {
+    const isAuto = isTranslatorAutoMode();
+    translateView?.classList.toggle("auto-translate-mode", isAuto);
+    syncTranslateButtonState();
+  }
+
+  window.addEventListener("app:translator-mode-changed", () => {
+    applyTranslatorModeUi();
+    if (isTranslatorAutoMode() && trInput?.value.trim()) {
+      scheduleRealtimeTranslation(100);
+    }
+  });
+
   toneSlider?.addEventListener("input", () => {
     formality = clamp(Number(toneSlider.value) || 0, 0, 100);
     if (toneBadge) {
@@ -7348,6 +7673,9 @@ function initAiTranslatorPanel() {
     }
     localStorage.setItem(AI_TONE_STORAGE_KEY, String(formality));
     syncTranslateButtonState();
+    if (isTranslatorAutoMode() && trInput?.value.trim()) {
+      scheduleRealtimeTranslation(100);
+    }
   });
 
   panel.querySelectorAll("[data-tone-jump]").forEach(lbl => {
@@ -7358,6 +7686,9 @@ function initAiTranslatorPanel() {
       if (toneBadge) toneBadge.textContent = describeFormalityLabel(targetVal);
       localStorage.setItem(AI_TONE_STORAGE_KEY, String(targetVal));
       syncTranslateButtonState();
+      if (isTranslatorAutoMode() && trInput?.value.trim()) {
+        scheduleRealtimeTranslation(20);
+      }
     });
   });
 
@@ -7417,6 +7748,9 @@ function initAiTranslatorPanel() {
       currentDirection = btn.dataset.aiDir || "pt-en";
       closeDirDropdown();
       syncDirectionUi();
+      if (isTranslatorAutoMode() && trInput?.value.trim()) {
+        scheduleRealtimeTranslation(20);
+      }
     });
   });
 
@@ -7424,9 +7758,13 @@ function initAiTranslatorPanel() {
     currentDirection = currentDirection === "en-pt" ? "pt-en" : "en-pt";
     trFlipDirBtn.classList.toggle("flipped");
     syncDirectionUi();
+    if (isTranslatorAutoMode() && trInput?.value.trim()) {
+      scheduleRealtimeTranslation(20);
+    }
   });
 
   syncDirectionUi();
+  applyTranslatorModeUi();
 
   function setTranslateStatus(stateName, label) {
     if (trStatusDot) {
@@ -7545,6 +7883,15 @@ function initAiTranslatorPanel() {
       trClearBtn.hidden = !raw.length;
     }
     syncTranslateButtonState();
+    if (isTranslatorAutoMode()) {
+      scheduleRealtimeTranslation(100);
+    }
+  });
+
+  trInput?.addEventListener("paste", () => {
+    if (isTranslatorAutoMode()) {
+      setTimeout(() => scheduleRealtimeTranslation(15), 0);
+    }
   });
 
   syncTranslateButtonState();
@@ -7909,6 +8256,274 @@ function initAiTranslatorPanel() {
         actions.append(timeSpan, copyBtn);
       }
 
+      if (isModel && msg.proposal && Array.isArray(msg.proposal.actions) && msg.proposal.actions.length > 0) {
+        const proposal = msg.proposal;
+        const cardEl = document.createElement("div");
+        cardEl.className = `ai-action-card status-${proposal.status || "pending"}`;
+
+        const head = document.createElement("div");
+        head.className = "ai-action-card-head";
+        const badgeText =
+          proposal.status === "approved"
+            ? "Executado ✓"
+            : proposal.status === "rejected"
+              ? "Recusado"
+              : "Permissão necessária";
+        head.innerHTML = `<span class="ai-action-card-title">${escapeHtml(proposal.summary || "Ações no app")}</span><span class="ai-action-status-pill">${badgeText}</span>`;
+        cardEl.appendChild(head);
+
+        const list = document.createElement("ul");
+        list.className = "ai-action-list";
+        proposal.actions.forEach(act => {
+          const li = document.createElement("li");
+          li.className = `ai-action-item${isDestructiveAction(act) ? " destructive" : ""}`;
+          li.textContent = describeAiAction(act);
+          list.appendChild(li);
+        });
+        cardEl.appendChild(list);
+
+        if (proposal.status === "pending") {
+          const foot = document.createElement("div");
+          foot.className = "ai-action-card-foot";
+
+          const approveBtn = document.createElement("button");
+          approveBtn.type = "button";
+          approveBtn.className = "ai-action-approve-btn";
+          approveBtn.textContent = "Permitir e executar";
+          approveBtn.addEventListener("click", async () => {
+            approveBtn.disabled = true;
+            rejectBtn.disabled = true;
+            approveBtn.textContent = "Executando...";
+            const results = await executeAiActionPlan(proposal.actions, {
+              runAction: runSingleAiAppAction
+            });
+            proposal.status = "approved";
+            proposal.results = results;
+            saveChatSessions();
+            renderChatMessages();
+          });
+
+          const rejectBtn = document.createElement("button");
+          rejectBtn.type = "button";
+          rejectBtn.className = "ai-action-reject-btn";
+          rejectBtn.textContent = "Recusar";
+          rejectBtn.addEventListener("click", () => {
+            proposal.status = "rejected";
+            saveChatSessions();
+            renderChatMessages();
+          });
+
+          foot.append(approveBtn, rejectBtn);
+          cardEl.appendChild(foot);
+        } else if (Array.isArray(proposal.results) && proposal.results.length > 0) {
+          const resBox = document.createElement("div");
+          resBox.className = "ai-action-results";
+          proposal.results.forEach(r => {
+            const line = document.createElement("div");
+            line.className = `ai-action-result-line ${r.ok ? "ok" : "err"}`;
+            line.textContent = `${r.ok ? "✓" : "✕"} ${r.message}`;
+            resBox.appendChild(line);
+          });
+          cardEl.appendChild(resBox);
+        }
+
+        row.appendChild(cardEl);
+      }
+
+      if (isModel && msg.questionSet && Array.isArray(msg.questionSet.questions) && msg.questionSet.questions.length > 0) {
+        const qSet = msg.questionSet;
+        const isAnswered = qSet.status === "answered";
+        const isInstantSingle = qSet.questions.length === 1 && !qSet.questions[0].multiSelect;
+        const draftSelections = {};
+        qSet.questions.forEach(q => {
+          const prev = qSet.answers?.[q.id];
+          draftSelections[q.id] = Array.isArray(prev) ? [...prev] : prev ? [prev] : [];
+        });
+
+        const qCard = document.createElement("div");
+        qCard.className = `ai-question-card status-${qSet.status || "pending"}`;
+
+        const qHead = document.createElement("div");
+        qHead.className = "ai-question-head";
+        qHead.innerHTML = `<span class="ai-question-head-title">${qSet.questions.length > 1 ? "Escolha suas respostas" : "Selecione uma opção"}</span><span class="ai-question-pill">${isAnswered ? "Respondido ✓" : "Interativo"}</span>`;
+        qCard.appendChild(qHead);
+
+        let submitBtn = null;
+        const updateSubmitState = () => {
+          if (!submitBtn) return;
+          const hasAny = qSet.questions.some(q => (draftSelections[q.id] || []).length > 0);
+          submitBtn.disabled = isAnswered || !hasAny;
+        };
+
+        const finalizeQuestionSet = () => {
+          const formatted = formatQuestionAnswersMessage(qSet, draftSelections);
+          if (!formatted) return;
+          qSet.answers = {};
+          qSet.questions.forEach(q => {
+            qSet.answers[q.id] = [...(draftSelections[q.id] || [])];
+          });
+          qSet.status = "answered";
+          saveChatSessions();
+          renderChatMessages();
+          sendChatMessage(formatted);
+        };
+
+        qSet.questions.forEach((q, qIdx) => {
+          const group = document.createElement("div");
+          group.className = "ai-question-group";
+
+          const promptEl = document.createElement("div");
+          promptEl.className = "ai-question-prompt";
+          promptEl.textContent = qSet.questions.length > 1 ? `${qIdx + 1}. ${q.prompt}` : q.prompt;
+          group.appendChild(promptEl);
+
+          const optsWrap = document.createElement("div");
+          optsWrap.className = "ai-question-options";
+
+          const syncOptionClasses = () => {
+            const picked = draftSelections[q.id] || [];
+            optsWrap.querySelectorAll(".ai-question-opt").forEach(btn => {
+              const active = picked.includes(btn.dataset.value);
+              btn.classList.toggle("selected", active);
+              btn.setAttribute("aria-pressed", String(active));
+            });
+          };
+
+          q.options.forEach(opt => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = `ai-question-opt${q.multiSelect ? " multi" : ""}`;
+            btn.dataset.value = opt.value;
+            btn.disabled = isAnswered;
+
+            const indicator = document.createElement("span");
+            indicator.className = `ai-question-indicator${q.multiSelect ? " multi" : ""}`;
+            indicator.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`;
+
+            const textWrap = document.createElement("span");
+            textWrap.className = "ai-question-opt-text";
+            const labelEl = document.createElement("span");
+            labelEl.className = "ai-question-opt-label";
+            labelEl.textContent = opt.label;
+            textWrap.appendChild(labelEl);
+            if (opt.description) {
+              const descEl = document.createElement("span");
+              descEl.className = "ai-question-opt-desc";
+              descEl.textContent = opt.description;
+              textWrap.appendChild(descEl);
+            }
+
+            btn.append(indicator, textWrap);
+
+            btn.addEventListener("click", () => {
+              if (isAnswered || chatBusy) return;
+              if (q.multiSelect) {
+                const cur = draftSelections[q.id] || [];
+                draftSelections[q.id] = cur.includes(opt.value)
+                  ? cur.filter(v => v !== opt.value)
+                  : [...cur, opt.value];
+                syncOptionClasses();
+                updateSubmitState();
+              } else {
+                draftSelections[q.id] = [opt.value];
+                syncOptionClasses();
+                if (isInstantSingle) {
+                  finalizeQuestionSet();
+                } else {
+                  updateSubmitState();
+                }
+              }
+            });
+
+            optsWrap.appendChild(btn);
+          });
+
+          syncOptionClasses();
+          group.appendChild(optsWrap);
+
+          if (q.allowCustom && !isAnswered) {
+            const customRow = document.createElement("div");
+            customRow.className = "ai-question-custom-row";
+
+            const customInput = document.createElement("input");
+            customInput.type = "text";
+            customInput.className = "ai-question-custom-input";
+            customInput.placeholder = "Outro (digite sua resposta)...";
+
+            const applyCustomValue = () => {
+              const val = customInput.value.trim();
+              if (!val) return;
+              if (q.multiSelect) {
+                const cur = draftSelections[q.id] || [];
+                if (!cur.includes(val)) draftSelections[q.id] = [...cur, val];
+                updateSubmitState();
+              } else {
+                draftSelections[q.id] = [val];
+                if (isInstantSingle) {
+                  finalizeQuestionSet();
+                } else {
+                  syncOptionClasses();
+                  updateSubmitState();
+                }
+              }
+            };
+
+            customInput.addEventListener("input", () => {
+              if (isInstantSingle) return;
+              const val = customInput.value.trim();
+              const presetVals = new Set(q.options.map(o => o.value));
+              const keptPresets = (draftSelections[q.id] || []).filter(v => presetVals.has(v));
+              if (q.multiSelect) {
+                draftSelections[q.id] = val ? [...keptPresets, val] : keptPresets;
+              } else if (val) {
+                draftSelections[q.id] = [val];
+                syncOptionClasses();
+              } else {
+                draftSelections[q.id] = keptPresets;
+              }
+              updateSubmitState();
+            });
+
+            customInput.addEventListener("keydown", ev => {
+              if (ev.key === "Enter") {
+                ev.preventDefault();
+                applyCustomValue();
+              }
+            });
+
+            customRow.appendChild(customInput);
+
+            if (isInstantSingle) {
+              const customSendBtn = document.createElement("button");
+              customSendBtn.type = "button";
+              customSendBtn.className = "ai-question-custom-send";
+              customSendBtn.textContent = "Enviar";
+              customSendBtn.addEventListener("click", applyCustomValue);
+              customRow.appendChild(customSendBtn);
+            }
+
+            group.appendChild(customRow);
+          }
+
+          qCard.appendChild(group);
+        });
+
+        if (!isInstantSingle && !isAnswered) {
+          const foot = document.createElement("div");
+          foot.className = "ai-question-foot";
+          submitBtn = document.createElement("button");
+          submitBtn.type = "button";
+          submitBtn.className = "ai-action-approve-btn";
+          submitBtn.textContent = "Enviar respostas";
+          submitBtn.addEventListener("click", finalizeQuestionSet);
+          foot.appendChild(submitBtn);
+          qCard.appendChild(foot);
+          updateSubmitState();
+        }
+
+        row.appendChild(qCard);
+      }
+
       row.appendChild(actions);
       chatMessagesEl.appendChild(row);
     });
@@ -7972,20 +8587,37 @@ function initAiTranslatorPanel() {
             text_content: a.text_content || ""
           }))
         }));
+        const appContext = buildAppContextSnapshot(state, {
+          selectedNodeId,
+          settings: {
+            theme: localStorage.getItem("todocompanion.settings.theme") || "claude-dark",
+            cardFontSize: Number(localStorage.getItem("todocompanion.settings.cardFontSize") || 14),
+            linkStyle: localStorage.getItem("todocompanion.settings.linkStyle") || "orthogonal",
+            linkArrows: localStorage.getItem("todocompanion.settings.linkArrows") !== "false",
+            translatorMode: localStorage.getItem("todocompanion.settings.translatorMode") || "manual"
+          }
+        });
         reply = await invoke("ai_chat_english", {
           messages: payloadMessages,
           formality,
-          apiKey: localStorage.getItem(GEMINI_API_KEY_STORAGE) || null
+          apiKey: localStorage.getItem(GEMINI_API_KEY_STORAGE) || null,
+          appContext
         });
       } else {
         reply = await fallbackBrowserTranslate(text || "Analyze attached file", formality, "auto");
       }
 
-      const cleaned = String(reply || "").trim() || "(No response)";
+      const { cleanText: afterActionsText, proposal } = extractAiActionProposal(String(reply || ""));
+      const { cleanText, questionSet } = extractAiQuestions(afterActionsText);
+      const cleaned =
+        cleanText ||
+        (proposal ? proposal.summary : questionSet ? "" : "(No response)");
       session.messages.push({
         role: "model",
         text: cleaned,
-        attachments: []
+        attachments: [],
+        proposal: proposal || null,
+        questionSet: questionSet || null
       });
       session.updatedAt = new Date().toISOString();
       if (panel.hidden || currentMode !== "chat") {
@@ -8033,6 +8665,526 @@ function initAiTranslatorPanel() {
   });
 }
 
+function findUserByAction(action) {
+  if (!state?.users?.length) return null;
+  if (action.userId) {
+    const byId = state.users.find(u => u.id === action.userId);
+    if (byId) return byId;
+  }
+  if (action.userName) {
+    const needle = String(action.userName).trim().toLowerCase();
+    const byName = state.users.find(u => String(u.name || "").trim().toLowerCase() === needle)
+      || state.users.find(u => String(u.name || "").trim().toLowerCase().includes(needle));
+    if (byName) return byName;
+  }
+  return activeUser();
+}
+
+function findTaskByAction(action, ctx) {
+  const user = findUserByAction(action);
+  const searchUsers = user ? [user, ...state.users.filter(u => u.id !== user.id)] : state.users;
+  const targetId = action.taskId === "$LAST_TASK" ? ctx?.lastCreatedTaskId : action.taskId;
+
+  if (targetId) {
+    for (const u of searchUsers) {
+      const t = (u.tasks || []).find(task => task.id === targetId);
+      if (t) return { user: u, task: t };
+    }
+  }
+  if (action.taskTitle) {
+    const needle = String(action.taskTitle).trim().toLowerCase();
+    for (const u of searchUsers) {
+      const t = (u.tasks || []).find(task => String(task.title || "").trim().toLowerCase() === needle)
+        || (u.tasks || []).find(task => String(task.title || "").trim().toLowerCase().includes(needle));
+      if (t) return { user: u, task: t };
+    }
+  }
+  const curUser = activeUser();
+  const curBoard = activeBoard();
+  return curUser && curBoard ? { user: curUser, task: curBoard } : null;
+}
+
+function resolveCardIdRef(rawId, ctx) {
+  if (rawId === "$LAST_CARD") return ctx?.lastCreatedCardId || selectedNodeId;
+  return rawId || selectedNodeId;
+}
+
+function findNodeLocationAcrossApp(cardId, hintAction = null, ctx = null) {
+  if (!state?.users?.length || !cardId) return null;
+  if (hintAction && (hintAction.taskId || hintAction.taskTitle || hintAction.sourceTaskId || hintAction.sourceTaskTitle)) {
+    const hinted = findTaskByAction(
+      {
+        userId: hintAction.userId || hintAction.sourceUserId,
+        userName: hintAction.userName || hintAction.sourceUserName,
+        taskId: hintAction.sourceTaskId || hintAction.taskId,
+        taskTitle: hintAction.sourceTaskTitle || hintAction.taskTitle
+      },
+      ctx
+    );
+    if (hinted) {
+      const node = (hinted.task.nodes || []).find(n => n.id === cardId);
+      if (node) return { user: hinted.user, task: hinted.task, node };
+    }
+  }
+  for (const u of state.users) {
+    for (const t of u.tasks || []) {
+      const node = (t.nodes || []).find(n => n.id === cardId);
+      if (node) return { user: u, task: t, node };
+    }
+  }
+  return null;
+}
+
+function findFreeCardPosition(board, startX, startY, w = 288, h = 144, gap = 48) {
+  const GRID = 24;
+  let x = Math.round((Number(startX) || 96) / GRID) * GRID;
+  let y = Math.round((Number(startY) || 96) / GRID) * GRID;
+  if (!board || !Array.isArray(board.nodes) || !board.nodes.length) {
+    return { x, y };
+  }
+  if (!nodeCollidesWithOthers(board, "__new__", x, y, w, h, gap)) {
+    return { x, y };
+  }
+  // Tenta descer na mesma coluna primeiro (mantendo alinhamento visual)
+  for (let step = 1; step <= 40; step++) {
+    const candY = y + step * (h + gap);
+    if (!nodeCollidesWithOthers(board, "__new__", x, candY, w, h, gap)) {
+      return { x, y: candY };
+    }
+  }
+  // Fallback em espiral/grade para a direita
+  for (let col = 1; col <= 15; col++) {
+    const candX = x + col * (w + gap);
+    for (let row = 0; row <= 20; row++) {
+      const candY = y + row * (h + gap);
+      if (!nodeCollidesWithOthers(board, "__new__", candX, candY, w, h, gap)) {
+        return { x: candX, y: candY };
+      }
+    }
+  }
+  return { x, y };
+}
+
+async function runSingleAiAppAction(action, ctx) {
+  const GRID = 24;
+  switch (action.type) {
+    case "create_user": {
+      const name = String(action.name || "").trim() || "Novo usuário";
+      const user = { id: makeId("user"), name, activeTaskId: null, tasks: [] };
+      state.users.push(user);
+      state.activeUserId = user.id;
+      saveState();
+      render();
+      return { message: `Usuário "${name}" criado` };
+    }
+
+    case "rename_user": {
+      const user = findUserByAction(action);
+      if (!user) throw new Error("Usuário não encontrado");
+      const newName = String(action.newName || "").trim();
+      if (!newName) throw new Error("Novo nome vazio");
+      user.name = newName;
+      saveState();
+      render();
+      return { message: `Usuário renomeado para "${newName}"` };
+    }
+
+    case "delete_user": {
+      const user = findUserByAction(action);
+      if (!user) throw new Error("Usuário não encontrado");
+      const name = user.name;
+      state.users = state.users.filter(u => u.id !== user.id);
+      if (state.activeUserId === user.id) {
+        state.activeUserId = state.users[0]?.id || null;
+      }
+      selectedNodeId = null;
+      selectedLinkId = null;
+      saveState();
+      render();
+      return { message: `Usuário "${name}" excluído` };
+    }
+
+    case "select_user": {
+      const user = findUserByAction(action);
+      if (!user) throw new Error("Usuário não encontrado");
+      state.activeUserId = user.id;
+      selectedNodeId = null;
+      selectedLinkId = null;
+      saveState();
+      render();
+      return { message: `Usuário "${user.name}" selecionado` };
+    }
+
+    case "create_task": {
+      let user = findUserByAction(action);
+      if (!user) {
+        user = { id: makeId("user"), name: action.userName || "Default", activeTaskId: null, tasks: [] };
+        state.users.push(user);
+      }
+      const title = String(action.title || "").trim() || "Nova task";
+      const nextNum = Math.max(0, ...user.tasks.map(t => Number(t.number) || 0)) + 1;
+      const rootId = makeId("root");
+      const task = {
+        id: makeId("board"),
+        number: nextNum,
+        title,
+        status: normalizeStatus(action.status || "ongoing"),
+        priority: normalizePriority(action.priority || "normal"),
+        criticality: clamp(Number(action.criticality ?? 0), 0, 2),
+        startDate: action.startDate || "",
+        endDate: action.endDate || "",
+        attachments: [],
+        view: { panX: 80, panY: 80, zoom: 1 },
+        nodes: [{ id: rootId, title, body: "", status: "ongoing", x: 96, y: 120, w: 288, h: 96 }],
+        links: []
+      };
+      user.tasks.push(task);
+      state.activeUserId = user.id;
+      user.activeTaskId = task.id;
+      selectedNodeId = null;
+      selectedLinkId = null;
+      saveState();
+      render();
+      return { createdTaskId: task.id, message: `Task "${title}" criada em ${user.name}` };
+    }
+
+    case "update_task": {
+      const found = findTaskByAction(action, ctx);
+      if (!found) throw new Error("Task não encontrada");
+      const { task } = found;
+      if (action.title) {
+        task.title = String(action.title).trim();
+        if (task.nodes[0]) task.nodes[0].title = task.title;
+      }
+      if (action.status) task.status = normalizeStatus(action.status);
+      if (action.priority) task.priority = normalizePriority(action.priority);
+      if (action.criticality !== undefined) task.criticality = clamp(Number(action.criticality), 0, 2);
+      if (action.startDate !== undefined) task.startDate = String(action.startDate || "");
+      if (action.endDate !== undefined) task.endDate = String(action.endDate || "");
+      saveState();
+      render();
+      return { message: `Task "${task.title}" atualizada` };
+    }
+
+    case "delete_task": {
+      const found = findTaskByAction(action, ctx);
+      if (!found) throw new Error("Task não encontrada");
+      const { user, task } = found;
+      user.tasks = user.tasks.filter(t => t.id !== task.id);
+      if (user.activeTaskId === task.id) {
+        user.activeTaskId = user.tasks[0]?.id || null;
+      }
+      selectedNodeId = null;
+      selectedLinkId = null;
+      saveState();
+      render();
+      return { message: `Task "${task.title}" excluída` };
+    }
+
+    case "duplicate_task": {
+      const found = findTaskByAction(action, ctx);
+      if (!found) throw new Error("Task não encontrada");
+      const { user, task } = found;
+      const clone = JSON.parse(JSON.stringify(task));
+      const nextNum = Math.max(0, ...user.tasks.map(t => Number(t.number) || 0)) + 1;
+      clone.id = makeId("board");
+      clone.number = nextNum;
+      clone.title = `${task.title} (cópia)`;
+      const idMap = new Map();
+      clone.nodes = (clone.nodes || []).map((n, idx) => {
+        const nextId = makeId(idx === 0 ? "root" : "action");
+        idMap.set(n.id, nextId);
+        return { ...n, id: nextId, title: idx === 0 ? clone.title : n.title };
+      });
+      clone.links = (clone.links || []).map(l => ({
+        ...l,
+        id: makeId("link"),
+        from: idMap.get(l.from) || l.from,
+        to: idMap.get(l.to) || l.to
+      }));
+      user.tasks.push(clone);
+      state.activeUserId = user.id;
+      user.activeTaskId = clone.id;
+      saveState();
+      render();
+      return { createdTaskId: clone.id, message: `Task duplicada como "${clone.title}"` };
+    }
+
+    case "select_task": {
+      const found = findTaskByAction(action, ctx);
+      if (!found) throw new Error("Task não encontrada");
+      state.activeUserId = found.user.id;
+      found.user.activeTaskId = found.task.id;
+      selectedNodeId = null;
+      selectedLinkId = null;
+      saveState();
+      render();
+      centerCanvasOnTasks();
+      return { message: `Task "${found.task.title}" aberta` };
+    }
+
+    case "create_card": {
+      const target = (action.taskId || action.taskTitle || action.userName || action.userId)
+        ? findTaskByAction(action, ctx)
+        : (activeUser() && activeBoard() ? { user: activeUser(), task: activeBoard() } : null);
+      const board = target?.task;
+      if (!board) throw new Error("Nenhuma task encontrada para criar o card");
+      let bodyText = String(action.body || "");
+      if (Array.isArray(action.tableRows) && action.tableRows.length > 0) {
+        const token = serializeTableToken({ rows: action.tableRows });
+        bodyText = bodyText ? `${bodyText}\n${token}` : token;
+      }
+      const parentRef = action.parentCardId === "$LAST_CARD" ? ctx?.lastCreatedCardId : action.parentCardId;
+      const parentId =
+        parentRef && board.nodes.some(n => n.id === parentRef)
+          ? parentRef
+          : board.nodes[0]?.id || null;
+      const id = makeId("action");
+      const rawPos = parentId ? getReplyActionPosition(board, parentId) : getViewportActionPosition();
+      const freePos = findFreeCardPosition(board, rawPos.x, rawPos.y, 288, 144, 48);
+      const newNode = {
+        id,
+        title: "",
+        body: bodyText,
+        status: normalizeStatus(action.status || "ongoing"),
+        criticality: clamp(Number(action.criticality ?? 0), 0, 2),
+        createdAt: new Date().toISOString(),
+        x: freePos.x,
+        y: freePos.y,
+        w: 288,
+        h: 144
+      };
+      if (parentId) {
+        board.nodes.splice(getReplyInsertionIndex(board, parentId), 0, newNode);
+        board.links.push({ id: makeId("link"), from: parentId, to: id, fromPort: "out", toPort: "in" });
+      } else {
+        board.nodes.push(newNode);
+      }
+      if (board === activeBoard()) {
+        pendingCardPop.add(id);
+        selectedNodeId = id;
+      }
+      saveState();
+      render();
+      const cardEl = nodesLayer.querySelector(`[data-id="${id}"]`);
+      if (cardEl) scheduleNodeHeightSync(id, cardEl);
+      return { createdCardId: id, message: `Card criado em "${board.title}"` };
+    }
+
+    case "update_card": {
+      const targetId = resolveCardIdRef(action.cardId, ctx);
+      const loc = findNodeLocationAcrossApp(targetId, action, ctx);
+      if (!loc) throw new Error("Card não encontrado");
+      const { node, task } = loc;
+      if (action.body !== undefined) {
+        setNodeContent(node, String(action.body));
+      } else if (action.appendBody) {
+        const cur = String(getNodeContent(node) || "").trim();
+        setNodeContent(node, cur ? `${cur}\n${action.appendBody}` : String(action.appendBody));
+      }
+      if (action.status) node.status = normalizeStatus(action.status);
+      if (action.criticality !== undefined) node.criticality = clamp(Number(action.criticality), 0, 2);
+      saveState();
+      render();
+      return { message: `Card atualizado em "${task.title}"` };
+    }
+
+    case "delete_card": {
+      const targetId = resolveCardIdRef(action.cardId, ctx);
+      const loc = findNodeLocationAcrossApp(targetId, action, ctx);
+      if (!loc || isRootNode(loc.task, loc.node.id)) {
+        throw new Error("Card não encontrado ou é o card principal");
+      }
+      const { task } = loc;
+      task.nodes = task.nodes.filter(n => n.id !== targetId);
+      task.links = task.links.filter(l => l.from !== targetId && l.to !== targetId);
+      if (selectedNodeId === targetId) selectedNodeId = null;
+      saveState();
+      render();
+      return { message: `Card excluído de "${task.title}"` };
+    }
+
+    case "duplicate_card": {
+      const targetId = resolveCardIdRef(action.cardId, ctx);
+      const loc = findNodeLocationAcrossApp(targetId, action, ctx);
+      if (!loc || isRootNode(loc.task, loc.node.id)) throw new Error("Card não encontrado");
+      const { task: board, node: orig } = loc;
+      const id = makeId("action");
+      const cloneW = orig.w || 288;
+      const cloneH = nodeHeight(orig);
+      const freePos = findFreeCardPosition(board, orig.x, orig.y + cloneH + 48, cloneW, cloneH, 48);
+      const clone = {
+        ...JSON.parse(JSON.stringify(orig)),
+        id,
+        createdAt: new Date().toISOString(),
+        x: freePos.x,
+        y: freePos.y
+      };
+      board.nodes.push(clone);
+      if (board === activeBoard()) selectedNodeId = id;
+      saveState();
+      render();
+      return { createdCardId: id, message: `Card duplicado em "${board.title}"` };
+    }
+
+    case "copy_card_to_task":
+    case "move_card_to_task": {
+      const srcId = resolveCardIdRef(action.sourceCardId || action.cardId, ctx);
+      const srcLoc = findNodeLocationAcrossApp(srcId, action, ctx);
+      if (!srcLoc || isRootNode(srcLoc.task, srcLoc.node.id)) {
+        throw new Error("Card de origem não encontrado");
+      }
+      const targetFound = findTaskByAction(
+        {
+          userId: action.targetUserId,
+          userName: action.targetUserName,
+          taskId: action.targetTaskId,
+          taskTitle: action.targetTaskTitle
+        },
+        ctx
+      );
+      if (!targetFound) throw new Error("Task de destino não encontrada");
+      const destBoard = targetFound.task;
+      const parentId = destBoard.nodes[0]?.id || null;
+      const newId = makeId("action");
+      const w = srcLoc.node.w || 288;
+      const h = srcLoc.node.h || 144;
+      const rawPos = parentId ? getReplyActionPosition(destBoard, parentId) : { x: 96, y: 120 };
+      const freePos = findFreeCardPosition(destBoard, rawPos.x, rawPos.y, w, h, 48);
+      const copied = {
+        ...JSON.parse(JSON.stringify(srcLoc.node)),
+        id: newId,
+        createdAt: new Date().toISOString(),
+        x: freePos.x,
+        y: freePos.y
+      };
+      if (parentId) {
+        destBoard.nodes.splice(getReplyInsertionIndex(destBoard, parentId), 0, copied);
+        destBoard.links.push({ id: makeId("link"), from: parentId, to: newId, fromPort: "out", toPort: "in" });
+      } else {
+        destBoard.nodes.push(copied);
+      }
+      if (action.type === "move_card_to_task") {
+        srcLoc.task.nodes = srcLoc.task.nodes.filter(n => n.id !== srcLoc.node.id);
+        srcLoc.task.links = srcLoc.task.links.filter(l => l.from !== srcLoc.node.id && l.to !== srcLoc.node.id);
+        if (selectedNodeId === srcLoc.node.id) selectedNodeId = null;
+      }
+      saveState();
+      render();
+      return {
+        createdCardId: newId,
+        message: `${action.type === "move_card_to_task" ? "Card movido" : "Card copiado"} de "${srcLoc.task.title}" para "${destBoard.title}"`
+      };
+    }
+
+    case "focus_card": {
+      const targetId = resolveCardIdRef(action.cardId, ctx);
+      const loc = findNodeLocationAcrossApp(targetId, action, ctx);
+      if (!loc) throw new Error("Card não encontrado");
+      state.activeUserId = loc.user.id;
+      loc.user.activeTaskId = loc.task.id;
+      saveState();
+      render();
+      focusCardOnNode(loc.node.id);
+      return { message: `Card exibido em "${loc.task.title}"` };
+    }
+
+    case "connect_cards": {
+      const fromId = resolveCardIdRef(action.fromCardId, ctx);
+      const toId = resolveCardIdRef(action.toCardId, ctx);
+      if (!addLink(fromId, toId, "out", "in")) {
+        throw new Error("Não foi possível conectar os cards");
+      }
+      saveState();
+      renderLinks();
+      return { message: "Cards conectados" };
+    }
+
+    case "disconnect_cards": {
+      const board = activeBoard();
+      if (!board) throw new Error("Nenhuma task ativa");
+      board.links = board.links.filter(l => !(l.from === action.fromCardId && l.to === action.toCardId));
+      saveState();
+      renderLinks();
+      return { message: "Conexão removida" };
+    }
+
+    case "organize_canvas": {
+      organizeCanvasCards();
+      return { message: "Canvas organizado" };
+    }
+
+    case "center_canvas": {
+      centerCanvasOnTasks();
+      return { message: "Canvas centralizado" };
+    }
+
+    case "copy_text": {
+      const text = String(action.text || "");
+      await navigator.clipboard.writeText(text);
+      return { message: "Texto copiado para a área de transferência" };
+    }
+
+    case "set_status_filter": {
+      const f = ["all", "ongoing", "stopped", "complete"].includes(action.filter) ? action.filter : "all";
+      taskStatusFilter = f;
+      localStorage.setItem(TASKS_STATUS_FILTER_KEY, f);
+      tasksStatusFilter?.querySelectorAll("[data-filter]").forEach(btn => {
+        const active = btn.dataset.filter === f;
+        btn.classList.toggle("active", active);
+        btn.setAttribute("aria-selected", String(active));
+      });
+      renderUserTasks();
+      return { message: `Filtro alterado para "${f}"` };
+    }
+
+    case "open_translator": {
+      if (typeof window.toggleAiTranslatorPanel === "function") {
+        window.toggleAiTranslatorPanel(true, "translate");
+      }
+      if (action.floating) {
+        document.getElementById("aiDetachTranslatorBtn")?.click();
+      }
+      return { message: "Tradutor aberto" };
+    }
+
+    case "open_settings": {
+      document.getElementById("openSettingsButton")?.click();
+      return { message: "Configurações abertas" };
+    }
+
+    case "update_settings": {
+      if (action.theme && ["claude-dark", "light-claude", "dracula"].includes(action.theme)) {
+        localStorage.setItem("todocompanion.settings.theme", action.theme);
+        if (action.theme === "claude-dark") delete document.documentElement.dataset.theme;
+        else document.documentElement.dataset.theme = action.theme;
+      }
+      if (action.cardFontSize) {
+        const sz = clamp(Number(action.cardFontSize), 10, 36);
+        localStorage.setItem("todocompanion.settings.cardFontSize", String(sz));
+        document.documentElement.style.setProperty("--card-font-size", `${sz}px`);
+        window.dispatchEvent(new CustomEvent("app:card-font-size-changed", { detail: { fontSize: sz } }));
+      }
+      if (action.linkStyle === "orthogonal" || action.linkStyle === "bezier") {
+        localStorage.setItem("todocompanion.settings.linkStyle", action.linkStyle);
+        window.dispatchEvent(new CustomEvent("app:link-style-changed"));
+      }
+      if (typeof action.linkArrows === "boolean") {
+        localStorage.setItem("todocompanion.settings.linkArrows", String(action.linkArrows));
+        window.dispatchEvent(new CustomEvent("app:link-style-changed"));
+      }
+      if (action.translatorMode === "auto" || action.translatorMode === "manual") {
+        localStorage.setItem("todocompanion.settings.translatorMode", action.translatorMode);
+        window.dispatchEvent(new CustomEvent("app:translator-mode-changed"));
+      }
+      return { message: "Configurações atualizadas" };
+    }
+
+    default:
+      throw new Error(`Ação não suportada: ${action.type}`);
+  }
+}
+
 function insertAiTextIntoActiveCanvas(text) {
   const board = activeBoard();
   if (!board || !text) return;
@@ -8055,16 +9207,16 @@ function insertAiTextIntoActiveCanvas(text) {
 
   const parentId = board.nodes[0]?.id || null;
   const id = makeId("action");
-  const GRID = 24;
-  const pos = parentId ? getReplyActionPosition(board, parentId) : getViewportActionPosition();
+  const rawPos = parentId ? getReplyActionPosition(board, parentId) : getViewportActionPosition();
+  const freePos = findFreeCardPosition(board, rawPos.x, rawPos.y, 288, 144, 48);
   const newNode = {
     id,
     title: "",
     body: text,
     status: "ongoing",
     createdAt: new Date().toISOString(),
-    x: Math.round(pos.x / GRID) * GRID,
-    y: Math.round(pos.y / GRID) * GRID,
+    x: freePos.x,
+    y: freePos.y,
     w: 288,
     h: 144
   };

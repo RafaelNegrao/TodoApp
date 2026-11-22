@@ -11,13 +11,16 @@ const linkStyleInput = document.querySelector("#settingsLinkStyleInput");
 const linkArrowsInput = document.querySelector("#settingsLinkArrowsInput");
 const themeInput = document.querySelector("#settingsThemeInput");
 const cardFontSizeInput = document.querySelector("#settingsCardFontSizeInput");
+const cardFontSizeValue = document.querySelector("#settingsCardFontSizeValue");
 const lineageHoverInput = document.querySelector("#settingsLineageHoverInput");
+const translatorAutoInput = document.querySelector("#settingsTranslatorAutoInput");
 
 const LINK_STYLE_KEY = "todocompanion.settings.linkStyle";
 const LINK_ARROWS_KEY = "todocompanion.settings.linkArrows";
 const LINEAGE_HOVER_KEY = "todocompanion.settings.lineageHover";
 const THEME_KEY = "todocompanion.settings.theme";
 const CARD_FONT_SIZE_KEY = "todocompanion.settings.cardFontSize";
+const TRANSLATOR_MODE_KEY = "todocompanion.settings.translatorMode";
 const THEMES = ["claude-dark", "light-claude", "dracula"];
 const DEFAULT_THEME = "claude-dark";
 const MIN_CARD_FONT_SIZE = 1;
@@ -57,6 +60,9 @@ function currentCardFontSize() {
 function applyCardFontSize(fontSize) {
   const size = parseCardFontSize(fontSize);
   document.documentElement.style.setProperty("--card-font-size", `${size}px`);
+  if (cardFontSizeValue) {
+    cardFontSizeValue.textContent = `${size}px`;
+  }
 }
 
 function persistCardFontSize(event) {
@@ -103,7 +109,14 @@ async function loadSettings() {
     themeInput.value = currentTheme();
   }
   if (cardFontSizeInput) {
-    cardFontSizeInput.value = currentCardFontSize();
+    const size = currentCardFontSize();
+    cardFontSizeInput.value = String(size);
+    if (cardFontSizeValue) {
+      cardFontSizeValue.textContent = `${size}px`;
+    }
+  }
+  if (translatorAutoInput) {
+    translatorAutoInput.checked = localStorage.getItem(TRANSLATOR_MODE_KEY) === "auto";
   }
 
   if (!invoke) return;
@@ -161,6 +174,25 @@ function persistLineageHover(event) {
   localStorage.setItem(LINEAGE_HOVER_KEY, event.target.checked ? "true" : "false");
 }
 
+function persistTranslatorMode(event) {
+  localStorage.setItem(TRANSLATOR_MODE_KEY, event.target.checked ? "auto" : "manual");
+  window.dispatchEvent(new CustomEvent("app:translator-mode-changed"));
+}
+
+function selectSettingsTab(tabName) {
+  if (!modal) return;
+  modal.querySelectorAll("[data-settings-tab]").forEach((btn) => {
+    const isActive = btn.dataset.settingsTab === tabName;
+    btn.classList.toggle("active", isActive);
+    btn.setAttribute("aria-selected", String(isActive));
+  });
+  modal.querySelectorAll("[data-settings-pane]").forEach((pane) => {
+    const isActive = pane.dataset.settingsPane === tabName;
+    pane.hidden = !isActive;
+    pane.classList.toggle("active", isActive);
+  });
+}
+
 function hideApp() {
   if (invoke) {
     invoke("hide_window").catch(err => console.warn("[settings] hide_window failed", err));
@@ -183,6 +215,10 @@ export function initSettings() {
   lineageHoverInput?.addEventListener("change", persistLineageHover);
   cardFontSizeInput?.addEventListener("change", persistCardFontSize);
   cardFontSizeInput?.addEventListener("input", persistCardFontSize);
+  translatorAutoInput?.addEventListener("change", persistTranslatorMode);
+  modal.querySelectorAll("[data-settings-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => selectSettingsTab(btn.dataset.settingsTab));
+  });
   applyTheme(currentTheme());
   applyCardFontSize(currentCardFontSize());
 

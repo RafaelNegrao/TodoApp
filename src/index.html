@@ -304,7 +304,7 @@
             <div class="ai-translate-boxes-wrap">
               <div class="ai-input-box">
                 <span class="ai-box-lang-watermark" id="aiInputLangWatermark" aria-hidden="true">PORTUGUÊS</span>
-                <textarea id="aiTranslateInput" placeholder="Digite ou cole aqui... (Enter traduz)" spellcheck="false"></textarea>
+                <textarea id="aiTranslateInput" spellcheck="false" aria-label="Texto para traduzir"></textarea>
                 <button class="ai-clear-input" id="aiTranslateClearBtn" type="button" title="Clear text" aria-label="Clear text" hidden>×</button>
                 <div class="ai-input-foot">
                   <span class="ai-input-hint">Enter traduz</span>
@@ -457,44 +457,108 @@
 
       <div class="modal-backdrop" id="settingsModal" hidden>
         <div class="canvas-modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
-          <header>
+          <header class="settings-header">
             <strong id="settingsModalTitle">Settings</strong>
-            <button class="modal-icon" id="settingsCloseIcon" type="button" aria-label="Close" title="Close">x</button>
+            <button class="modal-icon" id="settingsCloseIcon" type="button" aria-label="Close" title="Close">×</button>
           </header>
-          <div class="settings-row">
-            <span class="settings-label">Version</span>
-            <span class="settings-value" id="settingsVersionValue">—</span>
+          <div class="settings-layout">
+            <nav class="settings-nav" role="tablist" aria-label="Settings categories">
+              <button class="settings-nav-item active" type="button" role="tab" aria-selected="true" data-settings-tab="general">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <span>Geral</span>
+              </button>
+              <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="appearance">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18V3z"/></svg>
+                <span>Aparência</span>
+              </button>
+              <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="canvas">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="6" height="5" rx="1.4"/><rect x="15" y="15" width="6" height="5" rx="1.4"/><path d="M9 6.5h4a2 2 0 0 1 2 2v6.5"/></svg>
+                <span>Canvas</span>
+              </button>
+              <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="translator">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
+                <span>Tradutor</span>
+              </button>
+            </nav>
+
+            <div class="settings-content">
+              <section class="settings-pane active" data-settings-pane="general">
+                <h4 class="settings-pane-title">Geral</h4>
+                <label class="settings-row settings-toggle">
+                  <div class="settings-row-copy">
+                    <span class="settings-label">Iniciar com o Windows</span>
+                    <small class="settings-desc">Abre automaticamente em segundo plano ao ligar o PC</small>
+                  </div>
+                  <input type="checkbox" id="settingsAutostartInput" />
+                  <span class="settings-switch" aria-hidden="true"></span>
+                </label>
+                <div class="settings-row">
+                  <div class="settings-row-copy">
+                    <span class="settings-label">Versão instalada</span>
+                    <small class="settings-desc">TODOCompanion</small>
+                  </div>
+                  <span class="settings-value" id="settingsVersionValue">—</span>
+                </div>
+              </section>
+
+              <section class="settings-pane" data-settings-pane="appearance" hidden>
+                <h4 class="settings-pane-title">Aparência</h4>
+                <label class="settings-row">
+                  <div class="settings-row-copy">
+                    <span class="settings-label">Tema</span>
+                    <small class="settings-desc">Esquema de cores da interface</small>
+                  </div>
+                  <select class="settings-select" id="settingsThemeInput">
+                    <option value="claude-dark">Dark</option>
+                    <option value="light-claude">White</option>
+                    <option value="dracula">Dracula</option>
+                  </select>
+                </label>
+                <label class="settings-row">
+                  <div class="settings-row-copy">
+                    <span class="settings-label">Tamanho da fonte</span>
+                    <small class="settings-desc">Texto interno dos cards</small>
+                  </div>
+                  <div class="settings-slider-control">
+                    <input type="range" class="settings-range-slider" id="settingsCardFontSizeInput" min="10" max="36" step="1" value="14" aria-label="Tamanho da fonte dos cards" />
+                    <span class="settings-range-value" id="settingsCardFontSizeValue">14px</span>
+                  </div>
+                </label>
+              </section>
+
+              <section class="settings-pane" data-settings-pane="canvas" hidden>
+                <h4 class="settings-pane-title">Canvas</h4>
+                <label class="settings-row settings-toggle">
+                  <div class="settings-row-copy">
+                    <span class="settings-label">Linhas retas nas conexões</span>
+                    <small class="settings-desc">Usa ângulos retos em vez de curvas suaves</small>
+                  </div>
+                  <input type="checkbox" id="settingsLinkStyleInput" />
+                  <span class="settings-switch" aria-hidden="true"></span>
+                </label>
+                <label class="settings-row settings-toggle">
+                  <div class="settings-row-copy">
+                    <span class="settings-label">Mostrar setas nas conexões</span>
+                    <small class="settings-desc">Exibe a ponta direcional ao ligar dois cards</small>
+                  </div>
+                  <input type="checkbox" id="settingsLinkArrowsInput" />
+                  <span class="settings-switch" aria-hidden="true"></span>
+                </label>
+              </section>
+
+              <section class="settings-pane" data-settings-pane="translator" hidden>
+                <h4 class="settings-pane-title">Tradutor</h4>
+                <label class="settings-row settings-toggle">
+                  <div class="settings-row-copy">
+                    <span class="settings-label">Tradução simultânea</span>
+                    <small class="settings-desc">Traduz automaticamente 100ms após parar de editar (sem precisar clicar no botão)</small>
+                  </div>
+                  <input type="checkbox" id="settingsTranslatorAutoInput" />
+                  <span class="settings-switch" aria-hidden="true"></span>
+                </label>
+              </section>
+            </div>
           </div>
-          <label class="settings-row">
-            <span class="settings-label">Theme</span>
-            <select class="settings-select" id="settingsThemeInput">
-              <option value="claude-dark">Dark</option>
-              <option value="light-claude">White</option>
-              <option value="dracula">Dracula</option>
-            </select>
-          </label>
-          <label class="settings-row">
-            <span class="settings-label">Card font size</span>
-            <input type="number" class="settings-number-input" id="settingsCardFontSizeInput" min="1" max="99" step="1" />
-          </label>
-          <label class="settings-row settings-toggle">
-            <span class="settings-label">Start with Windows</span>
-            <input type="checkbox" id="settingsAutostartInput" />
-            <span class="settings-switch" aria-hidden="true"></span>
-          </label>
-          <label class="settings-row settings-toggle">
-            <span class="settings-label">Straight lines on canvas</span>
-            <input type="checkbox" id="settingsLinkStyleInput" />
-            <span class="settings-switch" aria-hidden="true"></span>
-          </label>
-          <label class="settings-row settings-toggle">
-            <span class="settings-label">Show arrow on card connections</span>
-            <input type="checkbox" id="settingsLinkArrowsInput" />
-            <span class="settings-switch" aria-hidden="true"></span>
-          </label>
-          <footer>
-            <button class="modal-button secondary" id="settingsDoneButton" type="button">Close</button>
-          </footer>
         </div>
       </div>
 
