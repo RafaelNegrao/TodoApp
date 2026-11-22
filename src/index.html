@@ -205,7 +205,29 @@
           <input class="canvas-attach-input" id="canvasAttachInput" type="file" multiple hidden />
           <div class="recording-indicator" id="recordingIndicator" hidden>
             <span id="recordingIndicatorText"></span>
+            <button class="recording-indicator-target" id="recordingIndicatorTarget" type="button" title="Ir para a task em gravação" hidden></button>
             <button class="recording-indicator-stop" id="recordingIndicatorStop" type="button" aria-label="Stop">Stop</button>
+          </div>
+          <div class="record-mode-popup" id="recordModePopup" role="menu" aria-label="Modo de gravação" hidden>
+            <div class="record-mode-head">Iniciar gravação</div>
+            <button class="record-mode-option" type="button" role="menuitem" data-record-mode="all">
+              <span class="record-mode-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>
+              </span>
+              <span class="record-mode-copy">
+                <strong>Tela + Áudio</strong>
+                <small>Vídeo da tela, microfone e áudio do PC</small>
+              </span>
+            </button>
+            <button class="record-mode-option" type="button" role="menuitem" data-record-mode="audio">
+              <span class="record-mode-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4M8 21h8"/></svg>
+              </span>
+              <span class="record-mode-copy">
+                <strong>Apenas Áudio</strong>
+                <small>Somente microfone e áudio do PC</small>
+              </span>
+            </button>
           </div>
           <div class="attachments-popup" id="attachmentsPopup" hidden>
             <div class="attachments-list" id="attachmentsList"></div>

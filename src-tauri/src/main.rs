@@ -803,18 +803,18 @@ mod win_screen_recorder {
         GetCursorPos, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
     };
 
-    // Qualidade nativa 1:1 (Full HD 1920x1080 / 1920x1200 sem downscale) com H.264 High Profile a 6.5 Mbps:
-    // - Captura 1:1 copia cada linha via memcpy (SIMD), sendo mais rapida na CPU do que redimensionar pixels
-    //   e mantendo textos, codigo e interfaces 100% nitidos!
-    // - O encoding H.264 roda via hardware (Intel QuickSync) na GPU integrada do Core i5.
-    const VIDEO_FPS: u32 = 15;
-    const VIDEO_BITRATE: u32 = 6_500_000;
+    // Gravacao compacta e nitida (Full HD 1:1 com H.264 High Profile a 800 kbps @ 10 fps):
+    // - ~6.5 MB/min (~125 MB em 20 min, ~8x menor que 6.5 Mbps) mantendo textos e codigo nitidos.
+    // - O encoding H.264 roda via hardware (Intel QuickSync / GPU) quando disponivel.
+    const VIDEO_FPS: u32 = 10;
+    const VIDEO_BITRATE: u32 = 800_000;
     const MAX_VIDEO_WIDTH: i32 = 1920;
     const MAX_VIDEO_HEIGHT: i32 = 1200;
     const H264_PROFILE_HIGH: u32 = 100;
     const AUDIO_SAMPLE_RATE: u32 = 48_000;
     const AUDIO_CHANNELS: u32 = 1;
     const AUDIO_BITS_PER_SAMPLE: u32 = 16;
+    const AUDIO_AVG_BYTES_PER_SEC: u32 = 8_000; // 64 kbps AAC mono (~0.48 MB/min)
     const HNS_PER_SEC: i64 = 10_000_000;
     // Buffer circular maximo de 1 segundo por canal (evita crescimento de RAM em gravacoes longas)
     const MAX_RING_SAMPLES: usize = AUDIO_SAMPLE_RATE as usize;
@@ -1021,7 +1021,7 @@ mod win_screen_recorder {
             .SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, AUDIO_BITS_PER_SAMPLE)
             .map_err(|e| e.to_string())?;
         out_type
-            .SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 12_000)
+            .SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, AUDIO_AVG_BYTES_PER_SEC)
             .map_err(|e| e.to_string())?;
 
         let stream_index = writer.AddStream(&out_type).map_err(|e| e.to_string())?;
@@ -1327,10 +1327,11 @@ mod win_screen_recorder {
         output_path: PathBuf,
         running: Arc<AtomicBool>,
         ready_tx: mpsc::Sender<Result<(), String>>,
+        audio_only: bool,
     ) -> thread::JoinHandle<Result<(), String>> {
         thread::spawn(move || unsafe {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-            let result = run_recorder_loop(&output_path, &running, &ready_tx);
+            let result = run_recorder_loop(&output_path, &running, &ready_tx, audio_only);
             CoUninitialize();
             result
         })
@@ -1340,6 +1341,7 @@ mod win_screen_recorder {
         output_path: &Path,
         running: &Arc<AtomicBool>,
         ready_tx: &mpsc::Sender<Result<(), String>>,
+        audio_only: bool,
     ) -> Result<(), String> {
         MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET).map_err(|e| {
             let msg = format!("MFStartup falhou: {e}");
@@ -1347,9 +1349,133 @@ mod win_screen_recorder {
             msg
         })?;
 
-        let res = run_recorder_inner(output_path, running, ready_tx);
+        let res = if audio_only {
+            run_audio_only_inner(output_path, running, ready_tx)
+        } else {
+            run_recorder_inner(output_path, running, ready_tx)
+        };
         let _ = MFShutdown();
         res
+    }
+
+    unsafe fn run_audio_only_inner(
+        output_path: &Path,
+        running: &Arc<AtomicBool>,
+        ready_tx: &mpsc::Sender<Result<(), String>>,
+    ) -> Result<(), String> {
+        let wide_url: Vec<u16> = output_path
+            .as_os_str()
+            .to_string_lossy()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let writer: IMFSinkWriter = match create_optimized_sink_writer(&wide_url) {
+            Ok(w) => w,
+            Err(err) => {
+                let _ = ready_tx.send(Err(err.clone()));
+                return Err(err);
+            }
+        };
+
+        let audio_stream = match configure_audio_streams(&writer) {
+            Ok(idx) => idx,
+            Err(err) => {
+                let _ = ready_tx.send(Err(err.clone()));
+                return Err(err);
+            }
+        };
+
+        if let Err(e) = writer.BeginWriting() {
+            let err = format!("BeginWriting (audio) falhou: {e}");
+            let _ = ready_tx.send(Err(err.clone()));
+            return Err(err);
+        }
+
+        let mic_buf = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(MAX_RING_SAMPLES)));
+        let sys_buf = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(MAX_RING_SAMPLES)));
+        let host = cpal::default_host();
+
+        let _mic_stream = host.default_input_device().and_then(|dev| {
+            let cfg = dev.default_input_config().ok()?;
+            let s = build_48k_stream(&dev, &cfg, Arc::clone(&mic_buf))?;
+            s.play().ok()?;
+            Some(s)
+        });
+
+        let _sys_stream = host.default_output_device().and_then(|dev| {
+            let cfg = dev.default_output_config().ok()?;
+            let s = build_48k_stream(&dev, &cfg, Arc::clone(&sys_buf))?;
+            s.play().ok()?;
+            Some(s)
+        });
+
+        let _ = ready_tx.send(Ok(()));
+
+        let start_instant = Instant::now();
+        let tick_interval = Duration::from_millis(50);
+        let mut prev_wall_hns: i64 = 0;
+        let mut media_cursor_hns: i64 = 0;
+        let mut pcm_bytes = Vec::<u8>::with_capacity((AUDIO_SAMPLE_RATE as usize / 2) * 2);
+
+        while running.load(Ordering::Relaxed) {
+            let loop_tick = Instant::now();
+            let now_wall_hns = (start_instant.elapsed().as_secs_f64() * (HNS_PER_SEC as f64)) as i64;
+            let raw_delta_hns = (now_wall_hns - prev_wall_hns).max(HNS_PER_SEC / 40);
+            prev_wall_hns = now_wall_hns;
+
+            let step_hns_approx = raw_delta_hns.clamp(HNS_PER_SEC / 25, HNS_PER_SEC / 3);
+            let step_samples = (((step_hns_approx as i128) * (AUDIO_SAMPLE_RATE as i128))
+                / (HNS_PER_SEC as i128))
+                .max(480) as usize;
+            let exact_step_hns =
+                ((step_samples as i64) * HNS_PER_SEC) / (AUDIO_SAMPLE_RATE as i64);
+
+            pcm_bytes.clear();
+            let mut mb_guard = mic_buf.lock().ok();
+            let mut sb_guard = sys_buf.lock().ok();
+
+            for _ in 0..step_samples {
+                let m_raw = mb_guard.as_mut().and_then(|q| q.pop_front()).unwrap_or(0.0);
+                let s_raw = sb_guard.as_mut().and_then(|q| q.pop_front()).unwrap_or(0.0);
+                let m = (m_raw * 1.6).clamp(-1.0, 1.0);
+                let s = s_raw.clamp(-1.0, 1.0);
+                let mixed = if m.abs() > 0.001 && s.abs() > 0.001 {
+                    (m + s) * 0.75
+                } else {
+                    m + s
+                };
+                let sample_i16 = (mixed.clamp(-1.0, 1.0) * 32767.0) as i16;
+                pcm_bytes.extend_from_slice(&sample_i16.to_le_bytes());
+            }
+
+            drop(mb_guard);
+            drop(sb_guard);
+
+            let _ = write_mf_sample(
+                &writer,
+                audio_stream,
+                &pcm_bytes,
+                media_cursor_hns,
+                exact_step_hns,
+            );
+
+            media_cursor_hns += exact_step_hns;
+
+            let spent = loop_tick.elapsed();
+            if spent < tick_interval {
+                thread::sleep(tick_interval - spent);
+            }
+        }
+
+        drop(_mic_stream);
+        drop(_sys_stream);
+
+        if let Err(e) = writer.Finalize() {
+            eprintln!("[audio-rec] writer.Finalize warning/error: {e}");
+        }
+
+        Ok(())
     }
 
     unsafe fn run_recorder_inner(
@@ -1661,10 +1787,12 @@ async fn native_screen_recording_start(
     user_id: String,
     sub_dir: Option<String>,
     file_name: String,
+    audio_only: Option<bool>,
 ) -> Result<RecordingTarget, String> {
+    let is_audio_only = audio_only.unwrap_or(false);
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (app, state, user_id, sub_dir, file_name);
+        let _ = (app, state, user_id, sub_dir, file_name, is_audio_only);
         return Err("Gravacao nativa disponivel apenas no Windows".to_string());
     }
 
@@ -1689,17 +1817,19 @@ async fn native_screen_recording_start(
         }
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
-        let mp4_name = if file_name.to_lowercase().ends_with(".mp4") {
+        let target_ext = if is_audio_only { ".m4a" } else { ".mp4" };
+        let default_stem = if is_audio_only { "Audio" } else { "Recording" };
+        let media_name = if file_name.to_lowercase().ends_with(target_ext) {
             file_name
         } else {
             let stem = Path::new(&file_name)
                 .file_stem()
                 .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| "Recording".to_string());
-            format!("{stem}.mp4")
+                .unwrap_or_else(|| default_stem.to_string());
+            format!("{stem}{target_ext}")
         };
 
-        let stored_name = unique_filename(&dir, &mp4_name);
+        let stored_name = unique_filename(&dir, &media_name);
         let path = dir.join(&stored_name);
 
         let mut parts = relative_dir;
@@ -1712,6 +1842,7 @@ async fn native_screen_recording_start(
             path.clone(),
             Arc::clone(&running),
             ready_tx,
+            is_audio_only,
         );
 
         match ready_rx.recv_timeout(Duration::from_secs(5)) {
@@ -1726,7 +1857,7 @@ async fn native_screen_recording_start(
                 running.store(false, Ordering::Relaxed);
                 let _ = join_handle.join();
                 let _ = fs::remove_file(&path);
-                return Err("Timeout ao iniciar gravador nativo de tela".to_string());
+                return Err("Timeout ao iniciar gravador nativo".to_string());
             }
         }
 
@@ -1734,7 +1865,7 @@ async fn native_screen_recording_start(
             running,
             path,
             relative_file: relative_file.clone(),
-            original_name: mp4_name,
+            original_name: media_name,
             join_handle: Some(join_handle),
         });
 

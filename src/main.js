@@ -1017,12 +1017,13 @@ function renderUsersRail() {
 
   state.users.forEach(item => {
     const taskCount = item.tasks?.length || 0;
+    const isRecordingThisUser = Boolean(recordingState && recordingState.userId === item.id);
     const tab = document.createElement("div");
-    tab.className = `user-rail-item${item.id === activeId ? " active" : ""}${item.id === tabDragId ? " dragging" : ""}`;
+    tab.className = `user-rail-item${item.id === activeId ? " active" : ""}${item.id === tabDragId ? " dragging" : ""}${isRecordingThisUser ? " is-recording" : ""}`;
     tab.setAttribute("role", "tab");
     tab.setAttribute("aria-selected", String(item.id === activeId));
     tab.tabIndex = 0;
-    tab.title = item.name;
+    tab.title = isRecordingThisUser ? `${item.name} (Gravando)` : item.name;
     tab.dataset.userId = item.id;
 
     const avatar = document.createElement("span");
@@ -1033,6 +1034,13 @@ function renderUsersRail() {
     const label = document.createElement("span");
     label.className = "user-rail-label";
     label.textContent = item.name;
+
+    const recDot = isRecordingThisUser ? document.createElement("span") : null;
+    if (recDot) {
+      recDot.className = "user-recording-dot";
+      recDot.title = "Gravando agora";
+      recDot.setAttribute("aria-label", "Gravando agora");
+    }
 
     const count = document.createElement("span");
     count.className = "user-rail-count";
@@ -1075,7 +1083,11 @@ function renderUsersRail() {
 
     actions.appendChild(editBtn);
     actions.appendChild(deleteBtn);
-    tab.append(avatar, label, count, actions);
+    if (recDot) {
+      tab.append(avatar, label, recDot, count, actions);
+    } else {
+      tab.append(avatar, label, count, actions);
+    }
 
     tab.addEventListener("pointerdown", event => startTabDrag(event, item.id));
     tab.addEventListener("dblclick", event => {
@@ -1471,6 +1483,7 @@ function renderNodes() {
         <div class="card-body-wrap">
           ${rootCard
           ? `<div class="root-card-header">
+                 ${recordingState && recordingState.taskId === board.id ? `<span class="card-recording-dot" title="Gravando agora" aria-label="Gravando agora"></span>` : ""}
                  <strong class="root-card-title" contenteditable="true" spellcheck="false" role="textbox" aria-label="Board Title">${escapeHtml(board.title)}</strong>
                  <button class="root-card-edit" type="button" aria-label="Edit" title="Edit">${icons.edit}</button>
                </div>`
@@ -2355,13 +2368,17 @@ function renderUserTasks() {
     }
     const priority = normalizePriority(task.priority);
     const criticality = normalizeCriticality(task.criticality);
+    const isRecordingThisTask = Boolean(
+      recordingState && recordingState.taskId === task.id && recordingState.userId === user.id
+    );
     const card = document.createElement("article");
-    card.className = `user-task-card status-${status} priority-${priority} crit-${criticality}${task.id === activeId ? " active" : ""}${task.id === dockDragId ? " dragging" : ""}`;
+    card.className = `user-task-card status-${status} priority-${priority} crit-${criticality}${task.id === activeId ? " active" : ""}${task.id === dockDragId ? " dragging" : ""}${isRecordingThisTask ? " is-recording" : ""}`;
     card.dataset.id = task.id;
     // Card enxuto: so o titulo. Numero, datas, criticidade e anexos continuam
     // acessiveis pelo popup de info (botao "i") e pelo overlay do canvas.
-    card.title = task.title;
+    card.title = isRecordingThisTask ? `${task.title} (Gravando)` : task.title;
     card.innerHTML = `
+      ${isRecordingThisTask ? `<span class="task-recording-dot" title="Gravando agora" aria-label="Gravando agora"></span>` : ""}
       <span class="user-task-id">#${task.number || ""}</span>
       <span class="user-task-title">${escapeHtml(task.title)}</span>
       <div class="user-task-actions">
@@ -5710,12 +5727,65 @@ async function handleAttachInputChange(event) {
 // perdia gravacoes longas em maquinas mais fracas).
 // ------------------------------------------------------------------
 const RECORDING_TIMESLICE_MS = 2000;
-const RECORDING_VIDEO_BPS = 2500000;
-const RECORDING_AUDIO_BPS = 128000;
+const RECORDING_VIDEO_BPS = 800000;
+const RECORDING_AUDIO_BPS = 64000;
 
 let recordingState = null;
 let isStartingRecording = false;
 let recordingTimerInterval = null;
+let recordModePopupInitialized = false;
+
+function initRecordModePopup() {
+  if (recordModePopupInitialized) return;
+  recordModePopupInitialized = true;
+  const popup = document.getElementById("recordModePopup");
+  const targetBtn = document.getElementById("recordingIndicatorTarget");
+
+  popup?.querySelectorAll("[data-record-mode]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const mode = btn.dataset.recordMode === "audio" ? "audio" : "all";
+      closeRecordModePopup();
+      await startScreenRecording(mode);
+    });
+  });
+
+  document.addEventListener("pointerdown", event => {
+    if (!popup || popup.hidden) return;
+    if (popup.contains(event.target) || recordButton?.contains(event.target)) return;
+    closeRecordModePopup();
+  });
+
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && popup && !popup.hidden) {
+      closeRecordModePopup();
+    }
+  });
+
+  targetBtn?.addEventListener("click", () => {
+    if (!recordingState) return;
+    const u = state.users.find(item => item.id === recordingState.userId);
+    const t = u?.tasks.find(item => item.id === recordingState.taskId);
+    if (!u || !t) return;
+    state.activeUserId = u.id;
+    u.activeTaskId = t.id;
+    saveState();
+    render();
+  });
+}
+
+function closeRecordModePopup() {
+  const popup = document.getElementById("recordModePopup");
+  if (popup) popup.hidden = true;
+}
+
+function toggleRecordModePopup() {
+  initRecordModePopup();
+  const popup = document.getElementById("recordModePopup");
+  if (!popup) return false;
+  const willOpen = popup.hidden;
+  popup.hidden = !willOpen;
+  return true;
+}
 
 async function toggleScreenRecording() {
   if (recordingState) {
@@ -5725,35 +5795,45 @@ async function toggleScreenRecording() {
     }
     stopScreenRecording();
   } else if (!isStartingRecording) {
-    await startScreenRecording();
+    if (!toggleRecordModePopup()) {
+      await startScreenRecording("all");
+    }
   }
 }
 
-async function startScreenRecording() {
+async function startScreenRecording(mode = "all") {
   if (recordingState || isStartingRecording) return;
 
   const user = activeUser();
   const task = activeMainTask();
   if (!user || !task) return;
 
+  const isAudioOnly = mode === "audio";
   isStartingRecording = true;
   try {
-    const nativeFileName = buildRecordingFileName(".mp4");
+    const nativeFileName = buildRecordingFileName(
+      isAudioOnly ? ".m4a" : ".mp4",
+      isAudioOnly ? "Audio" : "Recording"
+    );
     const subDir = `task${task.number}/anexos`;
 
-    // 1. Gravacao nativa em 1 clique (Tela inteira + Microfone + Audio do PC via Media Foundation/WASAPI, zero popups)
+    // 1. Gravacao nativa em 1 clique (Tela + Audio ou Apenas Audio via Media Foundation/WASAPI, zero popups)
     if (invoke) {
       try {
         const target = await invoke("native_screen_recording_start", {
           userId: user.id,
           subDir,
-          fileName: nativeFileName
+          fileName: nativeFileName,
+          audioOnly: isAudioOnly
         });
         recordingState = {
           isNative: true,
+          mode,
           targetFile: target?.file || "",
           userId: user.id,
+          userName: user.name,
           taskId: task.id,
+          taskTitle: task.title,
           startedAt: Date.now(),
           userStopped: false,
           finalized: false
@@ -5761,16 +5841,77 @@ async function startScreenRecording() {
         updateRecordingUi(true);
         return;
       } catch (nativeErr) {
-        console.warn("Gravacao nativa indisponivel, usando fallback getDisplayMedia", nativeErr);
+        console.warn("Gravacao nativa indisponivel, usando fallback do navegador", nativeErr);
       }
     }
 
-    if (!navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === "undefined") {
-      console.warn("Gravacao de tela nao suportada neste ambiente");
+    if (typeof MediaRecorder === "undefined" || !invoke) {
+      console.warn("Gravacao nao suportada neste ambiente");
       return;
     }
-    if (!invoke) {
-      console.warn("Backend indisponivel; gravacao nao foi iniciada");
+
+    if (isAudioOnly) {
+      let micStream;
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true }
+        });
+      } catch (error) {
+        console.info("Gravacao de audio nao iniciada", error);
+        return;
+      }
+      const sessionId = makeId("rec");
+      const fileName = buildRecordingFileName(".webm", "Audio");
+      let target = null;
+      let useMemoryFallback = false;
+      try {
+        target = await invoke("recording_begin", { sessionId, userId: user.id, subDir, fileName });
+      } catch (_) {
+        useMemoryFallback = true;
+      }
+      const recState = {
+        recorder: null,
+        mode: "audio",
+        displayStream: null,
+        micStream,
+        audioContext: null,
+        audioTracks: micStream.getAudioTracks(),
+        sessionId,
+        fileName,
+        subDir,
+        targetFile: target?.file || "",
+        userId: user.id,
+        userName: user.name,
+        taskId: task.id,
+        taskTitle: task.title,
+        startedAt: Date.now(),
+        bytesWritten: 0,
+        chunksProduced: 0,
+        fallbackProfile: 0,
+        useMemoryFallback,
+        fallbackChunks: [],
+        writeChain: Promise.resolve(),
+        writeError: null,
+        userStopped: false,
+        finalized: false
+      };
+      const recorder = new MediaRecorder(micStream);
+      recState.recorder = recorder;
+      recorder.addEventListener("dataavailable", event => {
+        if (event.data && event.data.size > 0) {
+          recState.chunksProduced += 1;
+          queueRecordingChunk(recState, event.data);
+        }
+      });
+      recorder.addEventListener("stop", () => finalizeRecording(recState));
+      recorder.start(RECORDING_TIMESLICE_MS);
+      recordingState = recState;
+      updateRecordingUi(true);
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      console.warn("Gravacao de tela nao suportada neste ambiente");
       return;
     }
 
@@ -5839,7 +5980,10 @@ async function startScreenRecording() {
       subDir,
       targetFile: target?.file || "",
       userId: user.id,
+      userName: user.name,
       taskId: task.id,
+      taskTitle: task.title,
+      mode: "all",
       startedAt: Date.now(),
       bytesWritten: 0,
       chunksProduced: 0,
@@ -6027,7 +6171,7 @@ async function finalizeNativeRecording(recState) {
     return;
   }
 
-  pushAttachment(targetTask, info, "video/mp4");
+  pushAttachment(targetTask, info, recState.mode === "audio" ? "audio/mp4" : "video/mp4");
 }
 
 // Cada pedaco vai para o disco assim que sai do gravador, na ordem.
@@ -6133,7 +6277,7 @@ async function finalizeRecording(recState) {
     return;
   }
 
-  pushAttachment(targetTask, info, "video/webm");
+  pushAttachment(targetTask, info, recState.mode === "audio" ? "audio/webm" : "video/webm");
 }
 
 async function mixAudioStreams(streams) {
@@ -6201,24 +6345,42 @@ function pickRecorderMimeType(hasAudio = true) {
   return candidates.find(type => MediaRecorder.isTypeSupported(type)) || "";
 }
 
-function buildRecordingFileName(ext = ".webm") {
+function buildRecordingFileName(ext = ".webm", prefix = "Recording") {
   const now = new Date();
   const pad = n => String(n).padStart(2, "0");
   const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-  return `Recording-${stamp}${ext}`;
+  return `${prefix}-${stamp}${ext}`;
 }
 
 function updateRecordingUi(active) {
+  initRecordModePopup();
   if (recordButton) {
     recordButton.classList.toggle("recording", active);
-    recordButton.title = active ? "Stop recording" : "Record screen";
-    recordButton.setAttribute("aria-label", active ? "Stop recording" : "Record screen");
+    recordButton.title = active ? "Parar gravação" : "Gravar tela ou áudio";
+    recordButton.setAttribute("aria-label", active ? "Parar gravação" : "Gravar tela ou áudio");
+  }
+  const targetBtn = document.getElementById("recordingIndicatorTarget");
+  if (targetBtn) {
+    if (active && recordingState) {
+      const u = state.users.find(item => item.id === recordingState.userId);
+      const t = u?.tasks.find(item => item.id === recordingState.taskId);
+      const uName = u?.name || recordingState.userName || "";
+      const tTitle = t?.title || recordingState.taskTitle || "";
+      targetBtn.textContent = `${uName} › ${tTitle}`;
+      targetBtn.hidden = false;
+    } else {
+      targetBtn.textContent = "";
+      targetBtn.hidden = true;
+    }
   }
   if (active) {
     startRecordingTimer();
   } else {
     stopRecordingTimer();
   }
+  renderUsersRail();
+  renderUserTasks();
+  renderNodes();
 }
 
 function setRecordingIndicatorText(text) {
@@ -6239,7 +6401,8 @@ function startRecordingTimer() {
     const elapsed = Math.max(0, Math.floor((Date.now() - recordingState.startedAt) / 1000));
     const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
     const ss = String(elapsed % 60).padStart(2, "0");
-    setRecordingIndicatorText(`Recording ${mm}:${ss}`);
+    const label = recordingState.mode === "audio" ? "Áudio" : "Tela + Áudio";
+    setRecordingIndicatorText(`${label} ${mm}:${ss}`);
   };
   tick();
   recordingTimerInterval = window.setInterval(tick, 1000);
