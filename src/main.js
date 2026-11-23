@@ -10,6 +10,7 @@ import {
   extractAiQuestions,
   formatQuestionAnswersMessage,
   isDestructiveAction,
+  proposalRequiresPermission,
   describeAiAction,
   buildAppContextSnapshot,
   executeAiActionPlan
@@ -3433,6 +3434,80 @@ function getNextActionPosition(board, indexOverride = null) {
     x: targetX,
     y: targetY
   };
+}
+
+let activeViewportAnimRaf = 0;
+
+function cancelViewportAnimation() {
+  if (activeViewportAnimRaf) {
+    cancelAnimationFrame(activeViewportAnimRaf);
+    activeViewportAnimRaf = 0;
+  }
+}
+
+function animateViewportTo({ zoom, panX, panY, durationMs = 460 }) {
+  cancelViewportAnimation();
+  const view = activeView();
+  if (!view) return;
+  const startZoom = view.zoom;
+  const startPanX = view.panX;
+  const startPanY = view.panY;
+  const targetZoom = clamp(zoom, MIN_ZOOM, MAX_ZOOM);
+  const startTime = performance.now();
+
+  const step = now => {
+    const rawT = Math.min(1, Math.max(0, (now - startTime) / durationMs));
+    const eased = 1 - Math.pow(1 - rawT, 3);
+    view.zoom = startZoom + (targetZoom - startZoom) * eased;
+    view.panX = startPanX + (panX - startPanX) * eased;
+    view.panY = startPanY + (panY - startPanY) * eased;
+    applyViewport();
+    renderLinks();
+    if (rawT < 1) {
+      activeViewportAnimRaf = requestAnimationFrame(step);
+    } else {
+      activeViewportAnimRaf = 0;
+      saveState();
+    }
+  };
+
+  activeViewportAnimRaf = requestAnimationFrame(step);
+}
+
+function focusNodesChainAnimated(nodeIds, { maxZoom = 1.08, padding = 96, durationMs = 480 } = {}) {
+  const board = activeBoard();
+  if (!board?.nodes?.length || !boardShell) return;
+  const idSet = new Set(Array.isArray(nodeIds) ? nodeIds.filter(Boolean) : []);
+  const targets = idSet.size ? board.nodes.filter(n => idSet.has(n.id)) : [];
+  if (!targets.length) return;
+
+  const minX = Math.min(...targets.map(n => n.x));
+  const minY = Math.min(...targets.map(n => n.y));
+  const maxX = Math.max(...targets.map(n => n.x + (n.w || 288)));
+  const maxY = Math.max(...targets.map(n => n.y + (n.h || 144)));
+  const contentWidth = Math.max(1, maxX - minX);
+  const contentHeight = Math.max(1, maxY - minY);
+  const availW = Math.max(240, boardShell.clientWidth - padding * 2);
+  const availH = Math.max(200, boardShell.clientHeight - padding * 2);
+  const zoom = clamp(Math.min(availW / contentWidth, availH / contentHeight, maxZoom), MIN_ZOOM, MAX_ZOOM);
+  const centerX = minX + contentWidth / 2;
+  const centerY = minY + contentHeight / 2;
+  const panX = boardShell.clientWidth / 2 - centerX * zoom;
+  const panY = boardShell.clientHeight / 2 - centerY * zoom;
+
+  animateViewportTo({ zoom, panX, panY, durationMs });
+}
+
+function triggerAiCardBirthHighlight(nodeId) {
+  if (!nodeId || !nodesLayer) return;
+  const el = nodesLayer.querySelector(`[data-id="${nodeId}"]`);
+  if (!el) return;
+  el.classList.remove("ai-birth-highlight");
+  void el.offsetWidth;
+  el.classList.add("ai-birth-highlight");
+  window.setTimeout(() => {
+    el.classList.remove("ai-birth-highlight");
+  }, 1250);
 }
 
 function centerCanvasOnTasks() {
@@ -10390,69 +10465,92 @@ function initAiTranslatorPanel() {
           cardEl.appendChild(toggleMoreBtn);
         }
 
-        if (proposal.status === "pending") {
-          const foot = document.createElement("div");
-          foot.className = "ai-action-card-foot";
+        const runProposalExecution = async footEl => {
+          proposal.status = "running";
+          proposal.stepStates = proposal.actions.map(() => "pending");
+          cardEl.className = "ai-action-card status-running";
+          const pill = head.querySelector(".ai-action-status-pill");
+          if (pill) pill.textContent = `0/${totalSteps}`;
+          progressFill.style.width = "10%";
+          footEl?.remove();
 
-          const approveBtn = document.createElement("button");
-          approveBtn.type = "button";
-          approveBtn.className = "ai-action-approve-btn";
-          approveBtn.textContent = "Permitir e executar";
-          approveBtn.addEventListener("click", async () => {
-            proposal.status = "running";
-            proposal.stepStates = proposal.actions.map(() => "pending");
-            cardEl.className = "ai-action-card status-running";
-            const pill = head.querySelector(".ai-action-status-pill");
-            if (pill) pill.textContent = `0/${totalSteps}`;
-            progressFill.style.width = "10%";
-            foot.remove();
-
-            let completedCount = 0;
-            const results = await executeAiActionPlan(proposal.actions, {
-              onStepUpdate: ({ index, status, message }) => {
-                proposal.stepStates[index] = status;
-                const target = stepRows[index];
-                if (!target) return;
-                target.li.className = `ai-step-row state-${status}${isDestructiveAction(target.act) ? " destructive" : ""}`;
-                target.iconEl.innerHTML = renderStepIconSvg(status);
-                if (message) {
-                  target.textEl.textContent = message;
-                }
-                if (status === "done" || status === "failed") {
-                  completedCount += 1;
-                  const pct = Math.round((completedCount / totalSteps) * 100);
-                  progressFill.style.width = `${pct}%`;
-                  if (pill) pill.textContent = `${completedCount}/${totalSteps}`;
-                }
-              },
-              runAction: async (action, ctx) => {
-                await new Promise(resolve => setTimeout(resolve, 260));
-                const out = await runSingleAiAppAction(action, ctx);
-                await new Promise(resolve => setTimeout(resolve, 140));
-                return out;
+          let completedCount = 0;
+          const createdChainIds = new Set();
+          const results = await executeAiActionPlan(proposal.actions, {
+            onStepUpdate: ({ index, status, message }) => {
+              proposal.stepStates[index] = status;
+              const target = stepRows[index];
+              if (!target) return;
+              target.li.className = `ai-step-row state-${status}${isDestructiveAction(target.act) ? " destructive" : ""}`;
+              target.iconEl.innerHTML = renderStepIconSvg(status);
+              if (message) {
+                target.textEl.textContent = message;
               }
+              if (status === "done" || status === "failed") {
+                completedCount += 1;
+                const pct = Math.round((completedCount / totalSteps) * 100);
+                progressFill.style.width = `${pct}%`;
+                if (pill) pill.textContent = `${completedCount}/${totalSteps}`;
+              }
+            },
+            runAction: async (action, ctx) => {
+              await new Promise(resolve => setTimeout(resolve, 180));
+              const out = await runSingleAiAppAction(action, ctx);
+              if (out?.createdCardId) {
+                if (out.parentCardId) createdChainIds.add(out.parentCardId);
+                createdChainIds.add(out.createdCardId);
+                triggerAiCardBirthHighlight(out.createdCardId);
+                focusNodesChainAnimated([...createdChainIds], { maxZoom: 1.06, padding: 88, durationMs: 440 });
+              }
+              await new Promise(resolve => setTimeout(resolve, 160));
+              return out;
+            }
+          });
+
+          if (createdChainIds.size > 0) {
+            focusNodesChainAnimated([...createdChainIds], { maxZoom: 1.04, padding: 96, durationMs: 560 });
+          }
+
+          proposal.status = "approved";
+          proposal.results = results;
+          delete proposal.stepStates;
+          saveChatSessions();
+          await new Promise(resolve => setTimeout(resolve, 220));
+          renderChatMessages();
+        };
+
+        if (proposal.status === "pending") {
+          const needsPermission = proposalRequiresPermission(proposal);
+          if (!needsPermission) {
+            if (!proposal._autoStarted) {
+              proposal._autoStarted = true;
+              queueMicrotask(() => {
+                runProposalExecution(null);
+              });
+            }
+          } else {
+            const foot = document.createElement("div");
+            foot.className = "ai-action-card-foot";
+
+            const approveBtn = document.createElement("button");
+            approveBtn.type = "button";
+            approveBtn.className = "ai-action-approve-btn";
+            approveBtn.textContent = "Permitir e executar";
+            approveBtn.addEventListener("click", () => runProposalExecution(foot));
+
+            const rejectBtn = document.createElement("button");
+            rejectBtn.type = "button";
+            rejectBtn.className = "ai-action-reject-btn";
+            rejectBtn.textContent = "Recusar";
+            rejectBtn.addEventListener("click", () => {
+              proposal.status = "rejected";
+              saveChatSessions();
+              renderChatMessages();
             });
 
-            proposal.status = "approved";
-            proposal.results = results;
-            delete proposal.stepStates;
-            saveChatSessions();
-            await new Promise(resolve => setTimeout(resolve, 220));
-            renderChatMessages();
-          });
-
-          const rejectBtn = document.createElement("button");
-          rejectBtn.type = "button";
-          rejectBtn.className = "ai-action-reject-btn";
-          rejectBtn.textContent = "Recusar";
-          rejectBtn.addEventListener("click", () => {
-            proposal.status = "rejected";
-            saveChatSessions();
-            renderChatMessages();
-          });
-
-          foot.append(approveBtn, rejectBtn);
-          cardEl.appendChild(foot);
+            foot.append(approveBtn, rejectBtn);
+            cardEl.appendChild(foot);
+          }
         }
 
         row.appendChild(cardEl);
@@ -11347,6 +11445,7 @@ async function runSingleAiAppAction(action, ctx) {
       }
       return {
         createdCardId: id,
+        parentCardId: parentId || null,
         message: `${hasCheckboxes ? "Tabela Todo List" : "Tabela"} criada em "${board.title}"`
       };
     }
@@ -11416,7 +11515,7 @@ async function runSingleAiAppAction(action, ctx) {
       const cardEl = nodesLayer.querySelector(`[data-id="${id}"]`);
       if (cardEl) scheduleNodeHeightSync(id, cardEl);
       const label = shortCardLabel(bodyText, "Card");
-      return { createdCardId: id, message: `Card "${label}" criado` };
+      return { createdCardId: id, parentCardId: parentId || null, message: `Card "${label}" criado` };
     }
 
     case "update_card": {

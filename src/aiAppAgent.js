@@ -174,6 +174,11 @@ export function isDestructiveAction(action) {
   return t === "delete_user" || t === "delete_task" || t === "delete_card" || t === "disconnect_cards";
 }
 
+export function proposalRequiresPermission(proposal) {
+  if (!proposal || !Array.isArray(proposal.actions)) return false;
+  return proposal.actions.some(action => isDestructiveAction(action));
+}
+
 export function describeAiAction(action) {
   if (!action || !action.type) return "Ação desconhecida";
   switch (action.type) {

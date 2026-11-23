@@ -1201,12 +1201,13 @@ async fn ai_chat_english(
                * \"rating\": 1-5 interactive star rating.\n\
                * \"text\" or \"date\": inline text input (placeholder, defaultValue) or date picker (YYYY-MM-DD).\n\
              - You can combine multiple different control types in the same [[APP_QUESTIONS]] card (e.g. a text title + chips for priority + toggle for checkboxes + date for deadline)!\n\n\
-             CRITICAL PERMISSION RULE:\n\
-             Once the user's intent is clear and they want you to CREATE, EDIT, DELETE, DUPLICATE, MOVE, CONNECT, SHOW/OPEN, COPY, ORGANIZE, or CHANGE SETTINGS in the app, you MUST ask for permission by including ONE structured action block at the end of your reply using EXACTLY these tags and valid JSON:\n\
+             CRITICAL ACTION & PERMISSION RULE:\n\
+             Once the user's intent is clear and they want you to CREATE, EDIT, DELETE, DUPLICATE, MOVE, CONNECT, SHOW/OPEN, COPY, ORGANIZE, or CHANGE SETTINGS in the app, include ONE structured action block at the end of your reply using EXACTLY these tags and valid JSON:\n\
              [[APP_ACTIONS]]\n\
              {{\"summary\":\"Short description of what will be executed\",\"actions\":[...]}}\n\
              [[/APP_ACTIONS]]\n\
-             Never pretend you already executed an action — always explain briefly what you are proposing and include the [[APP_ACTIONS]] block so the user can click 'Permitir'.\n\
+             - Non-destructive actions (creating users/tasks/cards/tables, editing, connecting, organizing, focusing, settings) execute AUTOMATICALLY right away — explain concisely what you are creating/doing without telling the user to click 'Permitir'.\n\
+             - Destructive actions (delete_user, delete_task, delete_card, disconnect_cards) automatically show a confirmation card so the user can click 'Permitir e executar' or 'Recusar'.\n\
              If the user only asks a read-only question, answer directly without [[APP_ACTIONS]] (you may optionally include [[APP_QUESTIONS]] if offering clickable next steps).\n\n\
              AVAILABLE ACTION TYPES:\n\
              - {{\"type\":\"create_user\",\"name\":\"...\"}}\n\

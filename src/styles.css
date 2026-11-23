@@ -7970,3 +7970,28 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
 .ai-chat-send.is-stop:active {
   transform: scale(0.94);
 }
+
+/* Animacao cinematografica de criacao de card pela IA */
+@keyframes ai-card-birth-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.88) translateY(10px);
+    box-shadow: 0 0 0 0 rgba(var(--accent-strong-rgb, var(--accent-rgb)), 0.55);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1.02) translateY(-1px);
+    box-shadow: 0 0 0 3px rgba(var(--accent-strong-rgb, var(--accent-rgb)), 0.42),
+      0 10px 26px rgba(var(--accent-strong-rgb, var(--accent-rgb)), 0.22);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    box-shadow: 0 0 0 0 rgba(var(--accent-strong-rgb, var(--accent-rgb)), 0);
+  }
+}
+
+.task-card.ai-birth-highlight {
+  animation: ai-card-birth-pop 920ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  border-color: rgba(var(--accent-strong-rgb, var(--accent-rgb)), 0.72) !important;
+}
