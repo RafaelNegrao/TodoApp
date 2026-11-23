@@ -10734,16 +10734,19 @@ function initAiTranslatorPanel() {
       let reply = "";
       let usedModel = "";
       if (invoke) {
-        const payloadMessages = session.messages.slice(-18).map(m => ({
-          role: m.role,
-          text: m.text || "",
-          attachments: (m.attachments || []).map(a => ({
-            name: a.name || "",
-            mime_type: a.mime_type || "",
-            data_base64: a.data_base64 || "",
-            text_content: a.text_content || ""
-          }))
-        }));
+        const payloadMessages = session.messages
+          .filter(m => !(m.role === "model" && typeof m.text === "string" && m.text.trimStart().startsWith("Error:")))
+          .slice(-18)
+          .map(m => ({
+            role: m.role,
+            text: m.text || "",
+            attachments: (m.attachments || []).map(a => ({
+              name: a.name || "",
+              mime_type: a.mime_type || "",
+              data_base64: a.data_base64 || "",
+              text_content: a.text_content || ""
+            }))
+          }));
         if (isTranslatorFloating && currentMode === "chat" && payloadMessages.length > 0) {
           try {
             const screenBase64 = await invoke("capture_current_monitor_png");

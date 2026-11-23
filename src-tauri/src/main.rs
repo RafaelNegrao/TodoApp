@@ -207,7 +207,7 @@ fn default_http_agent() -> &'static ureq::Agent {
 
 fn gemini_http_agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-    AGENT.get_or_init(|| build_schannel_agent(Duration::from_secs(6), Duration::from_secs(45)))
+    AGENT.get_or_init(|| build_schannel_agent(Duration::from_secs(5), Duration::from_secs(25)))
 }
 
 fn gemini_translate_agent() -> &'static ureq::Agent {
@@ -338,7 +338,40 @@ fn mark_model_cooldown(model: &str, duration: Duration) {
     }
 }
 
-fn order_models_by_availability(candidates: Vec<String>) -> Vec<String> {
+fn is_quota_exhausted_error(status: u16, err_lower: &str) -> bool {
+    if status == 429 {
+        return true;
+    }
+    if matches!(status, 403 | 503) {
+        return err_lower.contains("resource_exhausted")
+            || err_lower.contains("quota")
+            || err_lower.contains("rate limit")
+            || err_lower.contains("rate_limit")
+            || err_lower.contains("too many requests")
+            || err_lower.contains("requests per minute")
+            || err_lower.contains("requests per day")
+            || err_lower.contains("tokens per minute");
+    }
+    false
+}
+
+fn quota_cooldown_duration(err_lower: &str) -> Duration {
+    let is_daily_or_zero_limit = err_lower.contains("perday")
+        || err_lower.contains("per_day")
+        || err_lower.contains("per day")
+        || err_lower.contains("daily")
+        || err_lower.contains("limit: 0")
+        || err_lower.contains("free_tier_requests")
+        || err_lower.contains("generaterequestsperday");
+
+    if is_daily_or_zero_limit {
+        Duration::from_secs(1800)
+    } else {
+        Duration::from_secs(65)
+    }
+}
+
+fn partition_models_by_availability(candidates: Vec<String>) -> (Vec<String>, Vec<String>) {
     let now = Instant::now();
     let mut ready = Vec::new();
     let mut cooling: Vec<(String, Instant)> = Vec::new();
@@ -355,17 +388,56 @@ fn order_models_by_availability(candidates: Vec<String>) -> Vec<String> {
             ready.push(m);
         }
     } else {
-        return candidates;
+        return (candidates, Vec::new());
     }
 
-    // Os modelos em cooldown vao para o final da fila (ordenados pelo que libera mais cedo),
-    // garantindo que o sistema desca imediatamente para um modelo disponivel sem repetir 429,
-    // mas ainda tenha fallback caso todos estejam em cooldown.
     cooling.sort_by_key(|(_, until)| *until);
-    for (m, _) in cooling {
-        ready.push(m);
-    }
+    let cooling_ordered = cooling.into_iter().map(|(m, _)| m).collect();
+    (ready, cooling_ordered)
+}
+
+fn order_models_by_availability(candidates: Vec<String>) -> Vec<String> {
+    let (mut ready, cooling) = partition_models_by_availability(candidates);
+    ready.extend(cooling);
     ready
+}
+
+fn normalize_gemini_contents(raw_contents: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    let mut normalized: Vec<serde_json::Value> = Vec::new();
+
+    for entry in raw_contents {
+        let role = entry
+            .get("role")
+            .and_then(|r| r.as_str())
+            .unwrap_or("user")
+            .to_string();
+        let parts = entry
+            .get("parts")
+            .and_then(|p| p.as_array())
+            .cloned()
+            .unwrap_or_default();
+        if parts.is_empty() {
+            continue;
+        }
+        if normalized.is_empty() && role != "user" {
+            continue;
+        }
+        if let Some(last) = normalized.last_mut() {
+            let last_role = last.get("role").and_then(|r| r.as_str()).unwrap_or("");
+            if last_role == role {
+                if let Some(last_parts) = last.get_mut("parts").and_then(|p| p.as_array_mut()) {
+                    last_parts.extend(parts);
+                    continue;
+                }
+            }
+        }
+        normalized.push(serde_json::json!({
+            "role": role,
+            "parts": parts
+        }));
+    }
+
+    normalized
 }
 
 fn resolve_gemini_key_and_models(api_key: Option<String>) -> Result<(String, Vec<String>), String> {
@@ -475,19 +547,19 @@ fn execute_gemini_fast_payload_with_model(
     let payload_compat = fold_system_instruction_into_user(payload.clone());
 
     let mut tried = std::collections::HashSet::<String>::new();
-    let mut queue = order_models_by_availability(
-        models
-            .iter()
-            .filter(|m| !is_deprecated_gemini_model(m) && !is_model_marked_unavailable(m))
-            .cloned()
-            .collect(),
-    );
+    let filtered_models: Vec<String> = models
+        .iter()
+        .filter(|m| !is_deprecated_gemini_model(m) && !is_model_marked_unavailable(m))
+        .cloned()
+        .collect();
+    let (mut ready_queue, mut cooling_queue) = partition_models_by_availability(filtered_models);
     let mut discovered_fallback = false;
+    let mut tried_cooling_fallback = false;
     let mut saw_rate_limit = false;
     let mut saw_auth_error = false;
 
     loop {
-        if queue.is_empty() {
+        if ready_queue.is_empty() {
             if !discovered_fallback {
                 discovered_fallback = true;
                 let fresh: Vec<String> = discover_available_gemini_models(key)
@@ -495,14 +567,27 @@ fn execute_gemini_fast_payload_with_model(
                     .filter(|m| !tried.contains(m))
                     .collect();
                 if !fresh.is_empty() {
-                    queue.extend(fresh);
-                    continue;
+                    let (fresh_ready, fresh_cooling) = partition_models_by_availability(fresh);
+                    ready_queue.extend(fresh_ready);
+                    for m in fresh_cooling {
+                        if !cooling_queue.iter().any(|existing| existing == &m) {
+                            cooling_queue.push(m);
+                        }
+                    }
+                    if !ready_queue.is_empty() {
+                        continue;
+                    }
                 }
+            }
+            if !tried_cooling_fallback && !cooling_queue.is_empty() {
+                tried_cooling_fallback = true;
+                ready_queue.extend(cooling_queue.drain(..));
+                continue;
             }
             break;
         }
 
-        let model = queue.remove(0);
+        let model = ready_queue.remove(0);
         if !tried.insert(model.clone()) {
             continue;
         }
@@ -550,24 +635,16 @@ fn execute_gemini_fast_payload_with_model(
                     let err_body = resp.into_string().unwrap_or_default();
                     let err_lower = err_body.to_lowercase();
                     last_err = format!("Gemini HTTP {code} ({model}): {err_body}");
+                    if is_quota_exhausted_error(code, &err_lower) {
+                        saw_rate_limit = true;
+                        mark_model_cooldown(&model, quota_cooldown_duration(&err_lower));
+                        break;
+                    }
                     if code == 401 || code == 403 {
                         if err_lower.contains("api key") || err_lower.contains("invalid") {
                             saw_auth_error = true;
                             break;
                         }
-                    }
-                    if code == 429 {
-                        saw_rate_limit = true;
-                        let cooldown_secs = if err_body.contains("PerDay")
-                            || err_body.contains("DAILY")
-                            || err_body.contains("limit: 0")
-                        {
-                            300
-                        } else {
-                            30
-                        };
-                        mark_model_cooldown(&model, Duration::from_secs(cooldown_secs));
-                        break;
                     }
                     if code == 503 || code == 502 || code == 500 || code == 504 {
                         mark_model_cooldown(&model, Duration::from_secs(45));
@@ -1012,59 +1089,61 @@ async fn ai_chat_english(
              LIVE APP STATE (JSON):\n{ctx_json}"
         );
 
-        let contents: Vec<serde_json::Value> = messages
-            .into_iter()
-            .filter(|m| !m.text.trim().is_empty() || !m.attachments.is_empty())
-            .map(|m| {
-                let role = if m.role == "model" || m.role == "assistant" {
-                    "model"
-                } else {
-                    "user"
-                };
+        let contents = normalize_gemini_contents(
+            messages
+                .into_iter()
+                .filter(|m| !m.text.trim().is_empty() || !m.attachments.is_empty())
+                .map(|m| {
+                    let role = if m.role == "model" || m.role == "assistant" {
+                        "model"
+                    } else {
+                        "user"
+                    };
 
-                let mut parts: Vec<serde_json::Value> = Vec::new();
+                    let mut parts: Vec<serde_json::Value> = Vec::new();
 
-                for att in m.attachments {
-                    if let Some(txt) = att.text_content {
-                        if !txt.trim().is_empty() {
-                            parts.push(serde_json::json!({
-                                "text": format!("--- Attachment: {} ---\n{}\n--- End of {} ---", att.name, txt, att.name)
-                            }));
-                            continue;
+                    for att in m.attachments {
+                        if let Some(txt) = att.text_content {
+                            if !txt.trim().is_empty() {
+                                parts.push(serde_json::json!({
+                                    "text": format!("--- Attachment: {} ---\n{}\n--- End of {} ---", att.name, txt, att.name)
+                                }));
+                                continue;
+                            }
+                        }
+                        if let Some(b64) = att.data_base64 {
+                            let clean_b64 = b64.trim();
+                            if !clean_b64.is_empty() {
+                                let clean_mime = att
+                                    .mime_type
+                                    .split(';')
+                                    .next()
+                                    .unwrap_or("application/octet-stream")
+                                    .trim()
+                                    .to_string();
+                                parts.push(serde_json::json!({
+                                    "inlineData": {
+                                        "mimeType": clean_mime,
+                                        "data": clean_b64
+                                    }
+                                }));
+                            }
                         }
                     }
-                    if let Some(b64) = att.data_base64 {
-                        let clean_b64 = b64.trim();
-                        if !clean_b64.is_empty() {
-                            let clean_mime = att
-                                .mime_type
-                                .split(';')
-                                .next()
-                                .unwrap_or("application/octet-stream")
-                                .trim()
-                                .to_string();
-                            parts.push(serde_json::json!({
-                                "inlineData": {
-                                    "mimeType": clean_mime,
-                                    "data": clean_b64
-                                }
-                            }));
-                        }
+
+                    if !m.text.trim().is_empty() {
+                        parts.push(serde_json::json!({ "text": m.text }));
+                    } else if parts.is_empty() {
+                        parts.push(serde_json::json!({ "text": "Analyze the attached file(s)." }));
                     }
-                }
 
-                if !m.text.trim().is_empty() {
-                    parts.push(serde_json::json!({ "text": m.text }));
-                } else if parts.is_empty() {
-                    parts.push(serde_json::json!({ "text": "Analyze the attached file(s)." }));
-                }
-
-                serde_json::json!({
-                    "role": role,
-                    "parts": parts
+                    serde_json::json!({
+                        "role": role,
+                        "parts": parts
+                    })
                 })
-            })
-            .collect();
+                .collect(),
+        );
 
         let payload = serde_json::json!({
             "systemInstruction": {
@@ -4693,4 +4772,55 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running TODOCompanion");
+}
+
+#[cfg(test)]
+mod gemini_failover_tests {
+    use super::*;
+
+    #[test]
+    fn detects_quota_errors_across_status_codes() {
+        assert!(is_quota_exhausted_error(429, "anything"));
+        assert!(is_quota_exhausted_error(403, "resource_exhausted: quota exceeded"));
+        assert!(is_quota_exhausted_error(503, "rate limit reached"));
+        assert!(!is_quota_exhausted_error(403, "api key not valid"));
+        assert!(!is_quota_exhausted_error(400, "invalid argument"));
+    }
+
+    #[test]
+    fn assigns_longer_cooldown_for_daily_quota_than_burst() {
+        let daily = quota_cooldown_duration("exceeded generaterequestsperdayperprojectpermodel");
+        let burst = quota_cooldown_duration("too many requests per minute");
+        assert!(daily >= Duration::from_secs(1800));
+        assert!(burst >= Duration::from_secs(60));
+        assert!(daily > burst);
+    }
+
+    #[test]
+    fn partitions_cooling_models_out_of_ready_queue() {
+        let test_model = "test-quota-cooling-model";
+        let ready_model = "test-quota-ready-model";
+        mark_model_cooldown(test_model, Duration::from_secs(120));
+        let (ready, cooling) = partition_models_by_availability(vec![
+            test_model.to_string(),
+            ready_model.to_string(),
+        ]);
+        assert_eq!(ready, vec![ready_model.to_string()]);
+        assert_eq!(cooling, vec![test_model.to_string()]);
+    }
+
+    #[test]
+    fn normalizes_leading_model_and_merges_consecutive_roles() {
+        let raw = vec![
+            serde_json::json!({ "role": "model", "parts": [{ "text": "stale reply" }] }),
+            serde_json::json!({ "role": "user", "parts": [{ "text": "hi" }] }),
+            serde_json::json!({ "role": "user", "parts": [{ "text": "still here" }] }),
+            serde_json::json!({ "role": "model", "parts": [{ "text": "hello" }] }),
+        ];
+        let normalized = normalize_gemini_contents(raw);
+        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized[0]["role"], "user");
+        assert_eq!(normalized[0]["parts"].as_array().unwrap().len(), 2);
+        assert_eq!(normalized[1]["role"], "model");
+    }
 }
