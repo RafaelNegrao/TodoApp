@@ -4850,31 +4850,41 @@ body.translator-floating-mode .ai-status-text {
 }
 
 body.translator-floating-mode .ai-translate-controls-row {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 6px;
+  left: 10px;
+  right: 40px;
+  height: 22px;
+  z-index: 5;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 2px;
+  justify-content: flex-start;
+  padding: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 body.translator-floating-mode .ai-tone-bar {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 210px;
+  min-width: 0;
   flex-direction: row;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
+  gap: 6px;
   padding: 1px 2px;
   border: 0;
   border-radius: 0;
   background: transparent;
-}
-
-body.translator-floating-mode .ai-translate-thinking-side {
-  display: none !important;
+  pointer-events: auto;
 }
 
 body.translator-floating-mode .ai-translate-thinking-float {
+  display: none !important;
+}
+
+body.translator-floating-mode .ai-translate-thinking-side {
   display: inline-grid;
 }
 
@@ -4896,9 +4906,10 @@ body.translator-floating-mode .ai-tone-end[data-tone-jump="0"] {
 
 body.translator-floating-mode .ai-tone-slider {
   order: 2;
-  flex: 0 1 130px;
-  width: 130px;
-  max-width: 140px;
+  flex: 1 1 36px;
+  width: 100%;
+  min-width: 28px;
+  max-width: 120px;
   height: 4px;
   margin: 0;
   background: linear-gradient(90deg, var(--green), var(--accent), var(--blue));
@@ -4924,14 +4935,9 @@ body.translator-floating-mode .ai-panel-head {
   user-select: none;
 }
 
-body.translator-floating-mode .ai-panel-head-left::before {
-  content: "";
-  display: block;
-  width: 32px;
-  height: 3px;
-  border-radius: 999px;
-  background: rgba(var(--hi-rgb), 0.18);
-  margin-left: 4px;
+body.translator-floating-mode .ai-translate-view:not(.auto-translate-mode) .ai-input-box .ai-box-lang-watermark {
+  right: 42px;
+  bottom: 6px;
 }
 
 body.translator-floating-mode .ai-translate-view {
@@ -5318,18 +5324,21 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
 
 .ai-box-lang-watermark {
   position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
+  inset: auto 10px 6px auto;
+  display: block;
   pointer-events: none;
   user-select: none;
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-strong);
-  opacity: 0.055;
+  opacity: 0.3;
   z-index: 0;
+}
+
+.ai-translate-view:not(.auto-translate-mode) .ai-input-box .ai-box-lang-watermark {
+  bottom: 42px;
 }
 
 .ai-input-box {
@@ -5616,13 +5625,25 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   filter: brightness(1.08);
 }
 
-.ai-copy-icon-btn {
+.ai-copy-icon-btn,
+.ai-copy-icon-btn.primary {
   width: 30px;
   height: 24px;
   padding: 0;
   border-radius: 7px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
   display: grid;
   place-items: center;
+}
+
+.ai-copy-icon-btn:hover,
+.ai-copy-icon-btn.primary:hover {
+  background: rgba(var(--hi-rgb), 0.08);
+  border-color: transparent;
+  color: var(--text-strong);
+  filter: none;
 }
 
 .ai-copy-icon-btn svg {
