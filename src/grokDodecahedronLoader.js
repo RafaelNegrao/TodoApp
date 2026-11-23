@@ -203,3 +203,59 @@ export class GrokDodecahedronRenderer {
     }
   }
 }
+
+export const AI_CHAT_THINKING_PHRASES = [
+  "Thinking...",
+  "Planning next steps...",
+  "Analyzing context...",
+  "Reasoning...",
+  "Connecting ideas...",
+  "Reviewing details...",
+  "Evaluating options...",
+  "Structuring response...",
+  "Synthesizing...",
+  "Crafting answer..."
+];
+
+export const AI_TRANSLATOR_THINKING_PHRASES = [
+  "Translating...",
+  "Adapting tone...",
+  "Refining phrasing...",
+  "Polishing expression...",
+  "Choosing best words..."
+];
+
+export class ThinkingPhraseCycler {
+  constructor(phrases, { intervalMs = 2200, startRandom = true } = {}) {
+    this.phrases = Array.isArray(phrases) && phrases.length ? phrases : ["Thinking..."];
+    this.intervalMs = intervalMs;
+    this.startRandom = startRandom;
+    this.timerId = 0;
+    this.index = 0;
+    this.targetEl = null;
+  }
+
+  start(targetEl) {
+    this.stop();
+    if (!targetEl) return;
+    this.targetEl = targetEl;
+    this.index = this.startRandom ? Math.floor(Math.random() * this.phrases.length) : 0;
+    this.targetEl.textContent = this.phrases[this.index];
+    this.timerId = window.setInterval(() => {
+      if (!this.targetEl?.isConnected) {
+        this.stop();
+        return;
+      }
+      this.index = (this.index + 1) % this.phrases.length;
+      this.targetEl.textContent = this.phrases[this.index];
+    }, this.intervalMs);
+  }
+
+  stop() {
+    if (this.timerId) {
+      window.clearInterval(this.timerId);
+      this.timerId = 0;
+    }
+    this.targetEl = null;
+  }
+}

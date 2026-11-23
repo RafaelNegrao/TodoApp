@@ -1,5 +1,10 @@
 import { routeLinkPath } from "./linkRouting.js";
-import { GrokDodecahedronRenderer } from "./grokDodecahedronLoader.js";
+import {
+  GrokDodecahedronRenderer,
+  ThinkingPhraseCycler,
+  AI_CHAT_THINKING_PHRASES,
+  AI_TRANSLATOR_THINKING_PHRASES
+} from "./grokDodecahedronLoader.js";
 import {
   extractAiActionProposal,
   extractAiQuestions,
@@ -9064,6 +9069,14 @@ function initAiTranslatorPanel() {
     : null;
   topbarGrokLoader?.start();
   let chatGrokLoader = null;
+  const chatThinkingCycler = new ThinkingPhraseCycler(AI_CHAT_THINKING_PHRASES, {
+    intervalMs: 2200,
+    startRandom: false
+  });
+  const translateThinkingCycler = new ThinkingPhraseCycler(AI_TRANSLATOR_THINKING_PHRASES, {
+    intervalMs: 1600,
+    startRandom: false
+  });
 
   function updateChatTopbarIndicator() {
     if (!openChatBtn) return;
@@ -9078,12 +9091,12 @@ function initAiTranslatorPanel() {
     } else if (chatBusy) {
       topbarGrokLoader?.setState({ speed: 1.5, intensity: 1 });
       topbarGrokLoader?.start();
-      openChatBtn.title = "AI Chat (IA pensando...)";
+      openChatBtn.title = "AI Chat (Thinking...)";
     } else {
       topbarGrokLoader?.setState({ speed: 0.35, intensity: 0.65 });
       topbarGrokLoader?.start();
       if (chatHasUnread && !isChatVisible) {
-        openChatBtn.title = "AI Chat (Nova resposta pronta)";
+        openChatBtn.title = "AI Chat (New reply ready)";
       } else {
         openChatBtn.title = "AI Chat";
       }
@@ -9563,12 +9576,17 @@ function initAiTranslatorPanel() {
       trStatusDot.className = `ai-status-dot ${stateName}`;
     }
     if (trStatusText) {
-      trStatusText.textContent = label;
       trStatusText.classList.toggle("grok-shimmer-text", isBusy);
+      if (isBusy) {
+        translateThinkingCycler.start(trStatusText);
+      } else {
+        translateThinkingCycler.stop();
+        trStatusText.textContent = label;
+      }
     }
     translateView?.classList.toggle("is-thinking", isBusy);
     translateGrokLoaders.forEach(loader => {
-      loader.setState(isBusy ? { speed: 1.5, intensity: 1 } : { speed: 0.35, intensity: 0.45 });
+      loader.setState(isBusy ? { speed: 1.5, intensity: 1 } : { speed: 0.35, intensity: 0.52 });
       loader.start();
     });
   }
@@ -10136,6 +10154,7 @@ function initAiTranslatorPanel() {
   function renderChatMessages() {
     if (!chatMessagesEl) return;
     cancelActiveTypingAnimation();
+    chatThinkingCycler.stop();
     if (chatGrokLoader) {
       chatGrokLoader.stop();
       chatGrokLoader = null;
@@ -10772,12 +10791,13 @@ function initAiTranslatorPanel() {
       canvas.setAttribute("aria-hidden", "true");
       const label = document.createElement("span");
       label.className = "grok-shimmer-text";
-      label.textContent = "Pensando...";
+      label.textContent = AI_CHAT_THINKING_PHRASES[0];
       working.appendChild(canvas);
       working.appendChild(label);
       chatMessagesEl.appendChild(working);
       chatGrokLoader = new GrokDodecahedronRenderer(canvas, { size: 24 });
       chatGrokLoader.start();
+      chatThinkingCycler.start(label);
     }
 
     chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
