@@ -148,3 +148,71 @@ test("executeAiActionPlan executa acoes independentes de forma assincrona e emit
   assert.ok(events.includes("1:in_progress"));
   assert.ok(events.includes("2:done"));
 });
+
+test("create_table_card e buildAppContextSnapshot expoem tabelas decodificadas, tipos e anexos", async () => {
+  const { serializeTableToken } = await import("../src/cardTable.js");
+  assert.match(
+    describeAiAction({ type: "create_table_card", hasCheckboxes: true, rows: [["[ ]", "Item 1"], ["[ ]", "Item 2"]] }),
+    /tabela Todo List.*2 linhas/
+  );
+  assert.match(
+    describeAiAction({ type: "create_table_card", hasCheckboxes: false, rows: [["A", "B"]] }),
+    /tabela \(1 linhas\)/
+  );
+
+  const token = serializeTableToken({ rows: [["[ ]", "Revisar PR"]], hasCheckboxes: true });
+  const snap = JSON.parse(
+    buildAppContextSnapshot({
+      activeUserId: "u1",
+      users: [
+        {
+          id: "u1",
+          name: "Rafael",
+          activeTaskId: "t1",
+          tasks: [
+            {
+              id: "t1",
+              number: 1,
+              title: "Sprint",
+              attachments: [{ id: "att1", name: "demo.mp4", file: "task1/anexos/demo.mp4", size: 1024, type: "video/mp4" }],
+              nodes: [{ id: "n1", type: "table", body: token }],
+              links: [{ from: "n1", to: "n2", fromRow: 0 }]
+            }
+          ]
+        }
+      ]
+    })
+  );
+
+  const taskSnap = snap.users[0].tasks[0];
+  assert.equal(taskSnap.nodes[0].type, "table");
+  assert.equal(taskSnap.nodes[0].table.hasCheckboxes, true);
+  assert.deepEqual(taskSnap.nodes[0].table.rows, [["[ ]", "Revisar PR"]]);
+  assert.equal(taskSnap.attachments[0].name, "demo.mp4");
+  assert.equal(taskSnap.links[0].fromRow, 0);
+});
+
+test("extractAiQuestions e formatQuestionAnswersMessage suportam novos controles interativos", () => {
+  const reply = `Configure os detalhes:\n\n[[APP_QUESTIONS]]\n{\n  "questions": [\n    { "id": "q1", "type": "chips", "prompt": "Prioridade", "options": ["Baixa", "Alta"] },\n    { "id": "q2", "type": "toggle", "prompt": "Incluir checkboxes?", "onLabel": "Sim", "offLabel": "Não", "defaultValue": true },\n    { "id": "q3", "type": "slider", "prompt": "Linhas", "min": 2, "max": 10, "step": 1, "defaultValue": 5, "unit": " lin" },\n    { "id": "q4", "type": "rating", "prompt": "Urgência" },\n    { "id": "q5", "type": "date", "prompt": "Prazo" }\n  ]\n}\n[[/APP_QUESTIONS]]`;
+  const { questionSet } = extractAiQuestions(reply);
+  assert.ok(questionSet);
+  assert.equal(questionSet.questions.length, 5);
+  assert.equal(questionSet.questions[0].type, "chips");
+  assert.equal(questionSet.questions[1].type, "toggle");
+  assert.equal(questionSet.questions[2].type, "slider");
+  assert.equal(questionSet.questions[2].unit, "lin");
+  assert.equal(questionSet.questions[3].type, "rating");
+  assert.equal(questionSet.questions[4].type, "date");
+
+  const formatted = formatQuestionAnswersMessage(questionSet, {
+    q1: ["Alta"],
+    q2: ["Sim"],
+    q3: ["5"],
+    q4: ["4"],
+    q5: ["2026-12-01"]
+  });
+  assert.match(formatted, /1\. Prioridade → Alta/);
+  assert.match(formatted, /3\. Linhas → 5lin/);
+  assert.match(formatted, /4\. Urgência → 4\/5 ★/);
+  assert.match(formatted, /5\. Prazo → 2026-12-01/);
+});

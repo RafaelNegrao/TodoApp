@@ -64,6 +64,7 @@ fn set_translator_floating_mode(
     app: tauri::AppHandle,
     state: State<'_, FloatingTranslatorState>,
     floating: bool,
+    mode: Option<String>,
 ) -> Result<(), String> {
     let Some(window) = app.get_webview_window("main") else {
         return Err("Main window not found".to_string());
@@ -75,6 +76,7 @@ fn set_translator_floating_mode(
         .map_err(|_| "Floating translator state lock poisoned".to_string())?;
 
     if floating {
+        let is_chat = mode.as_deref() == Some("chat");
         if guard.is_none() {
             let was_maximized = window.is_maximized().unwrap_or(false);
             let position = window.outer_position().ok();
@@ -88,8 +90,13 @@ fn set_translator_floating_mode(
                 let _ = window.unmaximize();
             }
         }
-        let _ = window.set_min_size(Some(tauri::LogicalSize::new(240.0, 220.0)));
-        let _ = window.set_size(tauri::LogicalSize::new(340.0, 320.0));
+        let (min_w, min_h, width, height) = if is_chat {
+            (300.0, 340.0, 400.0, 560.0)
+        } else {
+            (240.0, 220.0, 340.0, 320.0)
+        };
+        let _ = window.set_min_size(Some(tauri::LogicalSize::new(min_w, min_h)));
+        let _ = window.set_size(tauri::LogicalSize::new(width, height));
         let _ = window.set_always_on_top(true);
         let _ = window.set_resizable(true);
         let _ = window.show();
@@ -578,6 +585,218 @@ struct AiChatReply {
     model: String,
 }
 
+#[cfg(target_os = "windows")]
+mod win_screen_snapshot {
+    use super::encode_base64;
+    use std::ptr;
+    use std::thread;
+    use std::time::Duration;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Gdi::{
+        BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC,
+        GetMonitorInfoW, MonitorFromWindow, ReleaseDC, SelectObject, SetStretchBltMode, StretchBlt,
+        BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HALFTONE, HGDIOBJ, MONITORINFO,
+        MONITOR_DEFAULTTONEAREST, SRCCOPY,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, SetWindowDisplayAffinity, SM_CXSCREEN, SM_CYSCREEN,
+        WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+    };
+
+    const MAX_CAPTURE_WIDTH: i32 = 1440;
+
+    fn encode_rgb_to_png(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+        let mut out = Vec::with_capacity((width * height) as usize);
+        {
+            let mut encoder = png::Encoder::new(&mut out, width, height);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.set_compression(png::Compression::Fast);
+            let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+            writer.write_image_data(rgb).map_err(|e| e.to_string())?;
+        }
+        Ok(out)
+    }
+
+    pub fn capture_monitor_png_base64(raw_hwnd: isize) -> Result<String, String> {
+        unsafe {
+            let hwnd = HWND(raw_hwnd as *mut std::ffi::c_void);
+            let excluded = if !hwnd.0.is_null() {
+                let ok = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE).is_ok();
+                if ok {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                ok
+            } else {
+                false
+            };
+
+            let capture_res = capture_monitor_inner(hwnd);
+
+            if excluded {
+                let _ = SetWindowDisplayAffinity(hwnd, WDA_NONE);
+            }
+
+            capture_res
+        }
+    }
+
+    unsafe fn capture_monitor_inner(hwnd: HWND) -> Result<String, String> {
+        let mut left = 0;
+        let mut top = 0;
+        let mut src_w = GetSystemMetrics(SM_CXSCREEN).max(640);
+        let mut src_h = GetSystemMetrics(SM_CYSCREEN).max(480);
+
+        if !hwnd.0.is_null() {
+            let hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            let mut mi = MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            if GetMonitorInfoW(hmon, &mut mi).as_bool() {
+                let r = mi.rcMonitor;
+                let w = r.right - r.left;
+                let h = r.bottom - r.top;
+                if w > 0 && h > 0 {
+                    left = r.left;
+                    top = r.top;
+                    src_w = w;
+                    src_h = h;
+                }
+            }
+        }
+
+        let (out_w, out_h) = if src_w > MAX_CAPTURE_WIDTH {
+            let scale = (MAX_CAPTURE_WIDTH as f64) / (src_w as f64);
+            (
+                MAX_CAPTURE_WIDTH,
+                ((src_h as f64) * scale).round().max(1.0) as i32,
+            )
+        } else {
+            (src_w, src_h)
+        };
+
+        let hdc_screen = GetDC(None);
+        if hdc_screen.is_invalid() {
+            return Err("Nao foi possivel obter DC da tela".to_string());
+        }
+        let hdc_mem = CreateCompatibleDC(Some(hdc_screen));
+        if hdc_mem.is_invalid() {
+            let _ = ReleaseDC(None, hdc_screen);
+            return Err("Falha ao criar DC em memoria".to_string());
+        }
+
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: out_w,
+                biHeight: -out_h, // Top-down DIB para conversao direta em PNG
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                biSizeImage: (out_w * out_h * 4) as u32,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let mut dib_bits: *mut std::ffi::c_void = ptr::null_mut();
+        let Ok(hbitmap) = CreateDIBSection(
+            Some(hdc_mem),
+            &bmi,
+            DIB_RGB_COLORS,
+            &mut dib_bits,
+            None,
+            0,
+        ) else {
+            let _ = DeleteDC(hdc_mem);
+            let _ = ReleaseDC(None, hdc_screen);
+            return Err("Falha ao alocar DIBSection".to_string());
+        };
+        if hbitmap.is_invalid() || dib_bits.is_null() {
+            let _ = DeleteDC(hdc_mem);
+            let _ = ReleaseDC(None, hdc_screen);
+            return Err("DIBSection invalida".to_string());
+        }
+
+        let old_obj: HGDIOBJ = SelectObject(hdc_mem, hbitmap.into());
+        let blit_ok = if out_w == src_w && out_h == src_h {
+            BitBlt(
+                hdc_mem,
+                0,
+                0,
+                out_w,
+                out_h,
+                Some(hdc_screen),
+                left,
+                top,
+                SRCCOPY,
+            )
+            .is_ok()
+        } else {
+            let _ = SetStretchBltMode(hdc_mem, HALFTONE);
+            StretchBlt(
+                hdc_mem,
+                0,
+                0,
+                out_w,
+                out_h,
+                Some(hdc_screen),
+                left,
+                top,
+                src_w,
+                src_h,
+                SRCCOPY,
+            )
+            .as_bool()
+        };
+
+        let result = if blit_ok {
+            let pixel_count = (out_w * out_h) as usize;
+            let bgra = std::slice::from_raw_parts(dib_bits as *const u8, pixel_count * 4);
+            let mut rgb = Vec::with_capacity(pixel_count * 3);
+            for px in bgra.chunks_exact(4) {
+                rgb.push(px[2]); // R
+                rgb.push(px[1]); // G
+                rgb.push(px[0]); // B
+            }
+            encode_rgb_to_png(&rgb, out_w as u32, out_h as u32).map(|png| encode_base64(&png))
+        } else {
+            Err("Falha ao capturar tela".to_string())
+        };
+
+        SelectObject(hdc_mem, old_obj);
+        let _ = DeleteObject(hbitmap.into());
+        let _ = DeleteDC(hdc_mem);
+        let _ = ReleaseDC(None, hdc_screen);
+
+        result
+    }
+}
+
+#[tauri::command]
+async fn capture_current_monitor_png(app: tauri::AppHandle) -> Result<String, String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = app;
+        Err("Captura de tela disponivel apenas no Windows".to_string())
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let raw_hwnd = app
+            .get_webview_window("main")
+            .and_then(|w| w.hwnd().ok())
+            .map(|h| h.0 as isize)
+            .unwrap_or(0);
+        tauri::async_runtime::spawn_blocking(move || {
+            win_screen_snapshot::capture_monitor_png_base64(raw_hwnd)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+}
+
 #[tauri::command]
 async fn ai_chat_english(
     messages: Vec<AiChatMessage>,
@@ -599,15 +818,44 @@ async fn ai_chat_english(
     tauri::async_runtime::spawn_blocking(move || {
         let system_prompt = format!(
             "You are the integrated AI Agent of TODOCompanion with full visibility and control over the entire application.\n\
-             You can hold natural multi-turn conversations, ask clarifying questions, suggest improvements, analyze attached images/PDFs/audio/files, summarize tasks/cards across the entire app, AND propose actions to control the app (users, tasks, cards, checklists, tables, connections, canvas layout, clipboard copy, navigation, and settings).\n\
+             You can hold natural multi-turn conversations, ask clarifying questions, suggest improvements, analyze attached images/PDFs/audio/files, summarize tasks/cards across the entire app, AND propose actions to control the app (users, tasks, action cards, Excel table cards, Todo List table cards, checklists, per-row connections, canvas layout, clipboard copy, navigation, and settings).\n\
              Always reply in the same language the user writes in.\n\n\
+             APP FEATURES & CAPABILITIES (know everything the app has):\n\
+             1. Hierarchy: Users -> Main Tasks (status: ongoing|stopped|complete, priority: low|normal|high|urgent, criticality: 0|1|2, startDate, endDate, attachments) -> Canvas Cards & Links.\n\
+             2. Card Types:\n\
+                - Action Card (type: \"action\"): rich text (<b>, <i>, <u>, <s>, lists), inline checklists (\"[ ] item\" / \"[x] item\"), inline images, inline video player (\"![video](userId/file)\" for recorded/attached videos), attachment chips (\"@[name](attachment:id)\").\n\
+                - Table Card (type: \"table\", hasCheckboxes: false): the table itself IS the card (compact minimal borders, no bottom format bar, auto-fit height, individual input & output connection ports on EVERY ROW, horizontal resize).\n\
+                - Todo List Table Card (type: \"table\", hasCheckboxes: true): same clean table-card style with interactive checkboxes (\"[ ]\" / \"[x]\") in column A + per-row input/output connection ports.\n\
+                - Image Card (type: \"image\"): standalone visual image card with fullscreen preview.\n\
+             3. Excel Formula Engine in Tables (EN & PT-BR, supports nested formulas, ';'/',' separators, '%', '&', '$A$1', ranges A1:C5, and checkbox booleans TRUE/FALSE in Todo tables):\n\
+                - Math/Aggregation: SUM/SOMA, AVERAGE/AVG/MEDIA, MIN/MINIMO, MAX/MAXIMO, MEDIAN/MED, PRODUCT/MULT, COUNT/CONT/CONT.NUM, COUNTA/CONT.VALORES, COUNTBLANK/CONTAR.VAZIO, ABS, ROUND/ARRED, ROUNDUP, ROUNDDOWN, INT, SQRT/RAIZ, POWER/POTENCIA, MOD.\n\
+                - Logic & Conditional: IF/SE, AND/E, OR/OU, NOT/NAO, IFERROR/SEERRO, SUMIF/SOMASE, COUNTIF/CONT.SE, AVERAGEIF/MEDIASE.\n\
+                - Text, Lookup & Date: CONCAT/CONCATENAR, UPPER/MAIUSCULA, LOWER/MINUSCULA, LEN/NUM.CARACT, TRIM/ARRUMAR, LEFT/ESQUERDA, RIGHT/DIREITA, MID/EXT.TEXTO, VLOOKUP/PROCV, TODAY/HOJE, NOW/AGORA.\n\
+             4. Per-row Connections: Table cards and Todo List table cards have input & output ports on every row (0-indexed: fromRow, toRow in connect_cards).\n\
+             5. Attachments & Recordings: Native screen+audio (.mp4) and audio-only (.m4a) recording saved in task's anexos folder, automatic sync with disk folder, rename/delete with confirmation, AI transcription, and inline video playback directly inside cards (use \"![video](userId/file)\" referencing an existing attachment from task.attachments).\n\
+             6. IMPORTANT CARD SELECTION RULE:\n\
+                - Whenever the user asks to create a table (\"tabela\", \"planilha\", \"orçamento\", \"cronograma em tabela\") -> ALWAYS use \"create_table_card\" with \"hasCheckboxes\": false (and use real Excel formulas like =SOMA(B2:B4) when totals/calculations make sense!).\n\
+                - Whenever the user asks to create a Todo List table (\"todo list\", \"lista de todo\", \"tabela de tarefas\", \"tabela com checkbox\") -> ALWAYS use \"create_table_card\" with \"hasCheckboxes\": true (put \"[ ]\" or \"[x]\" in column 0, followed by task columns).\n\
+                - NEVER use plain text \"create_card\" when the user asks for a table or Todo List table!\n\
+             7. Live Screen Vision (Floating Mini-Chat):\n\
+                - When the user asks a question from the floating mini-chat, a live screenshot of their current monitor (current_screen.png) is automatically attached.\n\
+                - Look directly at what is visible on the user's screen (fields, labels, forms, buttons, errors, code, processes) and answer directly, clearly, and concisely about what you see.\n\
+                - Do NOT propose [[APP_ACTIONS]] when the user is just asking about what is on their screen, unless they explicitly ask to create/edit something in TODOCompanion.\n\n\
              INTERACTIVE QUESTIONS & CLARIFICATION RULE:\n\
              - NEVER ask a plain-text 'Você tem certeza?' / 'Are you sure?' when the user's request is already clear (including destructive requests like deleting tasks/cards/users). Instead, go straight to [[APP_ACTIONS]] — the UI already shows an interactive confirmation card with 'Permitir e executar' and 'Recusar' buttons.\n\
-             - Whenever you DO need to ask the user a question (ambiguous request, multiple matching tasks/cards/users, choosing between options like copy vs. move, selecting which tasks/cards to act on, choosing status/priority, or follow-up choices), you MUST include ONE interactive question block at the end of your reply using EXACTLY these tags and valid JSON (and omit [[APP_ACTIONS]] until the user answers):\n\
+             - Whenever you DO need to ask the user a question (ambiguous request, multiple matching tasks/cards/users, choosing between options, collecting parameters/dates/priorities/quantities, or offering next steps), you MUST include ONE interactive question block at the end of your reply using EXACTLY these tags and valid JSON (and omit [[APP_ACTIONS]] until the user answers):\n\
              [[APP_QUESTIONS]]\n\
-             {{\"questions\":[{{\"id\":\"q1\",\"prompt\":\"Question text\",\"multiSelect\":false,\"allowCustom\":true,\"options\":[{{\"label\":\"Option A\",\"value\":\"Option A\",\"description\":\"Short detail\"}},{{\"label\":\"Option B\",\"value\":\"Option B\"}}]}}]}}\n\
+             {{\"questions\":[{{\"id\":\"q1\",\"type\":\"choice|checkbox|chips|toggle|slider|rating|text|date\",\"prompt\":\"Question text\",\"multiSelect\":false,\"allowCustom\":true,\"options\":[{{\"label\":\"Option A\",\"value\":\"Option A\",\"description\":\"Short detail\",\"badge\":\"Recomendado\"}}]}}]}}\n\
              [[/APP_QUESTIONS]]\n\
-             - Set \"multiSelect\":true whenever the user can pick more than one option (e.g., selecting multiple tasks or cards). Keep option labels short and clickable.\n\n\
+             - Pick the richest control type for each question:\n\
+               * \"choice\": single-select radio cards (supports label, description, optional badge).\n\
+               * \"checkbox\": multi-select checkboxes (user checks several items and clicks Enviar).\n\
+               * \"chips\": compact clickable tag pills (single or multiSelect:true, ideal for status/priority/columns/tags).\n\
+               * \"toggle\": Yes/No sliding switch (optional onLabel, offLabel, defaultValue: true|false).\n\
+               * \"slider\": numeric range slider (min, max, step, defaultValue, unit — e.g. rows/columns/percentage).\n\
+               * \"rating\": 1-5 interactive star rating.\n\
+               * \"text\" or \"date\": inline text input (placeholder, defaultValue) or date picker (YYYY-MM-DD).\n\
+             - You can combine multiple different control types in the same [[APP_QUESTIONS]] card (e.g. a text title + chips for priority + toggle for checkboxes + date for deadline)!\n\n\
              CRITICAL PERMISSION RULE:\n\
              Once the user's intent is clear and they want you to CREATE, EDIT, DELETE, DUPLICATE, MOVE, CONNECT, SHOW/OPEN, COPY, ORGANIZE, or CHANGE SETTINGS in the app, you MUST ask for permission by including ONE structured action block at the end of your reply using EXACTLY these tags and valid JSON:\n\
              [[APP_ACTIONS]]\n\
@@ -625,14 +873,15 @@ async fn ai_chat_english(
              - {{\"type\":\"delete_task\",\"taskId\":\"...\",\"taskTitle\":\"...\"}}\n\
              - {{\"type\":\"duplicate_task\",\"taskId\":\"...\",\"taskTitle\":\"...\"}}\n\
              - {{\"type\":\"select_task\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"userName\":\"...\"}}\n\
-             - {{\"type\":\"create_card\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"userName\":\"...\",\"body\":\"...\",\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2,\"parentCardId\":\"...|$LAST_CARD\",\"tableRows\":[[\"A\",\"B\"],[\"1\",\"2\"]]}}\n\
+             - {{\"type\":\"create_table_card\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"userName\":\"...\",\"hasCheckboxes\":false|true,\"rows\":[[\"Item\",\"Qtd\",\"Valor\"],[\"A\",\"2\",\"10\"],[\"Total\",\"=SOMA(B2:B2)\",\"=SOMA(C2:C2)\"]],\"parentCardId\":\"...|$LAST_CARD\",\"parentRow\":0}}\n\
+             - {{\"type\":\"create_card\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"userName\":\"...\",\"body\":\"...\",\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2,\"parentCardId\":\"...|$LAST_CARD\"}}\n\
              - {{\"type\":\"update_card\",\"cardId\":\"...|$LAST_CARD\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"body\":\"...\",\"appendBody\":\"...\",\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2}}\n\
              - {{\"type\":\"delete_card\",\"cardId\":\"...|$LAST_CARD\",\"taskId\":\"...\",\"taskTitle\":\"...\"}}\n\
              - {{\"type\":\"duplicate_card\",\"cardId\":\"...|$LAST_CARD\",\"taskId\":\"...\",\"taskTitle\":\"...\"}}\n\
              - {{\"type\":\"copy_card_to_task\",\"sourceCardId\":\"...\",\"sourceTaskId\":\"...\",\"sourceTaskTitle\":\"...\",\"targetTaskId\":\"...\",\"targetTaskTitle\":\"...\",\"targetUserName\":\"...\"}}\n\
              - {{\"type\":\"move_card_to_task\",\"sourceCardId\":\"...\",\"sourceTaskId\":\"...\",\"sourceTaskTitle\":\"...\",\"targetTaskId\":\"...\",\"targetTaskTitle\":\"...\",\"targetUserName\":\"...\"}}\n\
              - {{\"type\":\"focus_card\",\"cardId\":\"...|$LAST_CARD\",\"taskId\":\"...\",\"taskTitle\":\"...\"}}\n\
-             - {{\"type\":\"connect_cards\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"fromCardId\":\"...|$LAST_CARD\",\"toCardId\":\"...|$LAST_CARD\"}}\n\
+             - {{\"type\":\"connect_cards\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"fromCardId\":\"...|$LAST_CARD\",\"toCardId\":\"...|$LAST_CARD\",\"fromRow\":0,\"toRow\":0}}\n\
              - {{\"type\":\"disconnect_cards\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"fromCardId\":\"...\",\"toCardId\":\"...\"}}\n\
              - {{\"type\":\"organize_canvas\"}}\n\
              - {{\"type\":\"center_canvas\"}}\n\
@@ -4316,6 +4565,7 @@ fn main() {
             read_file_bytes,
             ai_translate_fast,
             ai_chat_english,
+            capture_current_monitor_png,
             transcribe_audio_gemini,
             transcribe_attachment_zoom_summary,
             ai_audio_capture_start,

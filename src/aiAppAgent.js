@@ -3,6 +3,8 @@
 // legiveis para o cartao de permissao e executa as operacoes somente apos
 // aprovacao explicita do usuario.
 
+import { decodeTableData } from "./cardTable.js";
+
 export const AI_ACTIONS_OPEN_TAG = "[[APP_ACTIONS]]";
 export const AI_ACTIONS_CLOSE_TAG = "[[/APP_ACTIONS]]";
 export const AI_QUESTIONS_OPEN_TAG = "[[APP_QUESTIONS]]";
@@ -63,29 +65,63 @@ export function extractAiQuestions(rawText) {
         ? [parsed]
         : [];
 
+    const VALID_QUESTION_TYPES = new Set([
+      "choice",
+      "checkbox",
+      "chips",
+      "toggle",
+      "slider",
+      "rating",
+      "text",
+      "date"
+    ]);
+
     const questions = rawList
       .map((q, idx) => {
         const prompt = String(q?.prompt || q?.question || "").trim();
+        if (!prompt) return null;
+
+        const rawType = String(q?.type || "").trim().toLowerCase();
+        const inferredType = VALID_QUESTION_TYPES.has(rawType)
+          ? rawType
+          : q?.multiSelect
+            ? "checkbox"
+            : "choice";
+
         const options = Array.isArray(q?.options)
           ? q.options
               .map(opt => {
                 if (typeof opt === "string") {
-                  return { label: opt.trim(), value: opt.trim(), description: "" };
+                  return { label: opt.trim(), value: opt.trim(), description: "", badge: "" };
                 }
                 const label = String(opt?.label || opt?.value || "").trim();
                 const value = String(opt?.value || opt?.label || "").trim();
                 const description = String(opt?.description || "").trim();
-                return label ? { label, value, description } : null;
+                const badge = String(opt?.badge || "").trim();
+                return label ? { label, value, description, badge } : null;
               })
               .filter(Boolean)
           : [];
-        if (!prompt || !options.length) return null;
+
+        const needsOptions = inferredType === "choice" || inferredType === "checkbox" || inferredType === "chips";
+        if (needsOptions && !options.length) return null;
+
+        const multiSelect = inferredType === "checkbox" || Boolean(q?.multiSelect);
         return {
           id: String(q?.id || `q${idx + 1}`),
+          type: inferredType,
           prompt,
-          multiSelect: Boolean(q?.multiSelect),
-          allowCustom: q?.allowCustom !== false,
-          options
+          multiSelect,
+          allowCustom: needsOptions && q?.allowCustom !== false,
+          options,
+          min: Number.isFinite(Number(q?.min)) ? Number(q.min) : 0,
+          max: Number.isFinite(Number(q?.max)) ? Number(q.max) : inferredType === "rating" ? 5 : 10,
+          step: Number.isFinite(Number(q?.step)) && Number(q.step) > 0 ? Number(q.step) : 1,
+          defaultValue: q?.defaultValue !== undefined ? q.defaultValue : null,
+          unit: String(q?.unit || "").trim(),
+          placeholder: String(q?.placeholder || "").trim(),
+          onLabel: String(q?.onLabel || "Sim").trim(),
+          offLabel: String(q?.offLabel || "Não").trim()
         };
       })
       .filter(Boolean);
@@ -114,13 +150,20 @@ export function formatQuestionAnswersMessage(questionSet, answersMap) {
   const lines = [];
   questions.forEach((q, idx) => {
     const raw = answersMap?.[q.id];
-    const values = Array.isArray(raw) ? raw.filter(Boolean) : raw ? [String(raw)] : [];
+    const values = Array.isArray(raw) ? raw.filter(v => v !== "" && v !== null && v !== undefined) : raw !== undefined && raw !== null && raw !== "" ? [String(raw)] : [];
     if (!values.length) return;
-    const joined = values.join(", ");
+
+    let display = values.join(", ");
+    if (q.type === "slider" && q.unit) {
+      display = `${values[0]}${q.unit}`;
+    } else if (q.type === "rating") {
+      display = `${values[0]}/${q.max || 5} ★`;
+    }
+
     if (questions.length === 1) {
-      lines.push(joined);
+      lines.push(display);
     } else {
-      lines.push(`${idx + 1}. ${q.prompt} → ${joined}`);
+      lines.push(`${idx + 1}. ${q.prompt} → ${display}`);
     }
   });
   return lines.join("\n").trim();
@@ -154,6 +197,11 @@ export function describeAiAction(action) {
       return `Mostrar/abrir task "${action.taskTitle || action.taskId || ""}"`;
     case "create_card":
       return `Criar card: "${String(action.body || "").replace(/\s+/g, " ").slice(0, 48)}"`;
+    case "create_table_card": {
+      const kind = action.hasCheckboxes ? "tabela Todo List" : "tabela";
+      const rowCount = Array.isArray(action.rows) ? action.rows.length : 3;
+      return `Criar card de ${kind} (${rowCount} linhas)`;
+    }
     case "update_card":
       return `Atualizar card ${action.cardId ? `(${action.cardId})` : "selecionado"}`;
     case "delete_card":
@@ -208,14 +256,39 @@ export function buildAppContextSnapshot(state, extras = {}) {
       startDate: t.startDate || "",
       endDate: t.endDate || "",
       isActive: u.id === state.activeUserId && t.id === u.activeTaskId,
-      nodes: (t.nodes || []).map((n, idx) => ({
-        id: n.id,
-        isRoot: idx === 0,
-        status: n.status || "ongoing",
-        criticality: n.criticality ?? 0,
-        body: String(n.body ?? n.title ?? "").slice(0, 600)
+      nodes: (t.nodes || []).map((n, idx) => {
+        const rawBody = String(n.body ?? n.title ?? "");
+        const tableMatch = rawBody.match(/\[\[table:([A-Za-z0-9_-]+)\]\]/);
+        const nodeSnap = {
+          id: n.id,
+          isRoot: idx === 0,
+          type: n.type || "action",
+          status: n.status || "ongoing",
+          criticality: n.criticality ?? 0,
+          body: rawBody.replace(/\[\[table:[A-Za-z0-9_-]+\]\]/g, "[tabela]").slice(0, 600)
+        };
+        if (tableMatch) {
+          const decoded = decodeTableData(tableMatch[1]);
+          nodeSnap.table = {
+            hasCheckboxes: Boolean(decoded.hasCheckboxes),
+            rows: decoded.rows
+          };
+        }
+        return nodeSnap;
+      }),
+      attachments: (t.attachments || []).map(a => ({
+        id: a.id,
+        name: a.name,
+        file: a.file,
+        size: a.size || 0,
+        type: a.type || ""
       })),
-      links: (t.links || []).map(l => ({ from: l.from, to: l.to }))
+      links: (t.links || []).map(l => {
+        const linkSnap = { from: l.from, to: l.to };
+        if (l.fromRow != null) linkSnap.fromRow = l.fromRow;
+        if (l.toRow != null) linkSnap.toRow = l.toRow;
+        return linkSnap;
+      })
     }))
   }));
 
@@ -256,6 +329,7 @@ export function buildActionDependencyMap(actions) {
       !action.taskId &&
       !action.taskTitle &&
       (action.type === "create_card" ||
+        action.type === "create_table_card" ||
         action.type === "update_task" ||
         action.type === "focus_task" ||
         action.type === "organize_canvas" ||
@@ -274,7 +348,7 @@ export function buildActionDependencyMap(actions) {
     if (action.type === "create_task") {
       lastTaskCreatorIdx = idx;
       createdTaskOrCardIndices.push(idx);
-    } else if (action.type === "create_card") {
+    } else if (action.type === "create_card" || action.type === "create_table_card") {
       lastCardCreatorIdx = idx;
       createdTaskOrCardIndices.push(idx);
     }

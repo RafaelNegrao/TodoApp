@@ -320,7 +320,7 @@ async function init() {
 
   newCardForm.addEventListener("submit", saveNewCard);
   document.getElementById("newTodoTableButton")?.addEventListener("click", saveNewTodoTableCard);
-  document.getElementById("newRecordedVideoButton")?.addEventListener("click", saveNewRecordedVideoCard);
+  document.getElementById("newTableCardButton")?.addEventListener("click", saveNewTableCard);
   document.getElementById("recordedVideoToastInsert")?.addEventListener("click", insertPendingRecordedVideoIntoCard);
   document.getElementById("recordedVideoToastClose")?.addEventListener("click", hideRecordedVideoToast);
   updateImageInput?.addEventListener("change", handleUpdateImage);
@@ -1429,6 +1429,102 @@ function updateFormatButtonStates(card) {
   });
 }
 
+const tableRowPortOffsets = new Map();
+
+function getTableNodeRowCount(node) {
+  const cached = tableRowPortOffsets.get(node.id);
+  if (cached && cached.length > 0) return cached.length;
+  const content = getNodeContent(node) || "";
+  const match = content.match(/\[\[table:([A-Za-z0-9_-]+)\]\]/);
+  if (match) {
+    const data = decodeTableData(match[1]);
+    if (data?.rows?.length) return data.rows.length;
+  }
+  return 1;
+}
+
+function getTableRowPortOffsetY(node, rowIndex) {
+  const offsets = tableRowPortOffsets.get(node.id);
+  if (offsets && offsets.length > 0) {
+    const safeIdx = Math.max(0, Math.min(offsets.length - 1, Number(rowIndex) || 0));
+    return offsets[safeIdx];
+  }
+  const height = nodeHeight(node);
+  const count = Math.max(1, getTableNodeRowCount(node));
+  const safeIdx = Math.max(0, Math.min(count - 1, Number(rowIndex) || 0));
+  const headerOffset = 48;
+  const usable = Math.max(24, height - headerOffset);
+  return headerOffset + ((safeIdx + 0.5) * usable) / count;
+}
+
+function syncTableCardRowPorts(card, node) {
+  if (!card || !node || node.type !== "table") return;
+  const board = activeBoard();
+  const zoom = board?.view?.zoom || 1;
+  const rows = Array.from(card.querySelectorAll(".card-excel-table tbody tr"));
+  if (!rows.length) return;
+
+  const cardRect = card.getBoundingClientRect();
+  const exactHeight = Math.max(48, Math.round(card.offsetHeight || cardRect.height / zoom));
+  node.h = exactHeight;
+  renderedHeights.set(node.id, exactHeight);
+
+  const offsets = rows.map(tr => {
+    const trRect = tr.getBoundingClientRect();
+    return (trRect.top - cardRect.top + trRect.height / 2) / zoom;
+  });
+  tableRowPortOffsets.set(node.id, offsets);
+
+  card.querySelectorAll(".port.table-row-port").forEach(el => el.remove());
+
+  offsets.forEach((centerY, rowIdx) => {
+    ["in", "out"].forEach(port => {
+      const btn = document.createElement("button");
+      const isPending =
+        linkDragState?.nodeId === node.id &&
+        linkDragState?.port === port &&
+        linkDragState?.row === rowIdx;
+      btn.type = "button";
+      btn.className = `port port-${port} table-row-port${isPending ? " pending" : ""}`;
+      btn.dataset.port = port;
+      btn.dataset.row = String(rowIdx);
+      btn.style.top = `${Math.round(centerY * 10) / 10}px`;
+      btn.setAttribute("aria-label", `${port === "in" ? "Entrada" : "Saída"} linha ${rowIdx + 1}`);
+      btn.addEventListener("pointerdown", event => startLinkDrag(event, node.id, port, rowIdx));
+      card.appendChild(btn);
+    });
+  });
+}
+
+function adjustLinksForTableRowMutation(nodeId, action, rowIndex) {
+  const board = activeBoard();
+  if (!board?.links?.length) return;
+  if (action === "addRow") {
+    board.links.forEach(link => {
+      if (link.from === nodeId && link.fromRow != null && link.fromRow > rowIndex) {
+        link.fromRow += 1;
+      }
+      if (link.to === nodeId && link.toRow != null && link.toRow > rowIndex) {
+        link.toRow += 1;
+      }
+    });
+  } else if (action === "delRow") {
+    board.links = board.links.filter(link => {
+      if (link.from === nodeId && link.fromRow === rowIndex) return false;
+      if (link.to === nodeId && link.toRow === rowIndex) return false;
+      return true;
+    });
+    board.links.forEach(link => {
+      if (link.from === nodeId && link.fromRow != null && link.fromRow > rowIndex) {
+        link.fromRow -= 1;
+      }
+      if (link.to === nodeId && link.toRow != null && link.toRow > rowIndex) {
+        link.toRow -= 1;
+      }
+    });
+  }
+}
+
 function capturePreservedCardVideos(currentBoardId) {
   const preserved = new Map();
   if (!currentBoardId || nodesLayer.dataset.boardId !== currentBoardId) {
@@ -1505,7 +1601,8 @@ function renderNodes() {
       justCreated ? "just-created" : "",
       hasFixedHeight ? "fixed-height" : "",
       rootCard ? "root-card" : "",
-      node.type === "image" ? "image-card" : ""
+      node.type === "image" ? "image-card" : "",
+      node.type === "table" ? "table-card" : ""
     ].filter(Boolean).join(" ");
     card.dataset.id = node.id;
     card.dataset.status = status;
@@ -1521,16 +1618,23 @@ function renderNodes() {
     card.style.left = `${node.x}px`;
     card.style.top = `${node.y}px`;
     card.style.width = `${node.w}px`;
-    card.style.minHeight = `${node.h}px`;
-    card.style.height = `${node.h}px`;
-    card.classList.add("fixed-height");
+    if (node.type === "table") {
+      card.style.minHeight = "";
+      card.style.height = "auto";
+      card.classList.remove("fixed-height");
+    } else {
+      card.style.minHeight = `${node.h}px`;
+      card.style.height = `${node.h}px`;
+      card.classList.add("fixed-height");
+    }
 
-    const createdAtHtml = (!rootCard && node.createdAt && node.type !== "image")
+    const isTableCard = node.type === "table";
+    const createdAtHtml = (!rootCard && node.createdAt && node.type !== "image" && !isTableCard)
       ? `<span class="card-created-at">${formatCreatedAt(node.createdAt)}</span>`
       : "";
     card.innerHTML = `
-      ${rootCard ? "" : `<button class="port port-in${linkDragState?.nodeId === node.id && linkDragState?.port === "in" ? " pending" : ""}" data-port="in" type="button" aria-label="Input"></button>`}
-      <button class="port port-out${pendingLink?.from === node.id || (linkDragState?.nodeId === node.id && linkDragState?.port === "out") ? " pending" : ""}" data-port="out" type="button" aria-label="Output"></button>
+      ${rootCard || isTableCard ? "" : `<button class="port port-in${linkDragState?.nodeId === node.id && linkDragState?.port === "in" ? " pending" : ""}" data-port="in" type="button" aria-label="Input"></button>`}
+      ${isTableCard ? "" : `<button class="port port-out${pendingLink?.from === node.id || (linkDragState?.nodeId === node.id && linkDragState?.port === "out") ? " pending" : ""}" data-port="out" type="button" aria-label="Output"></button>`}
       <div class="card-bento-inner">
         ${rootCard ? "" : node.type === "image" ? `
           <div class="card-top image-card-top">
@@ -1541,6 +1645,13 @@ function renderNodes() {
               ${node.imageUrl ? `<button class="image-card-fullscreen-btn" type="button" aria-label="Tela cheia" title="Tela cheia">${icons.fullscreen}</button>` : ""}
               <button class="card-action" type="button" aria-label="Remove" title="Remove">${icons.close}</button>
             </div>
+          </div>
+        ` : isTableCard ? `
+          <div class="card-top table-card-top">
+            <div class="card-drag-handle" title="Arrastar tabela" aria-label="Arrastar tabela">
+              ${icons.grip}
+            </div>
+            <button class="card-action" type="button" aria-label="Remove" title="Remove">${icons.close}</button>
           </div>
         ` : `
           <div class="card-top">
@@ -1572,9 +1683,11 @@ function renderNodes() {
           ? node.imageUrl
             ? `<div class="card-body image-card-body" role="img" aria-label="Attached image"><img src="${node.imageUrl}" alt="Card image" draggable="false" /></div>`
             : `<div class="card-body image-card-body empty-image-card" role="button" aria-label="Add image" title="Add image" onclick="document.getElementById('updateImageInput').click(); window.nodeToUpdateImage = '${node.id}';">${icons.image}</div>`
-          : `<div class="card-body" contenteditable="true" role="textbox" aria-label="Card content">${renderBodyHtml(getNodeContent(node))}</div>`}
+          : isTableCard
+            ? `<div class="card-body table-card-body" contenteditable="false" aria-label="Table card">${renderBodyHtml(getNodeContent(node))}</div>`
+            : `<div class="card-body" contenteditable="true" role="textbox" aria-label="Card content">${renderBodyHtml(getNodeContent(node))}</div>`}
         </div>
-        ${rootCard ? "" : node.type === "image" && node.imageUrl ? `
+        ${rootCard || isTableCard ? "" : node.type === "image" && node.imageUrl ? `
           <div class="image-card-bottom" contenteditable="false">
             <button class="image-card-btn" type="button" data-command="changeImage" title="Change Image">${icons.image}</button>
             <button class="image-card-btn" type="button" data-command="clearImage" title="Remove Image">${icons.close}</button>
@@ -1927,7 +2040,7 @@ function renderNodes() {
       saveState();
     });
 
-    card.querySelector(".port-out").addEventListener("pointerdown", event => startLinkDrag(event, node.id, "out"));
+    card.querySelector(".port-out")?.addEventListener("pointerdown", event => startLinkDrag(event, node.id, "out"));
     card.querySelector(".port-in")?.addEventListener("pointerdown", event => startLinkDrag(event, node.id, "in"));
     card.querySelector(".resize-handle")?.addEventListener("pointerdown", event => startResize(event, node.id));
 
@@ -2057,6 +2170,9 @@ function renderNodes() {
     }
 
     nodesLayer.appendChild(card);
+    if (node.type === "table") {
+      syncTableCardRowPorts(card, node);
+    }
   });
 
   // Retoma a reproducao dos videos preservados sem reiniciar nem perder o ponto atual
@@ -2079,13 +2195,24 @@ function renderNodes() {
   renderedHeights.clear();
   board.nodes.forEach(node => {
     const el = nodesLayer.querySelector(`[data-id="${node.id}"]`);
-    if (el) renderedHeights.set(node.id, node.h > 0 ? node.h : el.offsetHeight);
+    if (el) {
+      if (node.type === "table") {
+        const h = Math.max(48, Math.round(el.offsetHeight || node.h || 96));
+        node.h = h;
+        renderedHeights.set(node.id, h);
+      } else {
+        renderedHeights.set(node.id, node.h > 0 ? node.h : el.offsetHeight);
+      }
+    }
   });
 }
 
 // Altura usada para posicionar ports/linhas: altura fixa quando o card foi
 // redimensionado, senao a altura real renderizada com snap para a grade, com fallback de 144.
 function nodeHeight(node) {
+  if (node.type === "table") {
+    return renderedHeights.get(node.id) || node.h || 144;
+  }
   const minH = node.type === "image" ? 48 : 96;
   if (node.h > 0) return Math.max(minH, Math.round(node.h / 48) * 48);
   const measured = renderedHeights.get(node.id);
@@ -2099,27 +2226,120 @@ function nodeHeight(node) {
 // que apontam para eles) continuam na altura antiga ate o proximo render()
 // completo. Coalescido por frame para nao forcar reflow a cada tecla.
 let nodeHeightSyncFrame = null;
+const pendingHeightSyncNodes = new Set();
+
+function estimateActionCardSize(bodyText) {
+  const GRID = 24;
+  const HEIGHT_GRID = 48;
+  const raw = String(bodyText || "");
+  const plain = raw
+    .replace(/<[^>]+>/g, "")
+    .replace(/\[\[table:[^\]]+\]\]/g, "")
+    .replace(/!\[(?:image|video)\]\([^)]+\)/g, "")
+    .replace(/@\[([^\]]+)\]\(attachment:[^)]+\)/g, "@$1");
+  const lines = plain.split(/\r?\n/);
+  const maxLineLen = lines.reduce((m, l) => Math.max(m, l.trim().length), 0);
+  const totalChars = plain.trim().length;
+  const hasVideo = /!\[video\]\([^)]+\)/.test(raw);
+  const hasImage = /!\[image\]\([^)]+\)/.test(raw);
+  const hasTable = /\[\[table:[^\]]+\]\]/.test(raw);
+
+  let w = 288;
+  if (hasTable || totalChars > 260 || maxLineLen > 52) {
+    w = 432;
+  } else if (hasVideo || totalChars > 140 || maxLineLen > 36) {
+    w = 360;
+  } else if (totalChars > 60 || maxLineLen > 24) {
+    w = 336;
+  }
+
+  const charsPerLine = Math.max(18, Math.floor((w - 36) / 7.6));
+  let wrappedLines = 0;
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      wrappedLines += 0.6;
+      return;
+    }
+    const effectiveCharsPerLine = idx === 0 ? Math.max(14, Math.floor(charsPerLine * 0.78)) : charsPerLine;
+    wrappedLines += Math.max(1, Math.ceil(trimmed.length / effectiveCharsPerLine));
+  });
+
+  // 84px de chrome (top bar + format bar + paddings) + ~22px por linha
+  let estH = 88 + Math.ceil(wrappedLines * 22);
+  if (hasVideo) estH += 220;
+  if (hasImage) estH += 140;
+  if (hasTable) estH += 140;
+
+  w = Math.max(288, Math.min(480, Math.ceil(w / GRID) * GRID));
+  const h = Math.max(144, Math.min(576, Math.ceil(estH / HEIGHT_GRID) * HEIGHT_GRID));
+  return { w, h };
+}
+
+function estimateTableCardDimensions(tableData) {
+  const GRID = 24;
+  const rows = Array.isArray(tableData?.rows) ? tableData.rows : [];
+  const hasChecks = Boolean(tableData?.hasCheckboxes);
+  const colCount = Math.max(1, rows.reduce((m, r) => Math.max(m, Array.isArray(r) ? r.length : 0), 0));
+
+  let totalWidth = 24;
+  for (let c = 0; c < colCount; c++) {
+    if (hasChecks && c === 0) {
+      totalWidth += 38;
+      continue;
+    }
+    let maxChars = 0;
+    for (const r of rows) {
+      const cellStr = String(r?.[c] ?? "").trim();
+      const visibleLen = cellStr.startsWith("=") ? Math.min(12, cellStr.length) : cellStr.length;
+      if (visibleLen > maxChars) maxChars = visibleLen;
+    }
+    const colW = Math.max(110, Math.min(280, Math.round(maxChars * 8.4 + 28)));
+    totalWidth += colW;
+  }
+
+  const w = Math.max(384, Math.min(864, Math.ceil(totalWidth / GRID) * GRID));
+  const h = Math.max(144, 56 + rows.length * 34);
+  return { w, h };
+}
+
 function scheduleNodeHeightSync(nodeId, card) {
+  if (nodeId) pendingHeightSyncNodes.add(nodeId);
   if (nodeHeightSyncFrame) return;
   nodeHeightSyncFrame = requestAnimationFrame(() => {
     nodeHeightSyncFrame = null;
-    if (!card.isConnected) return;
+    const ids = [...pendingHeightSyncNodes];
+    pendingHeightSyncNodes.clear();
     const board = activeBoard();
-    const node = board?.nodes.find(n => n.id === nodeId);
-    if (!node) return;
-    const bodyEl = card.querySelector(".card-body");
-    if (bodyEl && bodyEl.scrollHeight > bodyEl.clientHeight) {
-      const extra = bodyEl.scrollHeight - bodyEl.clientHeight;
-      const newHeight = Math.ceil((nodeHeight(node) + extra) / 48) * 48;
-      const width = Math.max(node.type === "image" ? 72 : 288, node.w || 288);
-      if (!nodeCollidesWithOthers(board, nodeId, node.x, node.y, width, newHeight)) {
-        node.h = newHeight;
-        card.style.height = `${newHeight}px`;
-        card.style.minHeight = `${newHeight}px`;
-        renderedHeights.set(nodeId, newHeight);
-        renderLinks();
-        saveState();
+    if (!board) return;
+    let changed = false;
+
+    ids.forEach(id => {
+      const cardEl = nodesLayer.querySelector(`.task-card[data-id="${id}"]`);
+      const node = board.nodes.find(n => n.id === id);
+      if (!cardEl || !cardEl.isConnected || !node) return;
+      if (node.type === "table") {
+        syncTableCardRowPorts(cardEl, node);
+        changed = true;
+        return;
       }
+      const bodyEl = cardEl.querySelector(".card-body");
+      if (bodyEl && bodyEl.scrollHeight > bodyEl.clientHeight + 2) {
+        const extra = bodyEl.scrollHeight - bodyEl.clientHeight;
+        const newHeight = Math.min(672, Math.ceil((nodeHeight(node) + extra + 6) / 48) * 48);
+        if (newHeight > nodeHeight(node)) {
+          node.h = newHeight;
+          cardEl.style.height = `${newHeight}px`;
+          cardEl.style.minHeight = `${newHeight}px`;
+          renderedHeights.set(id, newHeight);
+          changed = true;
+        }
+      }
+    });
+
+    if (changed) {
+      renderLinks();
+      saveState();
     }
   });
 }
@@ -2146,13 +2366,13 @@ function renderLinks() {
     const to = nodesById.get(link.to);
     const fromPort = link.fromPort === "top" || link.fromPort === "bottom" ? "out" : (link.fromPort || "out");
     const toPort = link.toPort === "top" || link.toPort === "bottom" ? "in" : (link.toPort || "in");
-    const start = getPortPoint(from, fromPort);
+    const start = getPortPoint(from, fromPort, link.fromRow ?? null);
     // O ponto de destino tem que ser sempre o centro real do port: e dele que sai
     // a ponta da seta. Qualquer "endireitamento" da linha aqui (ex.: forcar
     // end.y = start.y quando os ports estao quase alinhados) desloca a seta da
     // bolinha. O desnivel pequeno fica por conta do roteador, que resolve com um
     // degrau curto antes da entrada.
-    const end = getPortPoint(to, toPort);
+    const end = getPortPoint(to, toPort, link.toRow ?? null);
 
     // Inclui tambem os proprios cards de origem e destino nos obstaculos para que a linha
     // nunca atravesse por baixo do proprio card (ex.: quando os cards estao empilhados verticalmente).
@@ -2239,7 +2459,7 @@ function renderLinks() {
     const source = nodesById.get(linkDragState.nodeId);
     if (source) {
       const dragPort = linkDragState.port;
-      const sourcePoint = getPortPoint(source, dragPort);
+      const sourcePoint = getPortPoint(source, dragPort, linkDragState.row ?? null);
       const cursorPoint = { x: linkDragState.x, y: linkDragState.y };
       const isOut = isOutputPort(dragPort);
       const fromPoint = isOut ? sourcePoint : cursorPoint;
@@ -2427,7 +2647,7 @@ function createSnapGuide(orientation, coord, bounds) {
   return line;
 }
 
-function getPortPoint(node, port) {
+function getPortPoint(node, port, rowIndex = null) {
   const GRID = 24;
   const width = Math.max(node.type === "image" ? 72 : 288, node.w || 288);
   const height = nodeHeight(node);
@@ -2435,6 +2655,13 @@ function getPortPoint(node, port) {
   const snappedY = Math.round(node.y / GRID) * GRID;
   if (port === "top") return { x: snappedX + width / 2, y: snappedY };
   if (port === "bottom") return { x: snappedX + width / 2, y: snappedY + height };
+  if (node.type === "table") {
+    const resolvedRow = rowIndex != null ? rowIndex : 0;
+    return {
+      x: port === "out" ? snappedX + width : snappedX,
+      y: Math.round(snappedY + getTableRowPortOffsetY(node, resolvedRow))
+    };
+  }
   return {
     x: port === "out" ? snappedX + width : snappedX,
     y: Math.round((snappedY + height / 2) / GRID) * GRID
@@ -3787,7 +4014,7 @@ function closeNewCardModal() {
   newCardPosition = null;
 }
 
-function createCanvasCardAtPopup(body = "", width = 288, height = 144) {
+function createCanvasCardAtPopup(body = "", width = 288, height = 144, extra = {}) {
   const board = activeBoard();
   if (!board) return null;
   const pos = newCardPosition ?? getViewportActionPosition();
@@ -3802,7 +4029,8 @@ function createCanvasCardAtPopup(body = "", width = 288, height = 144) {
     x: freePos.x,
     y: freePos.y,
     w: width,
-    h: height
+    h: height,
+    ...extra
   });
   pendingCardPop.add(id);
   selectedNodeId = id;
@@ -3818,56 +4046,32 @@ function saveNewCard(event) {
   createCanvasCardAtPopup("", 288, 144);
 }
 
-function saveNewTodoTableCard(event) {
-  event.preventDefault();
-  const token = serializeTableToken(createTodoTableData(3, 3));
-  const id = createCanvasCardAtPopup(token, 336, 192);
+function createTableCard(tableData, initialFocusCol = 0) {
+  const token = serializeTableToken(tableData);
+  const { w, h } = estimateTableCardDimensions(tableData);
+  const id = createCanvasCardAtPopup(token, w, h, { type: "table" });
   if (!id) return;
   requestAnimationFrame(() => {
     const cardEl = nodesLayer.querySelector(`[data-id="${id}"]`);
     const wrap = cardEl?.querySelector(".card-table-wrap");
-    if (cardEl) scheduleNodeHeightSync(id, cardEl);
-    if (wrap) focusCardTableCell(wrap, 0, 1);
+    const board = activeBoard();
+    const node = board?.nodes?.find(n => n.id === id);
+    if (cardEl && node) {
+      syncTableCardRowPorts(cardEl, node);
+      scheduleNodeHeightSync(id, cardEl);
+    }
+    if (wrap) focusCardTableCell(wrap, 0, initialFocusCol);
   });
 }
 
-async function saveNewRecordedVideoCard(event) {
+function saveNewTodoTableCard(event) {
   event.preventDefault();
-  const savedPos = newCardPosition ? { ...newCardPosition } : null;
-  closeNewCardModal();
+  createTableCard(createTodoTableData(3, 3), 1);
+}
 
-  const user = activeUser();
-  const task = activeMainTask();
-  if (!user || !task) return;
-
-  if (invoke) {
-    try {
-      const subDir = `task${task.number}/anexos`;
-      const pickedPath = await invoke("attachment_pick_file", {
-        userId: user.id,
-        subDir,
-        filterKind: "video"
-      });
-      if (!pickedPath) return;
-      const info = await invoke("attachment_save_from_path", {
-        userId: user.id,
-        subDir,
-        sourcePath: pickedPath
-      });
-      pushAttachment(task, info, inferMimeFromFileName(info.original_name) || "video/mp4");
-      newCardPosition = savedPos;
-      const id = createCanvasCardAtPopup(`![video](${user.id}/${info.file})\n`, 360, 288);
-      if (id) {
-        setTimeout(() => {
-          const cardEl = nodesLayer.querySelector(`.task-card[data-id="${id}"]`);
-          if (cardEl) scheduleNodeHeightSync(id, cardEl);
-        }, 120);
-      }
-      return;
-    } catch (error) {
-      console.warn("Falha ao criar card com vídeo gravado", error);
-    }
-  }
+function saveNewTableCard(event) {
+  event.preventDefault();
+  createTableCard(createDefaultTableData(3, 3), 0);
 }
 
 // Dimensiona um card de imagem a partir do tamanho natural do arquivo, limitando
@@ -4184,11 +4388,24 @@ function findSnapTarget(drag, cursorWorld) {
     for (const port of candidatePorts) {
       if (isRootNode(board, node.id) && isInputPort(port)) continue;
 
-      const point = getPortPoint(node, port);
+      if (node.type === "table") {
+        const rowCount = getTableNodeRowCount(node);
+        for (let r = 0; r < rowCount; r++) {
+          const point = getPortPoint(node, port, r);
+          const dist = Math.hypot(point.x - cursorWorld.x, point.y - cursorWorld.y);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = { nodeId: node.id, port, row: r, point };
+          }
+        }
+        continue;
+      }
+
+      const point = getPortPoint(node, port, null);
       const dist = Math.hypot(point.x - cursorWorld.x, point.y - cursorWorld.y);
       if (dist < bestDist) {
         bestDist = dist;
-        best = { nodeId: node.id, port, point };
+        best = { nodeId: node.id, port, row: null, point };
       }
     }
   }
@@ -4196,7 +4413,7 @@ function findSnapTarget(drag, cursorWorld) {
   return best;
 }
 
-function startLinkDrag(event, nodeId, port) {
+function startLinkDrag(event, nodeId, port, row = null) {
   event.preventDefault();
   event.stopPropagation();
 
@@ -4208,6 +4425,7 @@ function startLinkDrag(event, nodeId, port) {
   linkDragState = {
     nodeId,
     port,
+    row,
     pointerId: event.pointerId,
     startClientX: event.clientX,
     startClientY: event.clientY,
@@ -4236,16 +4454,21 @@ function startLinkDrag(event, nodeId, port) {
       linkDragState.y = snap.point.y;
       linkDragState.snappedNodeId = snap.nodeId;
       linkDragState.snappedPort = snap.port;
+      linkDragState.snappedRow = snap.row ?? null;
     } else {
       linkDragState.x = cursorWorld.x;
       linkDragState.y = cursorWorld.y;
       linkDragState.snappedNodeId = null;
       linkDragState.snappedPort = null;
+      linkDragState.snappedRow = null;
     }
 
-    const hoverPort = snap
-      ? document.querySelector(`.task-card[data-id="${snap.nodeId}"] .port-${snap.port}`)
+    const hoverSelector = snap
+      ? snap.row != null
+        ? `.task-card[data-id="${snap.nodeId}"] .port-${snap.port}[data-row="${snap.row}"]`
+        : `.task-card[data-id="${snap.nodeId}"] .port-${snap.port}`
       : null;
+    const hoverPort = hoverSelector ? document.querySelector(hoverSelector) : null;
 
     if (linkDragState.hoverPortEl && linkDragState.hoverPortEl !== hoverPort) {
       linkDragState.hoverPortEl.classList.remove("target");
@@ -4286,16 +4509,19 @@ function finishLinkDrag(event) {
 
   let targetNodeId = null;
   let targetPort = null;
+  let targetRow = null;
 
   if (drag.snappedNodeId && drag.snappedPort) {
     targetNodeId = drag.snappedNodeId;
     targetPort = drag.snappedPort;
+    targetRow = drag.snappedRow ?? null;
   } else {
     const target = document.elementFromPoint(event.clientX, event.clientY);
     const portEl = target?.closest(".port");
     const targetCard = portEl?.closest(".task-card");
     targetNodeId = targetCard?.dataset.id;
     targetPort = portEl?.dataset.port;
+    targetRow = portEl?.dataset.row != null ? parseInt(portEl.dataset.row, 10) : null;
   }
 
   let createdNodeId = null;
@@ -4304,10 +4530,10 @@ function finishLinkDrag(event) {
     const isForward = isOutputPort(drag.port) && isInputPort(targetPort);
     const isBackward = isInputPort(drag.port) && isOutputPort(targetPort);
     if (isForward) {
-      addLink(drag.nodeId, targetNodeId, drag.port, targetPort);
+      addLink(drag.nodeId, targetNodeId, drag.port, targetPort, drag.row ?? null, targetRow);
       selectedNodeId = targetNodeId;
     } else if (isBackward) {
-      addLink(targetNodeId, drag.nodeId, targetPort, drag.port);
+      addLink(targetNodeId, drag.nodeId, targetPort, drag.port, targetRow, drag.row ?? null);
       selectedNodeId = targetNodeId;
     }
   } else if (isPointInsideBoard(event.clientX, event.clientY)) {
@@ -4360,13 +4586,13 @@ function createCardFromConnection(drag, dropPoint, useReplySpacing = false, type
   pendingCardPop.add(id);
 
   if (drag.port === "top") {
-    addLink(drag.nodeId, id, "top", "bottom");
+    addLink(drag.nodeId, id, "top", "bottom", drag.row ?? null, null);
   } else if (drag.port === "bottom") {
-    addLink(drag.nodeId, id, "bottom", "top");
+    addLink(drag.nodeId, id, "bottom", "top", drag.row ?? null, null);
   } else if (drag.port === "in") {
-    addLink(drag.nodeId, id, "in", "out");
+    addLink(id, drag.nodeId, "out", "in", null, drag.row ?? null);
   } else {
-    addLink(drag.nodeId, id, "out", "in");
+    addLink(drag.nodeId, id, "out", "in", drag.row ?? null, null);
   }
 
   return id;
@@ -4407,7 +4633,7 @@ function getConnectionClickPosition(board, drag, width, height) {
   };
 }
 
-function addLink(from, to, fromPort = "out", toPort = "in") {
+function addLink(from, to, fromPort = "out", toPort = "in", fromRow = null, toRow = null) {
   const board = activeBoard();
   if (!from || !to || from === to) {
     return false;
@@ -4417,11 +4643,25 @@ function addLink(from, to, fromPort = "out", toPort = "in") {
     return false;
   }
 
-  if (board.links.some(link => link.from === from && link.to === to && link.fromPort === fromPort && link.toPort === toPort)) {
+  const sameRow = (a, b) => (a ?? null) === (b ?? null);
+  if (
+    board.links.some(
+      link =>
+        link.from === from &&
+        link.to === to &&
+        link.fromPort === fromPort &&
+        link.toPort === toPort &&
+        sameRow(link.fromRow, fromRow) &&
+        sameRow(link.toRow, toRow)
+    )
+  ) {
     return false;
   }
 
-  board.links.push({ id: makeId("link"), from, to, fromPort, toPort });
+  const entry = { id: makeId("link"), from, to, fromPort, toPort };
+  if (fromRow != null) entry.fromRow = fromRow;
+  if (toRow != null) entry.toRow = toRow;
+  board.links.push(entry);
   return true;
 }
 
@@ -4561,13 +4801,16 @@ function startResize(event, nodeId) {
   const GRID = 24;
   const HEIGHT_GRID = GRID * 2;
   const isImage = node.type === "image";
+  const isTable = node.type === "table";
   const minW = isImage ? 72 : 288;
   const minH = isImage ? 48 : 96;
 
   node.x = Math.round(node.x / GRID) * GRID;
   node.y = Math.round(node.y / GRID) * GRID;
   const initialW = Math.max(minW, Math.round((node.w || minW) / GRID) * GRID);
-  const initialH = Math.max(minH, Math.round((node.h || 144) / HEIGHT_GRID) * HEIGHT_GRID);
+  const initialH = isTable
+    ? Math.max(48, Math.round(card?.offsetHeight || node.h || 144))
+    : Math.max(minH, Math.round((node.h || 144) / HEIGHT_GRID) * HEIGHT_GRID);
   node.w = initialW;
   node.h = initialH;
 
@@ -4580,13 +4823,16 @@ function startResize(event, nodeId) {
     height: initialH
   };
 
-  card?.classList.add("resizing", "selected", "fixed-height");
+  card?.classList.add("resizing", "selected");
+  if (!isTable) card?.classList.add("fixed-height");
   if (card) {
     card.style.left = `${node.x}px`;
     card.style.top = `${node.y}px`;
     card.style.width = `${node.w}px`;
-    card.style.minHeight = `${node.h}px`;
-    card.style.height = `${node.h}px`;
+    if (!isTable) {
+      card.style.minHeight = `${node.h}px`;
+      card.style.height = `${node.h}px`;
+    }
     renderedHeights.set(node.id, node.h);
   }
 
@@ -4600,6 +4846,19 @@ function startResize(event, nodeId) {
     const dy = (moveEvent.clientY - resizeState.startY) / zoom;
 
     const candidateW = Math.max(minW, Math.round((resizeState.width + dx) / GRID) * GRID);
+    if (isTable) {
+      const currentH = Math.max(48, Math.round(card?.offsetHeight || node.h || 144));
+      if (!nodeCollidesWithOthers(board, node.id, node.x, node.y, candidateW, currentH)) {
+        node.w = candidateW;
+      }
+      if (card) {
+        card.style.width = `${node.w}px`;
+        syncTableCardRowPorts(card, node);
+      }
+      renderLinks();
+      return;
+    }
+
     const candidateH = Math.max(minH, Math.round((resizeState.height + dy) / HEIGHT_GRID) * HEIGHT_GRID);
 
     if (!nodeCollidesWithOthers(board, node.id, node.x, node.y, candidateW, candidateH)) {
@@ -5276,9 +5535,17 @@ function handleCardTableAction(btn, editor, node, card) {
     nextFocusC = Math.max(minEditableCol, activeC - 1);
   }
 
+  if (node.type === "table" && (action === "addRow" || action === "delRow")) {
+    adjustLinksForTableRowMutation(node.id, action, activeR);
+  }
+
   replaceCardTableDom(wrap, nextData, nextFocusR, nextFocusC);
   setNodeContent(node, serializeEditableContent(editor));
   saveState();
+  if (node.type === "table") {
+    syncTableCardRowPorts(card, node);
+    renderLinks();
+  }
   scheduleNodeHeightSync(node.id, card);
 }
 
@@ -7752,6 +8019,22 @@ function openAttachmentRowMenu(anchorBtn, row, nameEl, att) {
     menu.appendChild(embedItem);
   }
 
+  if (isAudioOrVideoAttachment(att)) {
+    const key = att.id || att.file;
+    const busy = transcribingAttachments.has(key);
+    const transcribeItem = document.createElement("button");
+    transcribeItem.type = "button";
+    transcribeItem.className = "attachments-row-menu-item";
+    transcribeItem.disabled = busy;
+    transcribeItem.innerHTML = `${icons.micAi}<span>${busy ? "Transcrevendo..." : "Transcrever com IA"}</span>`;
+    transcribeItem.addEventListener("click", event => {
+      event.stopPropagation();
+      closeAllAttachmentRowMenus();
+      transcribeAttachmentToCard(att);
+    });
+    menu.appendChild(transcribeItem);
+  }
+
   const renameItem = document.createElement("button");
   renameItem.type = "button";
   renameItem.className = "attachments-row-menu-item";
@@ -8065,23 +8348,6 @@ function renderAttachmentsPopup() {
 
     row.appendChild(info);
 
-    if (isAudioOrVideoAttachment(att)) {
-      const key = att.id || att.file;
-      const busy = transcribingAttachments.has(key);
-      const trBtn = document.createElement("button");
-      trBtn.type = "button";
-      trBtn.className = `attachments-action attachments-transcribe-btn${busy ? " busy" : ""}`;
-      trBtn.disabled = busy;
-      trBtn.title = busy ? "Transcrevendo com IA..." : "Transcrever com IA";
-      trBtn.setAttribute("aria-label", busy ? "Transcrevendo com IA" : "Transcrever com IA");
-      trBtn.innerHTML = icons.micAi;
-      trBtn.addEventListener("click", event => {
-        event.stopPropagation();
-        transcribeAttachmentToCard(att);
-      });
-      row.appendChild(trBtn);
-    }
-
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.className = "attachments-action";
@@ -8149,6 +8415,14 @@ async function deleteAttachment(att) {
   const user = activeUser();
   const task = activeMainTask();
   if (!user || !task) return;
+  closeAllAttachmentRowMenus();
+  const ok = await openConfirmDelete({
+    title: `Apagar "${att.name}"`,
+    message: "O arquivo será removido permanentemente da pasta de anexos. Esta ação não pode ser desfeita.",
+    requireCode: false,
+    confirmLabel: "Apagar"
+  });
+  if (!ok) return;
   if (invoke) {
     try {
       await invoke("attachment_delete", { userId: user.id, file: att.file });
@@ -8757,13 +9031,15 @@ function initAiTranslatorPanel() {
     openChatBtn?.classList.toggle("active", isOpen && isChat);
     if (chatHistoryToggle) chatHistoryToggle.hidden = !isChat;
     if (newChatBtn) newChatBtn.hidden = !isChat;
-    if (minimizeFloatingBtn) minimizeFloatingBtn.hidden = !isTranslatorFloating || isChat;
+    if (minimizeFloatingBtn) minimizeFloatingBtn.hidden = !isTranslatorFloating;
     if (detachTranslatorBtn) {
-      detachTranslatorBtn.hidden = isChat;
+      detachTranslatorBtn.hidden = false;
       detachTranslatorBtn.classList.toggle("floating-active", isTranslatorFloating);
+      const label = isChat ? "chat da IA" : "tradutor";
       detachTranslatorBtn.title = isTranslatorFloating
-        ? "Acoplar tradutor de volta na janela do TODO"
-        : "Soltar tradutor em janela flutuante sobre todos os apps (ou arraste o topo)";
+        ? `Acoplar ${label} de volta na janela do TODO`
+        : `Soltar ${label} em janela flutuante sobre todos os apps (ou arraste o topo)`;
+      detachTranslatorBtn.setAttribute("aria-label", detachTranslatorBtn.title);
       detachTranslatorBtn.innerHTML = isTranslatorFloating
         ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H3v-6"/><path d="M14 10 3 21"/><path d="M6 11V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-6"/></svg>`
         : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
@@ -8785,29 +9061,38 @@ function initAiTranslatorPanel() {
     const target = Boolean(nextFloating);
     if (isTranslatorFloating === target) return;
     isTranslatorFloating = target;
+    const isChat = currentMode === "chat";
     document.body.classList.toggle("translator-floating-mode", isTranslatorFloating);
+    document.body.classList.toggle("chat-floating-mode", isTranslatorFloating && isChat);
 
     if (isTranslatorFloating) {
-      currentMode = "translate";
       panel.hidden = false;
-      if (translateView) translateView.hidden = false;
-      if (chatView) chatView.hidden = true;
+      if (translateView) translateView.hidden = isChat;
+      if (chatView) chatView.hidden = !isChat;
     }
 
     syncTopbarActiveButtons();
 
     try {
       if (invoke) {
-        await invoke("set_translator_floating_mode", { floating: isTranslatorFloating });
+        await invoke("set_translator_floating_mode", {
+          floating: isTranslatorFloating,
+          mode: currentMode
+        });
       }
     } catch (err) {
-      console.warn("Falha ao alternar modo flutuante do tradutor:", err);
+      console.warn("Falha ao alternar modo flutuante:", err);
     }
 
     requestAnimationFrame(() => {
       applyViewport();
       renderLinks();
-      trInput?.focus();
+      if (isChat) {
+        renderChatMessages();
+        chatInput?.focus();
+      } else {
+        trInput?.focus();
+      }
     });
   }
 
@@ -8884,11 +9169,11 @@ function initAiTranslatorPanel() {
     minimizeWindow();
   });
 
-  // Permite "soltar" o modulo de traducao simplesmente puxando/arrastando o cabecalho dele para fora
+  // Permite "soltar" o tradutor ou chat da IA puxando/arrastando o cabecalho para fora
   if (panelHead) {
     let headDragStart = null;
     panelHead.addEventListener("pointerdown", event => {
-      if (isTranslatorFloating || currentMode !== "translate") return;
+      if (isTranslatorFloating) return;
       if (event.button !== 0 || event.target.closest("button")) return;
       headDragStart = { x: event.clientX, y: event.clientY };
     });
@@ -9816,16 +10101,33 @@ function initAiTranslatorPanel() {
 
         const head = document.createElement("div");
         head.className = "ai-action-card-head";
+        const totalSteps = proposal.actions.length;
+        const doneStepsInitial = Array.isArray(proposal.results)
+          ? proposal.results.filter(r => r?.ok).length
+          : 0;
         const badgeText =
           proposal.status === "approved"
-            ? "Executado ✓"
+            ? `${doneStepsInitial}/${totalSteps} ✓`
             : proposal.status === "running"
-              ? "Executando..."
+              ? `0/${totalSteps}`
               : proposal.status === "rejected"
                 ? "Recusado"
-                : "Permissão necessária";
+                : `${totalSteps} ${totalSteps === 1 ? "ação" : "ações"}`;
         head.innerHTML = `<span class="ai-action-card-title">${escapeHtml(proposal.summary || "Ações no app")}</span><span class="ai-action-status-pill">${badgeText}</span>`;
         cardEl.appendChild(head);
+
+        const progressWrap = document.createElement("div");
+        progressWrap.className = "ai-action-progress-bar";
+        const progressFill = document.createElement("div");
+        progressFill.className = "ai-action-progress-fill";
+        progressFill.style.width =
+          proposal.status === "approved"
+            ? "100%"
+            : proposal.status === "running"
+              ? "8%"
+              : "0%";
+        progressWrap.appendChild(progressFill);
+        cardEl.appendChild(progressWrap);
 
         const list = document.createElement("ul");
         list.className = "ai-action-list";
@@ -9837,6 +10139,7 @@ function initAiTranslatorPanel() {
             : (proposal.stepStates?.[idx] || "pending");
           li.className = `ai-step-row state-${initialState}${isDestructiveAction(act) ? " destructive" : ""}`;
           li.dataset.stepIndex = String(idx);
+          li.style.setProperty("--step-idx", String(idx));
 
           const iconEl = document.createElement("span");
           iconEl.className = "ai-step-icon";
@@ -9865,9 +10168,11 @@ function initAiTranslatorPanel() {
             proposal.stepStates = proposal.actions.map(() => "pending");
             cardEl.className = "ai-action-card status-running";
             const pill = head.querySelector(".ai-action-status-pill");
-            if (pill) pill.textContent = "Executando...";
+            if (pill) pill.textContent = `0/${totalSteps}`;
+            progressFill.style.width = "10%";
             foot.remove();
 
+            let completedCount = 0;
             const results = await executeAiActionPlan(proposal.actions, {
               onStepUpdate: ({ index, status, message }) => {
                 proposal.stepStates[index] = status;
@@ -9878,10 +10183,18 @@ function initAiTranslatorPanel() {
                 if (message) {
                   target.textEl.textContent = message;
                 }
+                if (status === "done" || status === "failed") {
+                  completedCount += 1;
+                  const pct = Math.round((completedCount / totalSteps) * 100);
+                  progressFill.style.width = `${pct}%`;
+                  if (pill) pill.textContent = `${completedCount}/${totalSteps}`;
+                }
               },
               runAction: async (action, ctx) => {
-                await new Promise(resolve => requestAnimationFrame(resolve));
-                return runSingleAiAppAction(action, ctx);
+                await new Promise(resolve => setTimeout(resolve, 260));
+                const out = await runSingleAiAppAction(action, ctx);
+                await new Promise(resolve => setTimeout(resolve, 140));
+                return out;
               }
             });
 
@@ -9889,6 +10202,7 @@ function initAiTranslatorPanel() {
             proposal.results = results;
             delete proposal.stepStates;
             saveChatSessions();
+            await new Promise(resolve => setTimeout(resolve, 220));
             renderChatMessages();
           });
 
@@ -9913,11 +10227,26 @@ function initAiTranslatorPanel() {
       if (isModel && msg.questionSet && Array.isArray(msg.questionSet.questions) && msg.questionSet.questions.length > 0) {
         const qSet = msg.questionSet;
         const isAnswered = qSet.status === "answered";
-        const isInstantSingle = qSet.questions.length === 1 && !qSet.questions[0].multiSelect;
         const draftSelections = {};
         qSet.questions.forEach(q => {
           const prev = qSet.answers?.[q.id];
-          draftSelections[q.id] = Array.isArray(prev) ? [...prev] : prev ? [prev] : [];
+          if (Array.isArray(prev) && prev.length) {
+            draftSelections[q.id] = [...prev];
+          } else if (prev !== undefined && prev !== null && prev !== "") {
+            draftSelections[q.id] = [String(prev)];
+          } else if (q.type === "toggle") {
+            const on = Boolean(q.defaultValue);
+            draftSelections[q.id] = [on ? (q.onLabel || "Sim") : (q.offLabel || "Não")];
+          } else if (q.type === "slider") {
+            const initial = q.defaultValue !== null && q.defaultValue !== undefined
+              ? Number(q.defaultValue)
+              : Math.round(((q.min ?? 0) + (q.max ?? 10)) / 2);
+            draftSelections[q.id] = [String(initial)];
+          } else if ((q.type === "text" || q.type === "date") && q.defaultValue) {
+            draftSelections[q.id] = [String(q.defaultValue)];
+          } else {
+            draftSelections[q.id] = [];
+          }
         });
 
         const qCard = document.createElement("div");
@@ -9925,14 +10254,20 @@ function initAiTranslatorPanel() {
 
         const qHead = document.createElement("div");
         qHead.className = "ai-question-head";
-        qHead.innerHTML = `<span class="ai-question-head-title">${qSet.questions.length > 1 ? "Escolha suas respostas" : "Selecione uma opção"}</span><span class="ai-question-pill">${isAnswered ? "Respondido ✓" : "Interativo"}</span>`;
+        qHead.innerHTML = `<span class="ai-question-head-title">${qSet.questions.length > 1 ? "Configure suas escolhas" : "Sua escolha"}</span><span class="ai-question-pill">${isAnswered ? "Enviado ✓" : "Interativo"}</span>`;
         qCard.appendChild(qHead);
 
         let submitBtn = null;
+        let submitHint = null;
         const updateSubmitState = () => {
           if (!submitBtn) return;
-          const hasAny = qSet.questions.some(q => (draftSelections[q.id] || []).length > 0);
-          submitBtn.disabled = isAnswered || !hasAny;
+          const answeredCount = qSet.questions.filter(q => (draftSelections[q.id] || []).length > 0).length;
+          submitBtn.disabled = isAnswered || answeredCount === 0;
+          if (submitHint) {
+            submitHint.textContent = answeredCount > 0
+              ? `${answeredCount} de ${qSet.questions.length} ${qSet.questions.length === 1 ? "selecionada" : "respondidas"}`
+              : "Selecione e clique em enviar";
+          }
         };
 
         const finalizeQuestionSet = () => {
@@ -9950,153 +10285,245 @@ function initAiTranslatorPanel() {
 
         qSet.questions.forEach((q, qIdx) => {
           const group = document.createElement("div");
-          group.className = "ai-question-group";
+          group.className = `ai-question-group type-${q.type || "choice"}`;
+          group.style.setProperty("--q-idx", String(qIdx));
 
           const promptEl = document.createElement("div");
           promptEl.className = "ai-question-prompt";
           promptEl.textContent = qSet.questions.length > 1 ? `${qIdx + 1}. ${q.prompt}` : q.prompt;
           group.appendChild(promptEl);
 
-          const optsWrap = document.createElement("div");
-          optsWrap.className = "ai-question-options";
+          const qType = q.type || (q.multiSelect ? "checkbox" : "choice");
 
-          const syncOptionClasses = () => {
-            const picked = draftSelections[q.id] || [];
-            optsWrap.querySelectorAll(".ai-question-opt").forEach(btn => {
-              const active = picked.includes(btn.dataset.value);
-              btn.classList.toggle("selected", active);
-              btn.setAttribute("aria-pressed", String(active));
-            });
-          };
+          if (qType === "toggle") {
+            const onLabel = q.onLabel || "Sim";
+            const offLabel = q.offLabel || "Não";
+            const isOn = () => (draftSelections[q.id]?.[0] || offLabel) === onLabel;
 
-          q.options.forEach(opt => {
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.className = `ai-question-opt${q.multiSelect ? " multi" : ""}`;
-            btn.dataset.value = opt.value;
-            btn.disabled = isAnswered;
-
-            const indicator = document.createElement("span");
-            indicator.className = `ai-question-indicator${q.multiSelect ? " multi" : ""}`;
-            indicator.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`;
-
-            const textWrap = document.createElement("span");
-            textWrap.className = "ai-question-opt-text";
-            const labelEl = document.createElement("span");
-            labelEl.className = "ai-question-opt-label";
-            labelEl.textContent = opt.label;
-            textWrap.appendChild(labelEl);
-            if (opt.description) {
-              const descEl = document.createElement("span");
-              descEl.className = "ai-question-opt-desc";
-              descEl.textContent = opt.description;
-              textWrap.appendChild(descEl);
-            }
-
-            btn.append(indicator, textWrap);
-
-            btn.addEventListener("click", () => {
+            const toggleBtn = document.createElement("button");
+            toggleBtn.type = "button";
+            toggleBtn.className = `ai-q-toggle${isOn() ? " is-on" : ""}`;
+            toggleBtn.disabled = isAnswered;
+            toggleBtn.setAttribute("role", "switch");
+            toggleBtn.setAttribute("aria-checked", String(isOn()));
+            toggleBtn.innerHTML = `<span class="ai-q-toggle-track"><span class="ai-q-toggle-thumb"></span></span><span class="ai-q-toggle-label">${escapeHtml(isOn() ? onLabel : offLabel)}</span>`;
+            toggleBtn.addEventListener("click", () => {
               if (isAnswered || chatBusy) return;
-              if (q.multiSelect) {
-                const cur = draftSelections[q.id] || [];
-                draftSelections[q.id] = cur.includes(opt.value)
-                  ? cur.filter(v => v !== opt.value)
-                  : [...cur, opt.value];
-                syncOptionClasses();
-                updateSubmitState();
-              } else {
-                draftSelections[q.id] = [opt.value];
-                syncOptionClasses();
-                if (isInstantSingle) {
-                  finalizeQuestionSet();
-                } else {
-                  updateSubmitState();
-                }
-              }
+              const nextOn = !isOn();
+              draftSelections[q.id] = [nextOn ? onLabel : offLabel];
+              toggleBtn.classList.toggle("is-on", nextOn);
+              toggleBtn.setAttribute("aria-checked", String(nextOn));
+              const lbl = toggleBtn.querySelector(".ai-q-toggle-label");
+              if (lbl) lbl.textContent = nextOn ? onLabel : offLabel;
+              updateSubmitState();
             });
+            group.appendChild(toggleBtn);
+          } else if (qType === "slider") {
+            const min = q.min ?? 0;
+            const max = q.max ?? 10;
+            const step = q.step ?? 1;
+            const currentVal = Number(draftSelections[q.id]?.[0] ?? min);
 
-            optsWrap.appendChild(btn);
-          });
+            const sliderWrap = document.createElement("div");
+            sliderWrap.className = "ai-q-slider-wrap";
 
-          syncOptionClasses();
-          group.appendChild(optsWrap);
+            const sliderHead = document.createElement("div");
+            sliderHead.className = "ai-q-slider-meta";
+            const minLbl = document.createElement("span");
+            minLbl.textContent = `${min}${q.unit || ""}`;
+            const valPill = document.createElement("span");
+            valPill.className = "ai-q-slider-value";
+            valPill.textContent = `${currentVal}${q.unit || ""}`;
+            const maxLbl = document.createElement("span");
+            maxLbl.textContent = `${max}${q.unit || ""}`;
+            sliderHead.append(minLbl, valPill, maxLbl);
 
-          if (q.allowCustom && !isAnswered) {
-            const customRow = document.createElement("div");
-            customRow.className = "ai-question-custom-row";
-
-            const customInput = document.createElement("input");
-            customInput.type = "text";
-            customInput.className = "ai-question-custom-input";
-            customInput.placeholder = "Outro (digite sua resposta)...";
-
-            const applyCustomValue = () => {
-              const val = customInput.value.trim();
-              if (!val) return;
-              if (q.multiSelect) {
-                const cur = draftSelections[q.id] || [];
-                if (!cur.includes(val)) draftSelections[q.id] = [...cur, val];
-                updateSubmitState();
-              } else {
-                draftSelections[q.id] = [val];
-                if (isInstantSingle) {
-                  finalizeQuestionSet();
-                } else {
-                  syncOptionClasses();
-                  updateSubmitState();
-                }
-              }
-            };
-
-            customInput.addEventListener("input", () => {
-              if (isInstantSingle) return;
-              const val = customInput.value.trim();
-              const presetVals = new Set(q.options.map(o => o.value));
-              const keptPresets = (draftSelections[q.id] || []).filter(v => presetVals.has(v));
-              if (q.multiSelect) {
-                draftSelections[q.id] = val ? [...keptPresets, val] : keptPresets;
-              } else if (val) {
-                draftSelections[q.id] = [val];
-                syncOptionClasses();
-              } else {
-                draftSelections[q.id] = keptPresets;
-              }
+            const rangeInput = document.createElement("input");
+            rangeInput.type = "range";
+            rangeInput.className = "ai-q-slider-input";
+            rangeInput.min = String(min);
+            rangeInput.max = String(max);
+            rangeInput.step = String(step);
+            rangeInput.value = String(currentVal);
+            rangeInput.disabled = isAnswered;
+            rangeInput.addEventListener("input", () => {
+              const v = rangeInput.value;
+              draftSelections[q.id] = [v];
+              valPill.textContent = `${v}${q.unit || ""}`;
               updateSubmitState();
             });
 
-            customInput.addEventListener("keydown", ev => {
-              if (ev.key === "Enter") {
-                ev.preventDefault();
-                applyCustomValue();
+            sliderWrap.append(sliderHead, rangeInput);
+            group.appendChild(sliderWrap);
+          } else if (qType === "rating") {
+            const maxStars = Math.max(3, Math.min(10, q.max || 5));
+            const starsWrap = document.createElement("div");
+            starsWrap.className = "ai-q-rating";
+
+            const syncStars = (hoverVal = 0) => {
+              const picked = Number(draftSelections[q.id]?.[0] || 0);
+              const activeVal = hoverVal || picked;
+              starsWrap.querySelectorAll(".ai-q-star").forEach(btn => {
+                const n = Number(btn.dataset.star);
+                btn.classList.toggle("active", n <= activeVal);
+                btn.classList.toggle("selected", n <= picked);
+              });
+            };
+
+            for (let s = 1; s <= maxStars; s++) {
+              const starBtn = document.createElement("button");
+              starBtn.type = "button";
+              starBtn.className = "ai-q-star";
+              starBtn.dataset.star = String(s);
+              starBtn.disabled = isAnswered;
+              starBtn.title = `${s} de ${maxStars}`;
+              starBtn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.6 6.2 20.7l1.1-6.5-4.7-4.6 6.5-.9L12 2.8z"/></svg>`;
+              starBtn.addEventListener("mouseenter", () => !isAnswered && syncStars(s));
+              starBtn.addEventListener("mouseleave", () => !isAnswered && syncStars(0));
+              starBtn.addEventListener("click", () => {
+                if (isAnswered || chatBusy) return;
+                draftSelections[q.id] = [String(s)];
+                syncStars(0);
+                updateSubmitState();
+              });
+              starsWrap.appendChild(starBtn);
+            }
+            syncStars(0);
+            group.appendChild(starsWrap);
+          } else if (qType === "text" || qType === "date") {
+            const field = document.createElement("input");
+            field.type = qType === "date" ? "date" : "text";
+            field.className = "ai-question-custom-input ai-q-field";
+            field.value = draftSelections[q.id]?.[0] || "";
+            field.placeholder = q.placeholder || (qType === "date" ? "YYYY-MM-DD" : "Digite sua resposta...");
+            field.disabled = isAnswered;
+            field.addEventListener("input", () => {
+              const val = field.value.trim();
+              draftSelections[q.id] = val ? [val] : [];
+              updateSubmitState();
+            });
+            group.appendChild(field);
+          } else {
+            const isChips = qType === "chips";
+            const isMulti = qType === "checkbox" || Boolean(q.multiSelect);
+            const optsWrap = document.createElement("div");
+            optsWrap.className = isChips ? "ai-question-chips" : "ai-question-options";
+
+            const syncOptionClasses = () => {
+              const picked = draftSelections[q.id] || [];
+              optsWrap.querySelectorAll(".ai-question-opt, .ai-question-chip").forEach(btn => {
+                const active = picked.includes(btn.dataset.value);
+                btn.classList.toggle("selected", active);
+                btn.setAttribute("aria-pressed", String(active));
+              });
+            };
+
+            q.options.forEach((opt, optIdx) => {
+              const btn = document.createElement("button");
+              btn.type = "button";
+              btn.className = isChips
+                ? `ai-question-chip${isMulti ? " multi" : ""}`
+                : `ai-question-opt${isMulti ? " multi" : ""}`;
+              btn.dataset.value = opt.value;
+              btn.disabled = isAnswered;
+              btn.style.setProperty("--opt-idx", String(optIdx));
+
+              if (isChips) {
+                btn.innerHTML = `<span class="ai-chip-dot"></span><span>${escapeHtml(opt.label)}</span>`;
+              } else {
+                const indicator = document.createElement("span");
+                indicator.className = `ai-question-indicator${isMulti ? " multi" : ""}`;
+                indicator.innerHTML = isMulti
+                  ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`
+                  : `<span class="ai-radio-dot"></span>`;
+
+                const textWrap = document.createElement("span");
+                textWrap.className = "ai-question-opt-text";
+                const labelRow = document.createElement("span");
+                labelRow.className = "ai-question-opt-label-row";
+                const labelEl = document.createElement("span");
+                labelEl.className = "ai-question-opt-label";
+                labelEl.textContent = opt.label;
+                labelRow.appendChild(labelEl);
+                if (opt.badge) {
+                  const badgeEl = document.createElement("span");
+                  badgeEl.className = "ai-question-opt-badge";
+                  badgeEl.textContent = opt.badge;
+                  labelRow.appendChild(badgeEl);
+                }
+                textWrap.appendChild(labelRow);
+                if (opt.description) {
+                  const descEl = document.createElement("span");
+                  descEl.className = "ai-question-opt-desc";
+                  descEl.textContent = opt.description;
+                  textWrap.appendChild(descEl);
+                }
+                btn.append(indicator, textWrap);
               }
+
+              btn.addEventListener("click", () => {
+                if (isAnswered || chatBusy) return;
+                if (isMulti) {
+                  const cur = draftSelections[q.id] || [];
+                  draftSelections[q.id] = cur.includes(opt.value)
+                    ? cur.filter(v => v !== opt.value)
+                    : [...cur, opt.value];
+                } else {
+                  draftSelections[q.id] = [opt.value];
+                }
+                syncOptionClasses();
+                updateSubmitState();
+              });
+
+              optsWrap.appendChild(btn);
             });
 
-            customRow.appendChild(customInput);
+            syncOptionClasses();
+            group.appendChild(optsWrap);
 
-            if (isInstantSingle) {
-              const customSendBtn = document.createElement("button");
-              customSendBtn.type = "button";
-              customSendBtn.className = "ai-question-custom-send";
-              customSendBtn.textContent = "Enviar";
-              customSendBtn.addEventListener("click", applyCustomValue);
-              customRow.appendChild(customSendBtn);
+            if (q.allowCustom && !isAnswered) {
+              const customRow = document.createElement("div");
+              customRow.className = "ai-question-custom-row";
+
+              const customInput = document.createElement("input");
+              customInput.type = "text";
+              customInput.className = "ai-question-custom-input";
+              customInput.placeholder = "Outro (digite sua resposta)...";
+
+              customInput.addEventListener("input", () => {
+                const val = customInput.value.trim();
+                const presetVals = new Set(q.options.map(o => o.value));
+                const keptPresets = (draftSelections[q.id] || []).filter(v => presetVals.has(v));
+                if (isMulti) {
+                  draftSelections[q.id] = val ? [...keptPresets, val] : keptPresets;
+                } else if (val) {
+                  draftSelections[q.id] = [val];
+                  syncOptionClasses();
+                } else {
+                  draftSelections[q.id] = keptPresets;
+                }
+                updateSubmitState();
+              });
+
+              customRow.appendChild(customInput);
+              group.appendChild(customRow);
             }
-
-            group.appendChild(customRow);
           }
 
           qCard.appendChild(group);
         });
 
-        if (!isInstantSingle && !isAnswered) {
+        if (!isAnswered) {
           const foot = document.createElement("div");
           foot.className = "ai-question-foot";
+          submitHint = document.createElement("span");
+          submitHint.className = "ai-question-foot-hint";
           submitBtn = document.createElement("button");
           submitBtn.type = "button";
           submitBtn.className = "ai-action-approve-btn";
-          submitBtn.textContent = "Enviar respostas";
+          submitBtn.textContent = qSet.questions.length > 1 ? "Enviar respostas" : "Enviar resposta";
           submitBtn.addEventListener("click", finalizeQuestionSet);
-          foot.appendChild(submitBtn);
+          foot.append(submitHint, submitBtn);
           qCard.appendChild(foot);
           updateSubmitState();
         }
@@ -10181,6 +10608,27 @@ function initAiTranslatorPanel() {
             text_content: a.text_content || ""
           }))
         }));
+        if (isTranslatorFloating && currentMode === "chat" && payloadMessages.length > 0) {
+          try {
+            const screenBase64 = await invoke("capture_current_monitor_png");
+            if (screenBase64) {
+              const lastMsg = payloadMessages[payloadMessages.length - 1];
+              if (lastMsg && lastMsg.role === "user") {
+                lastMsg.attachments = [
+                  ...(lastMsg.attachments || []),
+                  {
+                    name: "current_screen.png",
+                    mime_type: "image/png",
+                    data_base64: screenBase64,
+                    text_content: ""
+                  }
+                ];
+              }
+            }
+          } catch (screenErr) {
+            console.warn("Falha ao capturar tela atual para o mini chat:", screenErr);
+          }
+        }
         const appContext = buildAppContextSnapshot(state, {
           selectedNodeId,
           settings: {
@@ -10545,7 +10993,92 @@ async function runSingleAiAppAction(action, ctx) {
       return { message: `Task "${found.task.title}" aberta` };
     }
 
+    case "create_table_card": {
+      const target = (action.taskId || action.taskTitle || action.userName || action.userId)
+        ? findTaskByAction(action, ctx)
+        : (activeUser() && activeBoard() ? { user: activeUser(), task: activeBoard() } : null);
+      const board = target?.task;
+      if (!board) throw new Error("Nenhuma task encontrada para criar a tabela");
+
+      const hasCheckboxes = Boolean(action.hasCheckboxes);
+      let tableData;
+      if (Array.isArray(action.rows) && action.rows.length > 0) {
+        const preparedRows = action.rows.map(row => {
+          const cells = Array.isArray(row) ? row.map(c => String(c ?? "")) : [String(row ?? "")];
+          if (hasCheckboxes) {
+            const first = String(cells[0] || "").trim().toLowerCase();
+            if (first !== "[ ]" && first !== "[x]" && first !== "true" && first !== "false") {
+              cells.unshift("[ ]");
+            }
+          }
+          return cells;
+        });
+        tableData = hasCheckboxes ? { rows: preparedRows, hasCheckboxes: true } : { rows: preparedRows };
+      } else {
+        tableData = hasCheckboxes ? createTodoTableData(3, 3) : createDefaultTableData(3, 3);
+      }
+
+      const token = serializeTableToken(tableData);
+      const parentRef = action.parentCardId === "$LAST_CARD" ? ctx?.lastCreatedCardId : action.parentCardId;
+      const parentId =
+        parentRef && board.nodes.some(n => n.id === parentRef)
+          ? parentRef
+          : board.nodes[0]?.id || null;
+      const id = makeId("action");
+      const { w: cardW, h: cardH } = estimateTableCardDimensions(tableData);
+      const rawPos = parentId ? getReplyActionPosition(board, parentId) : getViewportActionPosition();
+      const freePos = findFreeCardPosition(board, rawPos.x, rawPos.y, cardW, cardH, 48);
+      const newNode = {
+        id,
+        type: "table",
+        title: "",
+        body: token,
+        status: normalizeStatus(action.status || "ongoing"),
+        criticality: clamp(Number(action.criticality ?? 0), 0, 2),
+        createdAt: new Date().toISOString(),
+        x: freePos.x,
+        y: freePos.y,
+        w: cardW,
+        h: cardH
+      };
+      if (parentId) {
+        board.nodes.splice(getReplyInsertionIndex(board, parentId), 0, newNode);
+        const link = { id: makeId("link"), from: parentId, to: id, fromPort: "out", toPort: "in" };
+        if (action.parentRow != null) link.fromRow = Number(action.parentRow);
+        if (action.targetRow != null) link.toRow = Number(action.targetRow);
+        board.links.push(link);
+      } else {
+        board.nodes.push(newNode);
+      }
+      if (board === activeBoard()) {
+        pendingCardPop.add(id);
+        selectedNodeId = id;
+      }
+      saveState();
+      render();
+      const cardEl = nodesLayer.querySelector(`[data-id="${id}"]`);
+      if (cardEl) {
+        syncTableCardRowPorts(cardEl, newNode);
+        renderLinks();
+      }
+      return {
+        createdCardId: id,
+        message: `${hasCheckboxes ? "Tabela Todo List" : "Tabela"} criada em "${board.title}"`
+      };
+    }
+
     case "create_card": {
+      if (action.cardType === "table" || action.cardType === "todo_table") {
+        return executeAiAppAction(
+          {
+            ...action,
+            type: "create_table_card",
+            hasCheckboxes: action.cardType === "todo_table" || Boolean(action.hasCheckboxes),
+            rows: action.rows || action.tableRows
+          },
+          ctx
+        );
+      }
       const target = (action.taskId || action.taskTitle || action.userName || action.userId)
         ? findTaskByAction(action, ctx)
         : (activeUser() && activeBoard() ? { user: activeUser(), task: activeBoard() } : null);
@@ -10553,7 +11086,11 @@ async function runSingleAiAppAction(action, ctx) {
       if (!board) throw new Error("Nenhuma task encontrada para criar o card");
       let bodyText = String(action.body || "");
       if (Array.isArray(action.tableRows) && action.tableRows.length > 0) {
-        const token = serializeTableToken({ rows: action.tableRows });
+        const token = serializeTableToken(
+          action.hasCheckboxes
+            ? { rows: action.tableRows, hasCheckboxes: true }
+            : { rows: action.tableRows }
+        );
         bodyText = bodyText ? `${bodyText}\n${token}` : token;
       }
       const parentRef = action.parentCardId === "$LAST_CARD" ? ctx?.lastCreatedCardId : action.parentCardId;
@@ -10562,8 +11099,9 @@ async function runSingleAiAppAction(action, ctx) {
           ? parentRef
           : board.nodes[0]?.id || null;
       const id = makeId("action");
+      const { w: cardW, h: cardH } = estimateActionCardSize(bodyText);
       const rawPos = parentId ? getReplyActionPosition(board, parentId) : getViewportActionPosition();
-      const freePos = findFreeCardPosition(board, rawPos.x, rawPos.y, 288, 144, 48);
+      const freePos = findFreeCardPosition(board, rawPos.x, rawPos.y, cardW, cardH, 48);
       const newNode = {
         id,
         title: "",
@@ -10573,8 +11111,8 @@ async function runSingleAiAppAction(action, ctx) {
         createdAt: new Date().toISOString(),
         x: freePos.x,
         y: freePos.y,
-        w: 288,
-        h: 144
+        w: cardW,
+        h: cardH
       };
       if (parentId) {
         board.nodes.splice(getReplyInsertionIndex(board, parentId), 0, newNode);
@@ -10606,8 +11144,15 @@ async function runSingleAiAppAction(action, ctx) {
       }
       if (action.status) node.status = normalizeStatus(action.status);
       if (action.criticality !== undefined) node.criticality = clamp(Number(action.criticality), 0, 2);
+      if (node.type !== "table" && (action.body !== undefined || action.appendBody)) {
+        const est = estimateActionCardSize(getNodeContent(node));
+        node.w = Math.max(node.w || 288, est.w);
+        node.h = Math.max(node.h || 144, est.h);
+      }
       saveState();
       render();
+      const updatedEl = nodesLayer.querySelector(`[data-id="${node.id}"]`);
+      if (updatedEl) scheduleNodeHeightSync(node.id, updatedEl);
       return { message: `Card atualizado em "${task.title}"` };
     }
 
@@ -10714,7 +11259,9 @@ async function runSingleAiAppAction(action, ctx) {
     case "connect_cards": {
       const fromId = resolveCardIdRef(action.fromCardId, ctx);
       const toId = resolveCardIdRef(action.toCardId, ctx);
-      if (!addLink(fromId, toId, "out", "in")) {
+      const fromRow = action.fromRow != null ? Number(action.fromRow) : null;
+      const toRow = action.toRow != null ? Number(action.toRow) : null;
+      if (!addLink(fromId, toId, "out", "in", fromRow, toRow)) {
         throw new Error("Não foi possível conectar os cards");
       }
       saveState();

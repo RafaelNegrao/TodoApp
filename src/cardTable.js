@@ -202,7 +202,7 @@ export function colIndexToLetter(index) {
 }
 
 export function cellRefToCoords(ref) {
-  const match = String(ref || "").trim().toUpperCase().match(/^([A-Z]+)(\d+)$/);
+  const match = String(ref || "").trim().toUpperCase().match(/^\$?([A-Z]+)\$?(\d+)$/);
   if (!match) return null;
   const letters = match[1];
   const rowNum = parseInt(match[2], 10);
@@ -215,10 +215,14 @@ export function cellRefToCoords(ref) {
 }
 
 function parseNumericValue(val) {
+  if (typeof val === "number") return Number.isFinite(val) ? val : null;
+  if (typeof val === "boolean") return val ? 1 : 0;
   const str = String(val ?? "").trim();
   if (!str) return null;
-  // Suporta formato brasileiro (1.234,56) e padrao (1234.56)
-  const cleaned = str.replace(/R\$\s?/i, "").replace(/\s/g, "");
+  const isPercent = str.endsWith("%");
+  const withoutPct = isPercent ? str.slice(0, -1).trim() : str;
+  // Suporta formato brasileiro (R$ 1.234,56) e padrao (1234.56)
+  const cleaned = withoutPct.replace(/R\$\s?/i, "").replace(/\s/g, "");
   let normalized = cleaned;
   if (/^-?\d{1,3}(\.\d{3})*(,\d+)?$/.test(cleaned)) {
     normalized = cleaned.replace(/\./g, "").replace(",", ".");
@@ -226,159 +230,695 @@ function parseNumericValue(val) {
     normalized = cleaned.replace(",", ".");
   }
   const num = Number(normalized);
-  return Number.isFinite(num) ? num : null;
+  if (!Number.isFinite(num)) return null;
+  return isPercent ? num / 100 : num;
 }
 
-function resolveCellNumeric(rows, r, c, visited) {
-  const key = `${r}:${c}`;
-  if (visited.has(key)) return 0;
-  const raw = rows[r]?.[c];
-  if (raw === undefined || raw === null) return null;
-  const str = String(raw).trim();
-  if (!str) return null;
-  if (str.startsWith("=")) {
-    const nextVisited = new Set(visited);
-    nextVisited.add(key);
-    const evaled = evaluateFormulaInternal(str.slice(1), rows, nextVisited);
-    return Number.isFinite(evaled) ? evaled : null;
-  }
-  return parseNumericValue(str);
+function toNumber(val) {
+  if (val === null || val === undefined || val === "") return 0;
+  const n = parseNumericValue(val);
+  if (n === null) throw new Error("#VALUE!");
+  return n;
 }
 
-function collectRangeNumbers(rangeExpr, rows, visited) {
-  const parts = rangeExpr.split(",").map(p => p.trim()).filter(Boolean);
-  const nums = [];
-  for (const part of parts) {
-    if (part.includes(":")) {
-      const [aRef, bRef] = part.split(":");
-      const a = cellRefToCoords(aRef);
-      const b = cellRefToCoords(bRef);
-      if (!a || !b) continue;
-      const r1 = Math.min(a.row, b.row);
-      const r2 = Math.max(a.row, b.row);
-      const c1 = Math.min(a.col, b.col);
-      const c2 = Math.max(a.col, b.col);
-      for (let r = r1; r <= r2; r++) {
-        for (let c = c1; c <= c2; c++) {
-          const n = resolveCellNumeric(rows, r, c, visited);
-          if (n !== null) nums.push(n);
-        }
-      }
-    } else {
-      const coords = cellRefToCoords(part);
-      if (coords) {
-        const n = resolveCellNumeric(rows, coords.row, coords.col, visited);
-        if (n !== null) nums.push(n);
-      } else {
-        const literal = parseNumericValue(part);
-        if (literal !== null) nums.push(literal);
-      }
+function toBool(val) {
+  if (typeof val === "boolean") return val;
+  if (typeof val === "number") return val !== 0;
+  const s = String(val ?? "").trim().toUpperCase();
+  if (s === "TRUE" || s === "VERDADEIRO" || s === "[X]") return true;
+  if (s === "FALSE" || s === "FALSO" || s === "[ ]" || s === "") return false;
+  const n = parseNumericValue(s);
+  return n !== null ? n !== 0 : Boolean(s);
+}
+
+function toStr(val) {
+  if (val === null || val === undefined) return "";
+  if (typeof val === "boolean") return val ? "TRUE" : "FALSE";
+  if (typeof val === "number") return String(Math.round(val * 10000) / 10000);
+  return String(val);
+}
+
+function normalizeFuncName(name) {
+  return String(name || "")
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function matchesCriteria(value, criteria) {
+  const critStr = String(criteria ?? "").trim();
+  const opMatch = critStr.match(/^(<=|>=|<>|!=|=|<|>)(.*)$/);
+  if (opMatch) {
+    const op = opMatch[1];
+    const rhsRaw = opMatch[2].trim();
+    const rhsNum = parseNumericValue(rhsRaw);
+    const lhsNum = parseNumericValue(value);
+    if (rhsNum !== null && lhsNum !== null) {
+      if (op === "=") return lhsNum === rhsNum;
+      if (op === "<>" || op === "!=") return lhsNum !== rhsNum;
+      if (op === "<") return lhsNum < rhsNum;
+      if (op === "<=") return lhsNum <= rhsNum;
+      if (op === ">") return lhsNum > rhsNum;
+      if (op === ">=") return lhsNum >= rhsNum;
     }
+    const lhsText = toStr(value).toLowerCase();
+    const rhsText = rhsRaw.toLowerCase();
+    if (op === "=") return lhsText === rhsText;
+    if (op === "<>" || op === "!=") return lhsText !== rhsText;
+    return false;
   }
-  return nums;
+
+  const critBool = critStr.toUpperCase();
+  if (critBool === "TRUE" || critBool === "VERDADEIRO") return toBool(value) === true;
+  if (critBool === "FALSE" || critBool === "FALSO") return toBool(value) === false;
+
+  const critNum = parseNumericValue(criteria);
+  const valNum = parseNumericValue(value);
+  if (critNum !== null && valNum !== null) {
+    return valNum === critNum;
+  }
+  return toStr(value).trim().toLowerCase() === critStr.toLowerCase();
 }
 
-// Avaliador aritmetico seguro (recursive descent) sem eval/Function
-function evaluateSafeArithmetic(expr) {
+function tokenizeFormula(expr) {
   const tokens = [];
   let i = 0;
-  while (i < expr.length) {
+  const len = expr.length;
+
+  while (i < len) {
     const ch = expr[i];
     if (/\s/.test(ch)) {
       i++;
       continue;
     }
-    if ("+-*/()".includes(ch)) {
-      tokens.push(ch);
+    if (ch === '"' || ch === "'") {
+      const quote = ch;
+      i++;
+      let str = "";
+      while (i < len) {
+        if (expr[i] === quote && expr[i + 1] === quote) {
+          str += quote;
+          i += 2;
+        } else if (expr[i] === quote) {
+          i++;
+          break;
+        } else {
+          str += expr[i++];
+        }
+      }
+      tokens.push({ type: "string", value: str });
+      continue;
+    }
+    const two = expr.slice(i, i + 2);
+    if (two === "<=" || two === ">=" || two === "<>" || two === "!=") {
+      tokens.push({ type: "op", value: two });
+      i += 2;
+      continue;
+    }
+    if ("+-*/^%=<>&".includes(ch)) {
+      tokens.push({ type: "op", value: ch });
       i++;
       continue;
     }
-    if (/[\d.]/.test(ch)) {
+    if (ch === "(" || ch === ")" || ch === "," || ch === ";" || ch === ":") {
+      tokens.push({ type: "punct", value: ch });
+      i++;
+      continue;
+    }
+    if (/\d/.test(ch) || (ch === "." && /\d/.test(expr[i + 1] || ""))) {
       let numStr = "";
-      while (i < expr.length && /[\d.]/.test(expr[i])) {
+      while (i < len && /[\d.]/.test(expr[i])) {
         numStr += expr[i++];
       }
       const num = Number(numStr);
-      if (!Number.isFinite(num)) return NaN;
-      tokens.push(num);
+      if (!Number.isFinite(num)) throw new Error("#NUM!");
+      tokens.push({ type: "number", value: num });
       continue;
     }
-    return NaN;
+    if (/[\$A-Za-zÀ-ÿ_]/.test(ch)) {
+      let ident = "";
+      while (i < len && /[\$A-Za-zÀ-ÿ0-9_.]/.test(expr[i])) {
+        ident += expr[i++];
+      }
+      tokens.push({ type: "ident", value: ident });
+      continue;
+    }
+    throw new Error("#SYNTAX!");
   }
 
-  let pos = 0;
-  function parseExpr() {
-    let left = parseTerm();
-    while (tokens[pos] === "+" || tokens[pos] === "-") {
-      const op = tokens[pos++];
-      const right = parseTerm();
-      left = op === "+" ? left + right : left - right;
-    }
-    return left;
+  return tokens;
+}
+
+class ExcelFormulaEngine {
+  constructor(rows, visited = new Set()) {
+    this.rows = rows || [];
+    this.visited = visited;
+    this.tokens = [];
+    this.pos = 0;
   }
-  function parseTerm() {
-    let left = parseFactor();
-    while (tokens[pos] === "*" || tokens[pos] === "/") {
-      const op = tokens[pos++];
-      const right = parseFactor();
-      if (op === "/") {
-        if (right === 0) return NaN;
-        left = left / right;
+
+  evaluate(expr) {
+    this.tokens = tokenizeFormula(String(expr || "").trim());
+    this.pos = 0;
+    if (!this.tokens.length) return "";
+    const result = this.parseComparison();
+    if (this.pos !== this.tokens.length) {
+      throw new Error("#SYNTAX!");
+    }
+    return this.unwrapScalar(result);
+  }
+
+  peek(offset = 0) {
+    return this.tokens[this.pos + offset] || null;
+  }
+
+  consume() {
+    return this.tokens[this.pos++] || null;
+  }
+
+  resolveCellValue(r, c) {
+    const key = `${r}:${c}`;
+    if (this.visited.has(key)) return 0;
+    const raw = this.rows[r]?.[c];
+    if (raw === undefined || raw === null) return "";
+    const str = String(raw);
+    const trimmed = str.trim();
+    if (!trimmed) return "";
+    if (trimmed === "[x]" || trimmed === "[X]") return true;
+    if (trimmed === "[ ]") return false;
+    if (trimmed.startsWith("=")) {
+      const nextVisited = new Set(this.visited);
+      nextVisited.add(key);
+      const child = new ExcelFormulaEngine(this.rows, nextVisited);
+      return child.evaluate(trimmed.slice(1));
+    }
+    const num = parseNumericValue(trimmed);
+    return num !== null ? num : str;
+  }
+
+  collectRangeValues(aCoords, bCoords) {
+    const r1 = Math.min(aCoords.row, bCoords.row);
+    const r2 = Math.max(aCoords.row, bCoords.row);
+    const c1 = Math.min(aCoords.col, bCoords.col);
+    const c2 = Math.max(aCoords.col, bCoords.col);
+    const matrix = [];
+    const flat = [];
+    for (let r = r1; r <= r2; r++) {
+      const rowVals = [];
+      for (let c = c1; c <= c2; c++) {
+        const val = this.resolveCellValue(r, c);
+        rowVals.push(val);
+        flat.push(val);
+      }
+      matrix.push(rowVals);
+    }
+    return { __range: true, flat, matrix };
+  }
+
+  unwrapScalar(val) {
+    if (val && typeof val === "object" && val.__range) {
+      return val.flat[0] ?? "";
+    }
+    return val;
+  }
+
+  flattenNumericArgs(args) {
+    const nums = [];
+    for (const arg of args) {
+      if (arg && typeof arg === "object" && arg.__range) {
+        for (const v of arg.flat) {
+          if (typeof v === "number" && Number.isFinite(v)) nums.push(v);
+        }
+      } else if (arg !== "" && arg !== null && arg !== undefined) {
+        const n = parseNumericValue(arg);
+        if (n !== null) nums.push(n);
+      }
+    }
+    return nums;
+  }
+
+  flattenAllArgs(args) {
+    const all = [];
+    for (const arg of args) {
+      if (arg && typeof arg === "object" && arg.__range) {
+        all.push(...arg.flat);
       } else {
-        left = left * right;
+        all.push(arg);
+      }
+    }
+    return all;
+  }
+
+  parseComparison() {
+    let left = this.parseConcat();
+    while (this.peek()?.type === "op" && ["=", "<>", "!=", "<", "<=", ">", ">="].includes(this.peek().value)) {
+      const op = this.consume().value;
+      const right = this.parseConcat();
+      const a = this.unwrapScalar(left);
+      const b = this.unwrapScalar(right);
+      const aNum = parseNumericValue(a);
+      const bNum = parseNumericValue(b);
+      if (aNum !== null && bNum !== null && typeof a !== "boolean" && typeof b !== "boolean") {
+        if (op === "=") left = aNum === bNum;
+        else if (op === "<>" || op === "!=") left = aNum !== bNum;
+        else if (op === "<") left = aNum < bNum;
+        else if (op === "<=") left = aNum <= bNum;
+        else if (op === ">") left = aNum > bNum;
+        else if (op === ">=") left = aNum >= bNum;
+      } else {
+        const sa = toStr(a).toLowerCase();
+        const sb = toStr(b).toLowerCase();
+        if (op === "=") left = sa === sb;
+        else if (op === "<>" || op === "!=") left = sa !== sb;
+        else if (op === "<") left = sa < sb;
+        else if (op === "<=") left = sa <= sb;
+        else if (op === ">") left = sa > sb;
+        else if (op === ">=") left = sa >= sb;
       }
     }
     return left;
   }
-  function parseFactor() {
-    if (tokens[pos] === "-") {
-      pos++;
-      return -parseFactor();
+
+  parseConcat() {
+    let left = this.parseAdditive();
+    while (this.peek()?.type === "op" && this.peek().value === "&") {
+      this.consume();
+      const right = this.parseAdditive();
+      left = toStr(this.unwrapScalar(left)) + toStr(this.unwrapScalar(right));
     }
-    if (tokens[pos] === "+") {
-      pos++;
-      return parseFactor();
+    return left;
+  }
+
+  parseAdditive() {
+    let left = this.parseMultiplicative();
+    while (this.peek()?.type === "op" && (this.peek().value === "+" || this.peek().value === "-")) {
+      const op = this.consume().value;
+      const right = this.parseMultiplicative();
+      const a = toNumber(this.unwrapScalar(left));
+      const b = toNumber(this.unwrapScalar(right));
+      left = op === "+" ? a + b : a - b;
     }
-    if (tokens[pos] === "(") {
-      pos++;
-      const val = parseExpr();
-      if (tokens[pos] !== ")") return NaN;
-      pos++;
+    return left;
+  }
+
+  parseMultiplicative() {
+    let left = this.parsePower();
+    while (this.peek()?.type === "op" && (this.peek().value === "*" || this.peek().value === "/")) {
+      const op = this.consume().value;
+      const right = this.parsePower();
+      const a = toNumber(this.unwrapScalar(left));
+      const b = toNumber(this.unwrapScalar(right));
+      if (op === "/") {
+        if (b === 0) throw new Error("#DIV/0!");
+        left = a / b;
+      } else {
+        left = a * b;
+      }
+    }
+    return left;
+  }
+
+  parsePower() {
+    let left = this.parseUnary();
+    if (this.peek()?.type === "op" && this.peek().value === "^") {
+      this.consume();
+      const right = this.parsePower();
+      left = Math.pow(toNumber(this.unwrapScalar(left)), toNumber(this.unwrapScalar(right)));
+    }
+    return left;
+  }
+
+  parseUnary() {
+    if (this.peek()?.type === "op" && (this.peek().value === "+" || this.peek().value === "-")) {
+      const op = this.consume().value;
+      const val = toNumber(this.unwrapScalar(this.parseUnary()));
+      return op === "-" ? -val : val;
+    }
+    return this.parsePostfix();
+  }
+
+  parsePostfix() {
+    let val = this.parsePrimary();
+    while (this.peek()?.type === "op" && this.peek().value === "%") {
+      this.consume();
+      val = toNumber(this.unwrapScalar(val)) / 100;
+    }
+    return val;
+  }
+
+  parsePrimary() {
+    const tok = this.peek();
+    if (!tok) throw new Error("#SYNTAX!");
+
+    if (tok.type === "number" || tok.type === "string") {
+      this.consume();
+      return tok.value;
+    }
+
+    if (tok.type === "punct" && tok.value === "(") {
+      this.consume();
+      const val = this.parseComparison();
+      if (this.peek()?.type !== "punct" || this.peek().value !== ")") {
+        throw new Error("#SYNTAX!");
+      }
+      this.consume();
       return val;
     }
-    const tok = tokens[pos++];
-    return typeof tok === "number" ? tok : NaN;
+
+    if (tok.type === "ident") {
+      const ident = this.consume().value;
+      const upper = normalizeFuncName(ident);
+
+      // Chamada de funcao: NOME(arg1; arg2; ...)
+      if (this.peek()?.type === "punct" && this.peek().value === "(") {
+        return this.parseFunctionCall(upper);
+      }
+
+      if (upper === "TRUE" || upper === "VERDADEIRO") return true;
+      if (upper === "FALSE" || upper === "FALSO") return false;
+
+      // Referencia de celula ou intervalo A1:B3
+      const startCoords = cellRefToCoords(ident);
+      if (startCoords) {
+        if (this.peek()?.type === "punct" && this.peek().value === ":") {
+          this.consume();
+          const endTok = this.consume();
+          if (!endTok || endTok.type !== "ident") throw new Error("#REF!");
+          const endCoords = cellRefToCoords(endTok.value);
+          if (!endCoords) throw new Error("#REF!");
+          return this.collectRangeValues(startCoords, endCoords);
+        }
+        return this.resolveCellValue(startCoords.row, startCoords.col);
+      }
+
+      throw new Error("#NAME?");
+    }
+
+    throw new Error("#SYNTAX!");
   }
 
-  const val = parseExpr();
-  return pos === tokens.length ? val : NaN;
-}
+  parseRawArgSlices() {
+    this.consume(); // '('
+    const slices = [];
+    if (this.peek()?.type === "punct" && this.peek().value === ")") {
+      this.consume();
+      return slices;
+    }
 
-function evaluateFormulaInternal(expr, rows, visited) {
-  const trimmed = String(expr || "").trim();
-  if (!trimmed) return NaN;
-
-  const fnMatch = trimmed.match(/^(SUM|SOMA|AVG|AVERAGE|MEDIA|MIN|MAX|COUNT|CONT)\s*\(([^)]+)\)$/i);
-  if (fnMatch) {
-    const fn = fnMatch[1].toUpperCase();
-    const nums = collectRangeNumbers(fnMatch[2], rows, visited);
-    if (fn === "COUNT" || fn === "CONT") return nums.length;
-    if (!nums.length) return 0;
-    if (fn === "SUM" || fn === "SOMA") return nums.reduce((a, b) => a + b, 0);
-    if (fn === "AVG" || fn === "AVERAGE" || fn === "MEDIA") return nums.reduce((a, b) => a + b, 0) / nums.length;
-    if (fn === "MIN") return Math.min(...nums);
-    if (fn === "MAX") return Math.max(...nums);
+    let start = this.pos;
+    let depth = 0;
+    while (this.pos < this.tokens.length) {
+      const t = this.tokens[this.pos];
+      if (t.type === "punct" && t.value === "(") {
+        depth++;
+      } else if (t.type === "punct" && t.value === ")") {
+        if (depth === 0) {
+          slices.push(this.tokens.slice(start, this.pos));
+          this.pos++;
+          return slices;
+        }
+        depth--;
+      } else if (depth === 0 && t.type === "punct" && (t.value === "," || t.value === ";")) {
+        slices.push(this.tokens.slice(start, this.pos));
+        start = this.pos + 1;
+      }
+      this.pos++;
+    }
+    throw new Error("#SYNTAX!");
   }
 
-  // Substitui referencias de celulas (ex.: A1, B2) por seus valores numericos
-  const substituted = trimmed.replace(/\b([A-Za-z]+\d+)\b/g, ref => {
-    const coords = cellRefToCoords(ref);
-    if (!coords) return "0";
-    const n = resolveCellNumeric(rows, coords.row, coords.col, visited);
-    return n === null ? "0" : String(n);
-  });
+  evalSlice(slice) {
+    if (!slice.length) return "";
+    const sub = new ExcelFormulaEngine(this.rows, this.visited);
+    sub.tokens = slice;
+    sub.pos = 0;
+    const val = sub.parseComparison();
+    if (sub.pos !== sub.tokens.length) throw new Error("#SYNTAX!");
+    return val;
+  }
 
-  return evaluateSafeArithmetic(substituted.replace(/,/g, "."));
+  parseFunctionCall(fn) {
+    const rawSlices = this.parseRawArgSlices();
+
+    // Avaliacao lazy para IF/SE e IFERROR/SEERRO
+    if (fn === "IF" || fn === "SE") {
+      if (rawSlices.length < 2) throw new Error("#VALUE!");
+      const cond = toBool(this.unwrapScalar(this.evalSlice(rawSlices[0])));
+      if (cond) return this.unwrapScalar(this.evalSlice(rawSlices[1]));
+      return rawSlices.length >= 3 ? this.unwrapScalar(this.evalSlice(rawSlices[2])) : false;
+    }
+
+    if (fn === "IFERROR" || fn === "SEERRO") {
+      if (rawSlices.length < 2) throw new Error("#VALUE!");
+      try {
+        const res = this.unwrapScalar(this.evalSlice(rawSlices[0]));
+        if (typeof res === "number" && !Number.isFinite(res)) {
+          return this.unwrapScalar(this.evalSlice(rawSlices[1]));
+        }
+        return res;
+      } catch (_) {
+        return this.unwrapScalar(this.evalSlice(rawSlices[1]));
+      }
+    }
+
+    const args = rawSlices.map(s => this.evalSlice(s));
+    return this.invokeFunction(fn, args);
+  }
+
+  invokeFunction(fn, args) {
+    const scalar = idx => this.unwrapScalar(args[idx]);
+
+    switch (fn) {
+      case "SUM":
+      case "SOMA":
+        return this.flattenNumericArgs(args).reduce((a, b) => a + b, 0);
+
+      case "AVERAGE":
+      case "AVG":
+      case "MEDIA": {
+        const nums = this.flattenNumericArgs(args);
+        if (!nums.length) return 0;
+        return nums.reduce((a, b) => a + b, 0) / nums.length;
+      }
+
+      case "MIN":
+      case "MINIMO": {
+        const nums = this.flattenNumericArgs(args);
+        return nums.length ? Math.min(...nums) : 0;
+      }
+
+      case "MAX":
+      case "MAXIMO": {
+        const nums = this.flattenNumericArgs(args);
+        return nums.length ? Math.max(...nums) : 0;
+      }
+
+      case "MEDIAN":
+      case "MED": {
+        const nums = this.flattenNumericArgs(args).sort((a, b) => a - b);
+        if (!nums.length) return 0;
+        const mid = Math.floor(nums.length / 2);
+        return nums.length % 2 === 0 ? (nums[mid - 1] + nums[mid]) / 2 : nums[mid];
+      }
+
+      case "PRODUCT":
+      case "MULT": {
+        const nums = this.flattenNumericArgs(args);
+        return nums.length ? nums.reduce((a, b) => a * b, 1) : 0;
+      }
+
+      case "COUNT":
+      case "CONT":
+      case "CONT.NUM":
+        return this.flattenNumericArgs(args).length;
+
+      case "COUNTA":
+      case "CONT.VALORES":
+        return this.flattenAllArgs(args).filter(v => v !== "" && v !== null && v !== undefined).length;
+
+      case "COUNTBLANK":
+      case "CONTAR.VAZIO":
+        return this.flattenAllArgs(args).filter(v => v === "" || v === null || v === undefined).length;
+
+      case "ABS":
+        return Math.abs(toNumber(scalar(0)));
+
+      case "ROUND":
+      case "ARRED": {
+        const n = toNumber(scalar(0));
+        const d = args.length > 1 ? Math.trunc(toNumber(scalar(1))) : 0;
+        const f = Math.pow(10, d);
+        return Math.round(n * f) / f;
+      }
+
+      case "ROUNDUP":
+      case "ARREDONDAR.PARA.CIMA": {
+        const n = toNumber(scalar(0));
+        const d = args.length > 1 ? Math.trunc(toNumber(scalar(1))) : 0;
+        const f = Math.pow(10, d);
+        return (n >= 0 ? Math.ceil(n * f) : Math.floor(n * f)) / f;
+      }
+
+      case "ROUNDDOWN":
+      case "ARREDONDAR.PARA.BAIXO": {
+        const n = toNumber(scalar(0));
+        const d = args.length > 1 ? Math.trunc(toNumber(scalar(1))) : 0;
+        const f = Math.pow(10, d);
+        return Math.trunc(n * f) / f;
+      }
+
+      case "INT":
+        return Math.floor(toNumber(scalar(0)));
+
+      case "SQRT":
+      case "RAIZ": {
+        const n = toNumber(scalar(0));
+        if (n < 0) throw new Error("#NUM!");
+        return Math.sqrt(n);
+      }
+
+      case "POWER":
+      case "POTENCIA":
+        return Math.pow(toNumber(scalar(0)), toNumber(scalar(1)));
+
+      case "MOD": {
+        const a = toNumber(scalar(0));
+        const b = toNumber(scalar(1));
+        if (b === 0) throw new Error("#DIV/0!");
+        return ((a % b) + b) % b;
+      }
+
+      case "AND":
+      case "E":
+        return this.flattenAllArgs(args).every(v => toBool(v));
+
+      case "OR":
+      case "OU":
+        return this.flattenAllArgs(args).some(v => toBool(v));
+
+      case "NOT":
+      case "NAO":
+        return !toBool(scalar(0));
+
+      case "COUNTIF":
+      case "CONT.SE": {
+        const rangeVals = this.flattenAllArgs([args[0]]);
+        const crit = scalar(1);
+        return rangeVals.filter(v => matchesCriteria(v, crit)).length;
+      }
+
+      case "SUMIF":
+      case "SOMASE": {
+        const checkVals = this.flattenAllArgs([args[0]]);
+        const crit = scalar(1);
+        const sumVals = args.length >= 3 ? this.flattenAllArgs([args[2]]) : checkVals;
+        let total = 0;
+        for (let idx = 0; idx < checkVals.length; idx++) {
+          if (matchesCriteria(checkVals[idx], crit)) {
+            const n = parseNumericValue(sumVals[idx]);
+            if (n !== null) total += n;
+          }
+        }
+        return total;
+      }
+
+      case "AVERAGEIF":
+      case "MEDIASE": {
+        const checkVals = this.flattenAllArgs([args[0]]);
+        const crit = scalar(1);
+        const avgVals = args.length >= 3 ? this.flattenAllArgs([args[2]]) : checkVals;
+        let total = 0;
+        let count = 0;
+        for (let idx = 0; idx < checkVals.length; idx++) {
+          if (matchesCriteria(checkVals[idx], crit)) {
+            const n = parseNumericValue(avgVals[idx]);
+            if (n !== null) {
+              total += n;
+              count++;
+            }
+          }
+        }
+        return count ? total / count : 0;
+      }
+
+      case "CONCAT":
+      case "CONCATENATE":
+      case "CONCATENAR":
+        return this.flattenAllArgs(args).map(v => toStr(v)).join("");
+
+      case "UPPER":
+      case "MAIUSCULA":
+        return toStr(scalar(0)).toUpperCase();
+
+      case "LOWER":
+      case "MINUSCULA":
+        return toStr(scalar(0)).toLowerCase();
+
+      case "LEN":
+      case "NUM.CARACT":
+        return toStr(scalar(0)).length;
+
+      case "TRIM":
+      case "ARRUMAR":
+        return toStr(scalar(0)).trim().replace(/\s+/g, " ");
+
+      case "LEFT":
+      case "ESQUERDA": {
+        const text = toStr(scalar(0));
+        const n = args.length > 1 ? Math.max(0, Math.trunc(toNumber(scalar(1)))) : 1;
+        return text.slice(0, n);
+      }
+
+      case "RIGHT":
+      case "DIREITA": {
+        const text = toStr(scalar(0));
+        const n = args.length > 1 ? Math.max(0, Math.trunc(toNumber(scalar(1)))) : 1;
+        return n === 0 ? "" : text.slice(-n);
+      }
+
+      case "MID":
+      case "EXT.TEXTO": {
+        const text = toStr(scalar(0));
+        const start = Math.max(1, Math.trunc(toNumber(scalar(1))));
+        const count = Math.max(0, Math.trunc(toNumber(scalar(2))));
+        return text.slice(start - 1, start - 1 + count);
+      }
+
+      case "VLOOKUP":
+      case "PROCV": {
+        const key = scalar(0);
+        const tableArg = args[1];
+        const colIdx = Math.trunc(toNumber(scalar(2)));
+        if (!tableArg?.__range || colIdx < 1 || colIdx > (tableArg.matrix[0]?.length || 0)) {
+          throw new Error("#REF!");
+        }
+        for (const row of tableArg.matrix) {
+          if (matchesCriteria(row[0], key)) {
+            return row[colIdx - 1] ?? "";
+          }
+        }
+        throw new Error("#N/A");
+      }
+
+      case "TODAY":
+      case "HOJE": {
+        const now = new Date();
+        const pad = n => String(n).padStart(2, "0");
+        return `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()}`;
+      }
+
+      case "NOW":
+      case "AGORA": {
+        const now = new Date();
+        const pad = n => String(n).padStart(2, "0");
+        return `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+      }
+
+      default:
+        throw new Error("#NAME?");
+    }
+  }
 }
 
 export function evaluateCellFormula(rawValue, rows, rowIdx = -1, colIdx = -1) {
@@ -388,10 +928,21 @@ export function evaluateCellFormula(rawValue, rows, rowIdx = -1, colIdx = -1) {
   if (rowIdx >= 0 && colIdx >= 0) {
     visited.add(`${rowIdx}:${colIdx}`);
   }
-  const result = evaluateFormulaInternal(str.trim().slice(1), rows, visited);
-  if (!Number.isFinite(result)) return "#ERR";
-  const rounded = Math.round(result * 10000) / 10000;
-  return String(rounded);
+  try {
+    const engine = new ExcelFormulaEngine(rows, visited);
+    const result = engine.evaluate(str.trim().slice(1));
+    if (typeof result === "number") {
+      if (!Number.isFinite(result)) return "#ERR";
+      const rounded = Math.round(result * 10000) / 10000;
+      return String(rounded);
+    }
+    if (typeof result === "boolean") {
+      return result ? "TRUE" : "FALSE";
+    }
+    return String(result ?? "");
+  } catch (_) {
+    return "#ERR";
+  }
 }
 
 function escapeHtmlBasic(str) {

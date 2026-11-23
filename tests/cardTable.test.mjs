@@ -116,7 +116,46 @@ test("colIndexToLetter e cellRefToCoords convertem corretamente alem de Z", () =
   assert.equal(colIndexToLetter(25), "Z");
   assert.equal(colIndexToLetter(26), "AA");
   assert.deepEqual(cellRefToCoords("B3"), { row: 2, col: 1 });
+  assert.deepEqual(cellRefToCoords("$A$1"), { row: 0, col: 0 });
   assert.deepEqual(cellRefToCoords("AA1"), { row: 0, col: 26 });
+});
+
+test("ExcelFormulaEngine suporta funcoes avancadas EN/PT-BR, aninhamento e ponto-e-virgula", () => {
+  const rows = [
+    ["Status", "Produto", "Valor", "Desconto"],
+    ["Pago", "Teclado", "200", "10%"],
+    ["Pendente", "Mouse", "100", "5%"],
+    ["Pago", "Monitor", "900", "15%"]
+  ];
+
+  // Aninhamento + porcentagem + separador ';' estilo Excel PT-BR
+  assert.equal(evaluateCellFormula("=ARRED(SOMA(C2:C4) * 1.1; 2)", rows), "1320");
+  assert.equal(evaluateCellFormula("=C2 * (1 - D2)", rows), "180");
+  assert.equal(evaluateCellFormula("=SE(C4>500; \"Caro\"; \"Ok\")", rows), "Caro");
+  assert.equal(evaluateCellFormula("=IF(AND(C2>=200, C3>=100), \"Sim\", \"Nao\")", rows), "Sim");
+  assert.equal(evaluateCellFormula("=SEERRO(C2/0; \"Zero\")", rows), "Zero");
+
+  // Agregacoes condicionais (SOMASE, CONT.SE, MEDIASE)
+  assert.equal(evaluateCellFormula("=SOMASE(A2:A4; \"Pago\"; C2:C4)", rows), "1100");
+  assert.equal(evaluateCellFormula("=CONT.SE(A2:A4; \"Pago\")", rows), "2");
+  assert.equal(evaluateCellFormula("=CONT.SE(C2:C4; \">=200\")", rows), "2");
+  assert.equal(evaluateCellFormula("=MEDIASE(A2:A4; \"Pago\"; C2:C4)", rows), "550");
+
+  // Texto, concatenacao e PROCV/VLOOKUP
+  assert.equal(evaluateCellFormula("=MAIÚSCULA(B2) & \" - \" & C2", rows), "TECLADO - 200");
+  assert.equal(evaluateCellFormula("=PROCV(\"Monitor\"; B2:C4; 2; FALSO)", rows), "900");
+  assert.equal(evaluateCellFormula("=VLOOKUP(\"Mouse\", B2:C4, 2, FALSE)", rows), "100");
+  assert.equal(evaluateCellFormula("=ESQUERDA(B2; 3)", rows), "Tec");
+  assert.equal(evaluateCellFormula("=POTENCIA(2; 3) + RAIZ(16)", rows), "12");
+
+  // Checkboxes em Todo List
+  const todoRows = [
+    ["[x]", "Tarefa 1"],
+    ["[ ]", "Tarefa 2"],
+    ["[x]", "Tarefa 3"]
+  ];
+  assert.equal(evaluateCellFormula("=CONT.SE(A1:A3; VERDADEIRO)", todoRows), "2");
+  assert.equal(evaluateCellFormula("=SE(A1; \"Concluido\"; \"Aberto\")", todoRows), "Concluido");
 });
 
 test("renderCardTableHtml renderiza tabela escapada com formulas avaliadas", () => {
