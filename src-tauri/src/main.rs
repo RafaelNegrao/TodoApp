@@ -3059,52 +3059,109 @@ async fn download_and_apply_update(
     Ok(())
 }
 
-fn fetch_latest_release(current_version: &str) -> Result<Option<UpdateInfo>, String> {
-    let response = ureq::get(GITHUB_API_LATEST)
+fn fetch_latest_release_via_web_redirect(
+    current_version: &str,
+) -> Result<Option<UpdateInfo>, String> {
+    let web_url = "https://github.com/RafaelNegrao/TodoApp/releases/latest";
+    let resp = ureq::get(web_url)
         .set("User-Agent", USER_AGENT)
-        .set("Accept", "application/vnd.github+json")
         .timeout(Duration::from_secs(15))
         .call()
-        .map_err(|e| format!("Falha ao consultar GitHub: {e}"))?;
+        .map_err(|e| format!("Falha ao consultar GitHub (web): {e}"))?;
 
-    let release: serde_json::Value = response
-        .into_json()
-        .map_err(|e| format!("Resposta invalida: {e}"))?;
-
-    let tag = release["tag_name"].as_str().unwrap_or("").trim();
-    let latest = tag.trim_start_matches('v').trim_start_matches('V');
-    if latest.is_empty() {
+    let final_url = resp.get_url().to_string();
+    let tag = final_url
+        .rsplit("/tag/")
+        .next()
+        .unwrap_or("")
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim();
+    if final_url == web_url || tag.is_empty() {
         return Ok(None);
     }
-    if compare_versions(latest, current_version) <= 0 {
+    let latest = tag.trim_start_matches('v').trim_start_matches('V');
+    if latest.is_empty() || compare_versions(latest, current_version) <= 0 {
         return Ok(None);
     }
 
     let expected_name = format!("TodoApp-{}.exe", latest);
-    let assets = release["assets"].as_array().cloned().unwrap_or_default();
+    let download_url = format!(
+        "https://github.com/RafaelNegrao/TodoApp/releases/download/{}/{}",
+        tag, expected_name
+    );
 
-    let asset = assets
-        .iter()
-        .find(|a| a["name"].as_str() == Some(expected_name.as_str()))
-        .ok_or_else(|| format!("Asset '{expected_name}' nao encontrado no release"))?;
-
-    let url = asset["browser_download_url"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-    if url.is_empty() {
-        return Err("URL de download ausente".to_string());
-    }
-
-    let size = asset["size"].as_u64().unwrap_or(0);
+    let size = ureq::head(&download_url)
+        .set("User-Agent", USER_AGENT)
+        .timeout(Duration::from_secs(15))
+        .call()
+        .ok()
+        .and_then(|r| r.header("Content-Length").and_then(|v| v.parse::<u64>().ok()))
+        .unwrap_or(0);
 
     Ok(Some(UpdateInfo {
         current_version: current_version.to_string(),
         latest_version: latest.to_string(),
-        download_url: url,
+        download_url,
         asset_name: expected_name,
         size,
     }))
+}
+
+fn fetch_latest_release(current_version: &str) -> Result<Option<UpdateInfo>, String> {
+    let api_result: Result<Option<UpdateInfo>, String> = (|| {
+        let response = ureq::get(GITHUB_API_LATEST)
+            .set("User-Agent", USER_AGENT)
+            .set("Accept", "application/vnd.github+json")
+            .timeout(Duration::from_secs(15))
+            .call()
+            .map_err(|e| format!("Falha ao consultar GitHub: {e}"))?;
+
+        let release: serde_json::Value = response
+            .into_json()
+            .map_err(|e| format!("Resposta invalida: {e}"))?;
+
+        let tag = release["tag_name"].as_str().unwrap_or("").trim();
+        let latest = tag.trim_start_matches('v').trim_start_matches('V');
+        if latest.is_empty() {
+            return Ok(None);
+        }
+        if compare_versions(latest, current_version) <= 0 {
+            return Ok(None);
+        }
+
+        let expected_name = format!("TodoApp-{}.exe", latest);
+        let assets = release["assets"].as_array().cloned().unwrap_or_default();
+
+        let asset = assets
+            .iter()
+            .find(|a| a["name"].as_str() == Some(expected_name.as_str()))
+            .ok_or_else(|| format!("Asset '{expected_name}' nao encontrado no release"))?;
+
+        let url = asset["browser_download_url"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        if url.is_empty() {
+            return Err("URL de download ausente".to_string());
+        }
+
+        let size = asset["size"].as_u64().unwrap_or(0);
+
+        Ok(Some(UpdateInfo {
+            current_version: current_version.to_string(),
+            latest_version: latest.to_string(),
+            download_url: url,
+            asset_name: expected_name,
+            size,
+        }))
+    })();
+
+    match api_result {
+        Ok(info) => Ok(info),
+        Err(api_err) => fetch_latest_release_via_web_redirect(current_version).map_err(|_| api_err),
+    }
 }
 
 fn download_to_file(

@@ -195,9 +195,10 @@ function selectSettingsTab(tabName) {
   });
 }
 
-function setUpdateStatus(text, tone = "") {
+function setUpdateStatus(text, tone = "", detail = "") {
   if (!updateStatusEl) return;
   updateStatusEl.textContent = text;
+  updateStatusEl.title = detail || "";
   updateStatusEl.classList.remove("status-ok", "status-error");
   if (tone) updateStatusEl.classList.add(tone);
 }
@@ -218,13 +219,13 @@ async function handleManualUpdateCheck() {
     } else if (result?.status === "unavailable") {
       setUpdateStatus("Verificação disponível apenas no app instalado");
     } else if (result?.status === "error") {
-      setUpdateStatus("Não foi possível verificar agora", "status-error");
+      setUpdateStatus("Não foi possível verificar agora", "status-error", result.error || "");
     } else {
       setUpdateStatus("Verifica automaticamente ao abrir o app");
     }
   } catch (err) {
     console.warn("[settings] manual update check failed", err);
-    setUpdateStatus("Não foi possível verificar agora", "status-error");
+    setUpdateStatus("Não foi possível verificar agora", "status-error", String(err?.message || err));
   } finally {
     checkUpdateButton.disabled = false;
     checkUpdateButton.textContent = "Verificar agora";
