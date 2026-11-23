@@ -8966,7 +8966,38 @@ function initAiTranslatorPanel() {
   let activeSessionId = "";
   let pendingAttachments = [];
   let chatBusy = false;
+  let activeChatRequestId = 0;
   let chatHasUnread = false;
+
+  const CHAT_SEND_ICON_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>`;
+  const CHAT_STOP_ICON_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none" /></svg>`;
+
+  function syncChatSendButtonState() {
+    if (!chatSendBtn) return;
+    chatSendBtn.disabled = false;
+    chatSendBtn.classList.toggle("is-stop", chatBusy);
+    chatSendBtn.type = chatBusy ? "button" : "submit";
+    chatSendBtn.title = chatBusy ? "Parar requisição" : "Send message (Enter)";
+    chatSendBtn.setAttribute("aria-label", chatBusy ? "Parar requisição" : "Send message");
+    chatSendBtn.innerHTML = chatBusy ? CHAT_STOP_ICON_SVG : CHAT_SEND_ICON_SVG;
+  }
+
+  function stopActiveChatRequest() {
+    if (!chatBusy) return;
+    activeChatRequestId += 1;
+    if (activeTypingRaf) {
+      cancelAnimationFrame(activeTypingRaf);
+      activeTypingRaf = 0;
+    }
+    animatingMessageRef = null;
+    chatBusy = false;
+    syncChatSendButtonState();
+    updateChatTopbarIndicator();
+    renderChatMessages();
+    if (!panel.hidden && currentMode === "chat") {
+      chatInput?.focus();
+    }
+  }
   let animatingMessageRef = null;
   let activeTypingRaf = 0;
   let chatDropOverlayActive = false;
@@ -10692,9 +10723,10 @@ function initAiTranslatorPanel() {
     renderSessionsList();
 
     if (chatInput) chatInput.value = "";
+    const reqId = ++activeChatRequestId;
     chatBusy = true;
     chatHasUnread = false;
-    if (chatSendBtn) chatSendBtn.disabled = true;
+    syncChatSendButtonState();
     updateChatTopbarIndicator();
     renderChatMessages();
 
@@ -10760,6 +10792,8 @@ function initAiTranslatorPanel() {
         usedModel = DEFAULT_ENV_GEMINI_MODEL;
       }
 
+      if (reqId !== activeChatRequestId) return;
+
       const { cleanText: afterActionsText, proposal } = extractAiActionProposal(String(reply || ""));
       const { cleanText, questionSet } = extractAiQuestions(afterActionsText);
       const cleaned =
@@ -10784,6 +10818,7 @@ function initAiTranslatorPanel() {
       saveChatSessions();
       renderSessionsList();
     } catch (err) {
+      if (reqId !== activeChatRequestId) return;
       session.messages.push({
         role: "model",
         text: `Error: ${String(err?.message || err)}`,
@@ -10794,18 +10829,32 @@ function initAiTranslatorPanel() {
       }
       saveChatSessions();
     } finally {
-      chatBusy = false;
-      if (chatSendBtn) chatSendBtn.disabled = false;
-      updateChatTopbarIndicator();
-      renderChatMessages();
-      if (!panel.hidden && currentMode === "chat") {
-        chatInput?.focus();
+      if (reqId === activeChatRequestId) {
+        chatBusy = false;
+        syncChatSendButtonState();
+        updateChatTopbarIndicator();
+        renderChatMessages();
+        if (!panel.hidden && currentMode === "chat") {
+          chatInput?.focus();
+        }
       }
     }
   }
 
+  chatSendBtn?.addEventListener("click", event => {
+    if (chatBusy) {
+      event.preventDefault();
+      event.stopPropagation();
+      stopActiveChatRequest();
+    }
+  });
+
   chatForm?.addEventListener("submit", event => {
     event.preventDefault();
+    if (chatBusy) {
+      stopActiveChatRequest();
+      return;
+    }
     sendChatMessage(chatInput?.value);
   });
 

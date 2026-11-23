@@ -7847,3 +7847,20 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   opacity: 0.42;
   cursor: default;
 }
+
+.ai-chat-send.is-stop {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.48);
+  transition: background 150ms ease, border-color 150ms ease, transform 120ms ease;
+}
+
+.ai-chat-send.is-stop:hover {
+  background: rgba(239, 68, 68, 0.34);
+  border-color: rgba(239, 68, 68, 0.72);
+  color: #fecaca;
+}
+
+.ai-chat-send.is-stop:active {
+  transform: scale(0.94);
+}
