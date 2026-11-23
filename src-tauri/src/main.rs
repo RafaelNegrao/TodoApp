@@ -183,24 +183,29 @@ struct AiChatMessage {
     attachments: Vec<AiChatAttachment>,
 }
 
+fn build_schannel_agent(connect_timeout: Duration, total_timeout: Duration) -> ureq::Agent {
+    let mut builder = ureq::AgentBuilder::new()
+        .timeout_connect(connect_timeout)
+        .timeout(total_timeout);
+    if let Ok(tls) = native_tls::TlsConnector::new() {
+        builder = builder.tls_connector(Arc::new(tls));
+    }
+    builder.build()
+}
+
+fn default_http_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| build_schannel_agent(Duration::from_secs(10), Duration::from_secs(180)))
+}
+
 fn gemini_http_agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-    AGENT.get_or_init(|| {
-        ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(6))
-            .timeout(Duration::from_secs(45))
-            .build()
-    })
+    AGENT.get_or_init(|| build_schannel_agent(Duration::from_secs(6), Duration::from_secs(45)))
 }
 
 fn gemini_translate_agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-    AGENT.get_or_init(|| {
-        ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(3))
-            .timeout(Duration::from_secs(5))
-            .build()
-    })
+    AGENT.get_or_init(|| build_schannel_agent(Duration::from_secs(3), Duration::from_secs(5)))
 }
 
 // Cascata completa de modelos de texto da API Gemini/Gemma ordenada por velocidade real
@@ -2369,7 +2374,7 @@ async fn transcribe_audio_gemini(
         for base_url in &endpoints {
             for model in &models {
                 let url = format!("{}/{}:generateContent?key={}", base_url, model, key);
-                match ureq::post(&url)
+                match default_http_agent().post(&url)
                     .set("Content-Type", "application/json")
                     .timeout(Duration::from_secs(120))
                     .send_json(payload.clone())
@@ -2446,7 +2451,7 @@ fn upload_gemini_media_file(
         "https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=media&key={}",
         key
     );
-    let resp = ureq::post(&upload_url)
+    let resp = default_http_agent().post(&upload_url)
         .set("Content-Type", mime)
         .timeout(Duration::from_secs(300))
         .send(file)
@@ -2472,7 +2477,7 @@ fn upload_gemini_media_file(
         file_name, key
     );
     for _ in 0..45 {
-        let state_str = match ureq::get(&status_url).timeout(Duration::from_secs(15)).call() {
+        let state_str = match default_http_agent().get(&status_url).timeout(Duration::from_secs(15)).call() {
             Ok(r) => r
                 .into_json::<serde_json::Value>()
                 .ok()
@@ -2584,7 +2589,7 @@ async fn transcribe_attachment_zoom_summary(
                 "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
                 model, key
             );
-            match ureq::post(&url)
+            match default_http_agent().post(&url)
                 .set("Content-Type", "application/json")
                 .timeout(Duration::from_secs(180))
                 .send_json(payload.clone())
@@ -2637,7 +2642,7 @@ async fn transcribe_attachment_zoom_summary(
                 "https://generativelanguage.googleapis.com/v1beta/{}?key={}",
                 fname, key
             );
-            let _ = ureq::delete(&del_url).timeout(Duration::from_secs(15)).call();
+            let _ = default_http_agent().delete(&del_url).timeout(Duration::from_secs(15)).call();
         }
 
         final_result.ok_or(last_err)
@@ -3063,7 +3068,7 @@ fn fetch_latest_release_via_web_redirect(
     current_version: &str,
 ) -> Result<Option<UpdateInfo>, String> {
     let web_url = "https://github.com/RafaelNegrao/TodoApp/releases/latest";
-    let resp = ureq::get(web_url)
+    let resp = default_http_agent().get(web_url)
         .set("User-Agent", USER_AGENT)
         .timeout(Duration::from_secs(15))
         .call()
@@ -3092,7 +3097,7 @@ fn fetch_latest_release_via_web_redirect(
         tag, expected_name
     );
 
-    let size = ureq::head(&download_url)
+    let size = default_http_agent().head(&download_url)
         .set("User-Agent", USER_AGENT)
         .timeout(Duration::from_secs(15))
         .call()
@@ -3111,7 +3116,7 @@ fn fetch_latest_release_via_web_redirect(
 
 fn fetch_latest_release(current_version: &str) -> Result<Option<UpdateInfo>, String> {
     let api_result: Result<Option<UpdateInfo>, String> = (|| {
-        let response = ureq::get(GITHUB_API_LATEST)
+        let response = default_http_agent().get(GITHUB_API_LATEST)
             .set("User-Agent", USER_AGENT)
             .set("Accept", "application/vnd.github+json")
             .timeout(Duration::from_secs(15))
@@ -3169,7 +3174,7 @@ fn download_to_file(
     dest: &Path,
     window: &tauri::WebviewWindow,
 ) -> Result<(), String> {
-    let response = ureq::get(url)
+    let response = default_http_agent().get(url)
         .set("User-Agent", USER_AGENT)
         .timeout(Duration::from_secs(60))
         .call()
