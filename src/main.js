@@ -7303,7 +7303,7 @@ function hideRecordingIndicator() {
 // ------------------------------------------------------------------
 const GEMINI_API_KEY_STORAGE = "todocompanion.settings.geminiApiKey";
 const DEFAULT_ENV_GEMINI_KEY = "";
-const DEFAULT_ENV_GEMINI_MODEL = "gemini-3.5-flash-lite";
+const DEFAULT_ENV_GEMINI_MODEL = "gemini-2.5-flash";
 const LIVE_TRANSCRIBE_INTERVAL_MS = 5500;
 
 let transcribeState = null;
@@ -7555,7 +7555,7 @@ async function requestGeminiTranscription(apiKey, mimeType, audioBase64) {
     "2. Se houver apenas uma única pessoa falando durante todo o áudio, transcreva o texto diretamente com pontuação adequada e parágrafos claros.\n" +
     "3. Retorne APENAS a transcrição pronta, sem introduções, sem títulos e sem comentários extras. Se não houver fala audível, retorne apenas uma string vazia.";
 
-  const models = [DEFAULT_ENV_GEMINI_MODEL, "gemini-3.8-flash", "gemini-3.1-flash-lite-preview"];
+  const models = [DEFAULT_ENV_GEMINI_MODEL, "gemini-2.5-flash-lite", "gemini-flash-latest"];
   const keyToUse = apiKey || DEFAULT_ENV_GEMINI_KEY;
   let lastError = new Error("Could not reach Gemini API");
 

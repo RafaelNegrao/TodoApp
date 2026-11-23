@@ -222,42 +222,108 @@ fn gemini_translate_agent() -> &'static ureq::Agent {
 // 3. Cota gigante de seguranca (14.4K RPD): gemma-4-26b-a4b-it, gemma-4-31b-it
 // 4. Demais modelos de texto da API como ultimo recurso caso tenham cota liberada
 const GEMINI_MODEL_CASCADE: &[&str] = &[
-    "gemini-3.1-flash-lite",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite-preview",
-    "gemini-flash-lite-latest",
-    "gemini-robotics-er-2-preview",
-    "gemini-3-flash-preview",
-    "gemini-3.6-flash",
-    "gemini-4-hydrogen",
-    "gemini-3.5-flash",
-    "gemini-3.7-flash",
-    "gemini-3.8-flash",
-    "gemma-4-26b-a4b-it",
-    "gemma-4-31b-it",
-    "gemini-flash-latest",
-    "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-flash-latest",
     "gemini-2.5-pro",
     "gemini-3.1-pro-preview",
-    "gemini-4-argon",
-    "gemini-4-carbon",
-    "gemini-4-neon",
     "gemini-pro-latest",
-    "gemini-2.0-flash-lite",
-    "gemini-2.0-flash",
+    "gemma-3-27b-it",
+    "gemma-3-12b-it",
+    "gemma-3-4b-it",
 ];
+
+fn is_deprecated_gemini_model(model: &str) -> bool {
+    let lower = model.trim().to_lowercase();
+    lower.starts_with("gemini-2.0")
+        || lower.starts_with("gemini-1.5")
+        || lower.starts_with("gemini-1.0")
+}
+
+fn gemini_dead_models() -> &'static Mutex<std::collections::HashSet<String>> {
+    static DEAD: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    DEAD.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+}
+
+fn mark_model_unavailable(model: &str) {
+    if let Ok(mut set) = gemini_dead_models().lock() {
+        set.insert(model.to_string());
+    }
+}
+
+fn is_model_marked_unavailable(model: &str) -> bool {
+    gemini_dead_models()
+        .lock()
+        .map(|set| set.contains(model))
+        .unwrap_or(false)
+}
+
+fn discover_available_gemini_models(key: &str) -> Vec<String> {
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models?key={}&pageSize=100",
+        key
+    );
+    let Ok(resp) = gemini_translate_agent().get(&url).call() else {
+        return Vec::new();
+    };
+    let Ok(body) = resp.into_json::<serde_json::Value>() else {
+        return Vec::new();
+    };
+    let Some(arr) = body["models"].as_array() else {
+        return Vec::new();
+    };
+
+    let mut flash = Vec::new();
+    let mut pro = Vec::new();
+    let mut other = Vec::new();
+
+    for item in arr {
+        let supports_gen = item["supportedGenerationMethods"]
+            .as_array()
+            .map(|methods| methods.iter().any(|m| m.as_str() == Some("generateContent")))
+            .unwrap_or(false);
+        if !supports_gen {
+            continue;
+        }
+        let Some(raw_name) = item["name"].as_str() else {
+            continue;
+        };
+        let name = raw_name.strip_prefix("models/").unwrap_or(raw_name).trim();
+        let lower = name.to_lowercase();
+        if name.is_empty()
+            || is_deprecated_gemini_model(name)
+            || is_model_marked_unavailable(name)
+            || lower.contains("embedding")
+            || lower.contains("imagen")
+            || lower.contains("veo")
+            || lower.contains("tts")
+            || lower.contains("audio")
+            || lower.contains("robotics")
+            || lower.contains("computer-use")
+        {
+            continue;
+        }
+        if lower.contains("flash") {
+            flash.push(name.to_string());
+        } else if lower.contains("pro") {
+            pro.push(name.to_string());
+        } else if lower.starts_with("gemini-") || lower.starts_with("gemma-") {
+            other.push(name.to_string());
+        }
+    }
+
+    let mut combined = Vec::new();
+    combined.extend(flash);
+    combined.extend(pro);
+    combined.extend(other);
+    combined
+}
 
 fn model_prefers_minimal_thinking(model: &str) -> bool {
     matches!(
         model,
-        "gemini-3-flash-preview"
-            | "gemini-3.6-flash"
-            | "gemini-3.7-flash"
-            | "gemini-3.8-flash"
-            | "gemini-3.5-flash"
-            | "gemini-4-hydrogen"
-            | "gemini-flash-latest"
+        "gemini-3-flash-preview" | "gemini-flash-latest"
     )
 }
 
@@ -318,11 +384,12 @@ fn resolve_gemini_key_and_models(api_key: Option<String>) -> Result<(String, Vec
     let env_model = env_vars
         .get("GEMINI_MODEL")
         .cloned()
-        .unwrap_or_else(|| "gemini-3-flash-preview".to_string());
+        .unwrap_or_else(|| "gemini-2.5-flash".to_string());
 
     let mut models = Vec::new();
-    if !env_model.trim().is_empty() {
-        models.push(env_model.trim().to_string());
+    let trimmed_env = env_model.trim();
+    if !trimmed_env.is_empty() && !is_deprecated_gemini_model(trimmed_env) {
+        models.push(trimmed_env.to_string());
     }
     for &fb in GEMINI_MODEL_CASCADE {
         if !models.iter().any(|m| m == fb) {
@@ -330,7 +397,12 @@ fn resolve_gemini_key_and_models(api_key: Option<String>) -> Result<(String, Vec
         }
     }
 
-    Ok((key, order_models_by_availability(models)))
+    let active_models: Vec<String> = models
+        .into_iter()
+        .filter(|m| !is_model_marked_unavailable(m))
+        .collect();
+
+    Ok((key, order_models_by_availability(active_models)))
 }
 
 fn describe_formality(formality: u8) -> &'static str {
@@ -402,9 +474,39 @@ fn execute_gemini_fast_payload_with_model(
     });
     let payload_compat = fold_system_instruction_into_user(payload.clone());
 
-    let ordered = order_models_by_availability(models.to_vec());
+    let mut tried = std::collections::HashSet::<String>::new();
+    let mut queue = order_models_by_availability(
+        models
+            .iter()
+            .filter(|m| !is_deprecated_gemini_model(m) && !is_model_marked_unavailable(m))
+            .cloned()
+            .collect(),
+    );
+    let mut discovered_fallback = false;
+    let mut saw_rate_limit = false;
+    let mut saw_auth_error = false;
 
-    for model in &ordered {
+    loop {
+        if queue.is_empty() {
+            if !discovered_fallback {
+                discovered_fallback = true;
+                let fresh: Vec<String> = discover_available_gemini_models(key)
+                    .into_iter()
+                    .filter(|m| !tried.contains(m))
+                    .collect();
+                if !fresh.is_empty() {
+                    queue.extend(fresh);
+                    continue;
+                }
+            }
+            break;
+        }
+
+        let model = queue.remove(0);
+        if !tried.insert(model.clone()) {
+            continue;
+        }
+
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
             model, key
@@ -412,7 +514,7 @@ fn execute_gemini_fast_payload_with_model(
 
         let candidates = if model.starts_with("gemma-") {
             vec![&payload_compat]
-        } else if model_prefers_minimal_thinking(model) {
+        } else if model_prefers_minimal_thinking(&model) {
             vec![&payload_fast_think, &payload, &payload_compat]
         } else {
             vec![&payload, &payload_compat]
@@ -446,10 +548,16 @@ fn execute_gemini_fast_payload_with_model(
                 }
                 Err(ureq::Error::Status(code, resp)) => {
                     let err_body = resp.into_string().unwrap_or_default();
+                    let err_lower = err_body.to_lowercase();
                     last_err = format!("Gemini HTTP {code} ({model}): {err_body}");
+                    if code == 401 || code == 403 {
+                        if err_lower.contains("api key") || err_lower.contains("invalid") {
+                            saw_auth_error = true;
+                            break;
+                        }
+                    }
                     if code == 429 {
-                        // Cota do modelo excedida: se for limite diario ou cota 0, aplica cooldown longo;
-                        // se for RPM por minuto, 30s — descendo imediatamente para o proximo modelo da cascata.
+                        saw_rate_limit = true;
                         let cooldown_secs = if err_body.contains("PerDay")
                             || err_body.contains("DAILY")
                             || err_body.contains("limit: 0")
@@ -458,15 +566,20 @@ fn execute_gemini_fast_payload_with_model(
                         } else {
                             30
                         };
-                        mark_model_cooldown(model, Duration::from_secs(cooldown_secs));
+                        mark_model_cooldown(&model, Duration::from_secs(cooldown_secs));
                         break;
                     }
                     if code == 503 || code == 502 || code == 500 || code == 504 {
-                        mark_model_cooldown(model, Duration::from_secs(45));
+                        mark_model_cooldown(&model, Duration::from_secs(45));
                         break;
                     }
-                    if code == 404 {
-                        mark_model_cooldown(model, Duration::from_secs(600));
+                    if code == 404
+                        || code == 410
+                        || err_lower.contains("no longer available")
+                        || err_lower.contains("not found")
+                        || err_lower.contains("deprecated")
+                    {
+                        mark_model_unavailable(&model);
                         break;
                     }
                     if code == 400
@@ -480,13 +593,19 @@ fn execute_gemini_fast_payload_with_model(
                 }
                 Err(e) => {
                     last_err = format!("Erro de rede ao chamar Gemini ({model}): {e}");
-                    mark_model_cooldown(model, Duration::from_secs(15));
+                    mark_model_cooldown(&model, Duration::from_secs(15));
                     break;
                 }
             }
         }
     }
 
+    if saw_auth_error {
+        return Err("Chave da API Gemini inválida ou sem permissão. Verifique em Configurações.".to_string());
+    }
+    if saw_rate_limit {
+        return Err("Limite temporário de requisições da API Gemini atingido. Aguarde alguns segundos e tente novamente.".to_string());
+    }
     Err(last_err)
 }
 
