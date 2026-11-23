@@ -5136,16 +5136,55 @@ button {
   background: var(--btn-active-bg);
 }
 
+.canvas-ai-fab {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 25;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(var(--hi-rgb), 0.14);
+  background: var(--surface-2, rgba(28, 29, 34, 0.92));
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: none;
+  transition: opacity 160ms var(--ease-out),
+    background var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out),
+    transform 160ms var(--ease-out);
+}
+
+.canvas-ai-fab:hover {
+  background: var(--surface-3, rgba(40, 42, 50, 0.96));
+  border-color: rgba(var(--hi-rgb), 0.24);
+  transform: scale(1.05);
+}
+
+.canvas-ai-fab:active {
+  transform: scale(0.96);
+}
+
+.canvas-ai-fab.active {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.8);
+}
+
 .topbar-ai-chat-btn {
-  position: relative;
+  padding: 0;
 }
 
 .ai-chat-thinking-indicator {
   position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 8px;
-  height: 8px;
+  top: 4px;
+  right: 4px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   pointer-events: none;
   opacity: 0;
@@ -5153,15 +5192,31 @@ button {
   transition: opacity var(--t-fast) var(--ease-out), transform var(--t-fast) var(--ease-out);
 }
 
+.topbar-ai-chat-btn .ai-chat-chip-icon {
+  display: none;
+}
+
+.topbar-ai-chat-btn .grok-canvas-topbar {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  display: block;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
 .topbar-ai-chat-btn.thinking {
   color: var(--accent-strong);
-  background: rgba(var(--accent-rgb), 0.14);
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.16);
   box-shadow: none;
 }
 
-.topbar-ai-chat-btn.thinking .ai-chip-core {
-  fill: var(--accent-strong);
-  animation: ai-chip-core-pulse 1.2s ease-in-out infinite;
+.topbar-ai-chat-btn.thinking.active {
+  background: var(--btn-active-bg);
+  border-color: transparent;
 }
 
 .topbar-ai-chat-btn.thinking .ai-chat-thinking-indicator {
@@ -6003,17 +6058,23 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   gap: 6px;
 }
 
-/* Indicador animado minimalista de "pensando" no tradutor */
+/* Indicador animado 3D estilo Grok no tradutor (sempre animado; mais rapido e claro ao traduzir) */
 .ai-translate-thinking {
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   flex: 0 0 auto;
   display: inline-grid;
   place-items: center;
-  opacity: 0;
-  transform: scale(0.72);
+  opacity: 0.78;
+  transform: scale(0.96);
   pointer-events: none;
   transition: opacity 180ms var(--ease-out), transform 220ms var(--ease-spring);
+}
+
+.grok-canvas-translate {
+  width: 22px;
+  height: 22px;
+  display: block;
 }
 
 .ai-translate-thinking-float {
@@ -6022,7 +6083,7 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
 
 .ai-translate-view.is-thinking .ai-translate-thinking {
   opacity: 1;
-  transform: scale(1);
+  transform: scale(1.06);
 }
 
 .ai-thinking-orbit {
@@ -6403,78 +6464,72 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   background: rgba(var(--hi-rgb), 0.08);
 }
 
-/* Indicador minimalista e clean de "Pensando..." (sem sombra) */
+/* Loader 3D estilo Grok (Pyraminx Crystal / Dodecaedro) */
 .ai-chat-working {
   align-self: flex-start;
-  margin-top: 2px;
-  padding: 5px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(var(--hi-rgb), 0.08);
-  background: rgba(var(--hi-rgb), 0.035);
+  margin-top: 4px;
+  padding: 4px 2px;
+  border: none;
+  background: transparent;
   box-shadow: none;
-  font-size: 12px;
-  font-weight: 560;
-  color: var(--muted);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
   animation: ai-card-enter 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.ai-wave-dots {
+.grok-thinking-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3.5px;
-  height: 12px;
+  gap: 10px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  user-select: none;
 }
 
-.ai-wave-dots span {
-  width: 4.5px;
-  height: 4.5px;
-  border-radius: 50%;
-  background: var(--accent-strong, var(--accent));
-  opacity: 0.35;
-  animation: ai-wave-dot 1.15s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+.grok-canvas-20 {
+  width: 24px;
+  height: 24px;
+  display: block;
+  flex-shrink: 0;
 }
 
-.ai-wave-dots span:nth-child(2) {
-  animation-delay: 0.16s;
-}
-
-.ai-wave-dots span:nth-child(3) {
-  animation-delay: 0.32s;
-}
-
-@keyframes ai-wave-dot {
-  0%, 100% {
-    transform: translateY(0);
-    opacity: 0.3;
-  }
-  40% {
-    transform: translateY(-3.5px);
-    opacity: 1;
-  }
-}
-
-.ai-chat-working-text {
-  background: linear-gradient(90deg,
-      rgba(var(--hi-rgb), 0.45) 0%,
-      var(--text-strong) 50%,
-      rgba(var(--hi-rgb), 0.45) 100%);
-  background-size: 220% 100%;
+.grok-shimmer-text {
+  background: linear-gradient(
+    90deg,
+    #71717a 0%,
+    #71717a 35%,
+    #e4e4e7 50%,
+    #71717a 65%,
+    #71717a 100%
+  );
+  background-size: 250% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: ai-working-shimmer 1.8s linear infinite;
+  animation: grokTextShimmer 2.8s linear infinite;
 }
 
-@keyframes ai-working-shimmer {
-  0% {
-    background-position: 180% 0;
-  }
+:root[data-theme="light-claude"] .grok-shimmer-text {
+  background: linear-gradient(
+    90deg,
+    #71717a 0%,
+    #71717a 35%,
+    #18181b 50%,
+    #71717a 65%,
+    #71717a 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
 
+@keyframes grokTextShimmer {
+  0% {
+    background-position: 100% 0;
+  }
   100% {
-    background-position: -40% 0;
+    background-position: -150% 0;
   }
 }
 

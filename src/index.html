@@ -47,15 +47,6 @@
               <path d="M14 18h6" />
             </svg>
           </button>
-          <button class="topbar-action topbar-ai-chat-btn" id="openAiChatButton" type="button" aria-label="AI Chat"
-            title="AI Chat">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="6" y="6" width="12" height="12" rx="2.5" />
-              <rect class="ai-chip-core" x="9.5" y="9.5" width="5" height="5" rx="1" />
-              <path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4" />
-            </svg>
-            <span class="ai-chat-thinking-indicator" id="aiChatThinkingIndicator" aria-hidden="true"></span>
-          </button>
           <button class="topbar-action" id="openSearchButton" type="button" aria-label="Search" title="Search">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="11" cy="11" r="7" />
@@ -306,6 +297,11 @@
               <span>Drop to attach</span>
             </div>
           </div>
+          <button class="canvas-ai-fab topbar-ai-chat-btn" id="openAiChatButton" type="button" aria-label="AI Chat"
+            title="AI Chat">
+            <canvas id="topbarGrokDodecahedron" class="grok-canvas-topbar" aria-hidden="true"></canvas>
+            <span class="ai-chat-thinking-indicator" id="aiChatThinkingIndicator" aria-hidden="true"></span>
+          </button>
         </main>
 
         <aside class="ai-translator-panel" id="aiTranslatorPanel" aria-label="AI Translator and Chat" hidden>
@@ -400,12 +396,7 @@
               </div>
 
               <span class="ai-translate-thinking ai-translate-thinking-float" aria-hidden="true" title="Traduzindo...">
-                <svg class="ai-thinking-orbit" viewBox="0 0 20 20">
-                  <circle class="ai-thinking-track" cx="10" cy="10" r="7.5" />
-                  <path class="ai-thinking-arc" d="M10 2.5A7.5 7.5 0 0 1 17.5 10" />
-                  <path class="ai-thinking-star"
-                    d="M10 6.2c.35 1.85 1.95 3.45 3.8 3.8-1.85.35-3.45 1.95-3.8 3.8-.35-1.85-1.95-3.45-3.8-3.8 1.85-.35 3.45-1.95 3.8-3.8Z" />
-                </svg>
+                <canvas class="grok-canvas-translate" aria-hidden="true"></canvas>
               </span>
             </div>
 
@@ -440,18 +431,12 @@
               <div class="ai-output-box">
                 <span class="ai-box-lang-watermark" id="aiOutputLangWatermark" aria-hidden="true">ENGLISH</span>
                 <div class="ai-output-head">
-                  <span class="ai-status-dot" id="aiTranslateStatusDot"></span>
+                  <span class="ai-translate-thinking ai-translate-thinking-side" aria-hidden="true"
+                    title="Traduzindo...">
+                    <canvas class="grok-canvas-translate" aria-hidden="true"></canvas>
+                  </span>
                   <span class="ai-status-text" id="aiTranslateStatusText">Instant AI Translation</span>
                   <div class="ai-output-actions">
-                    <span class="ai-translate-thinking ai-translate-thinking-side" aria-hidden="true"
-                      title="Traduzindo...">
-                      <svg class="ai-thinking-orbit" viewBox="0 0 20 20">
-                        <circle class="ai-thinking-track" cx="10" cy="10" r="7.5" />
-                        <path class="ai-thinking-arc" d="M10 2.5A7.5 7.5 0 0 1 17.5 10" />
-                        <path class="ai-thinking-star"
-                          d="M10 6.2c.35 1.85 1.95 3.45 3.8 3.8-1.85.35-3.45 1.95-3.8 3.8-.35-1.85-1.95-3.45-3.8-3.8 1.85-.35 3.45-1.95 3.8-3.8Z" />
-                      </svg>
-                    </span>
                     <button class="ai-mini-btn ai-copy-icon-btn primary" id="aiTranslateCopyBtn" type="button"
                       title="Copy translation" aria-label="Copy translation">
                       <svg viewBox="0 0 24 24" aria-hidden="true">

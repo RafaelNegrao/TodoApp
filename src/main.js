@@ -1,4 +1,5 @@
 import { routeLinkPath } from "./linkRouting.js";
+import { GrokDodecahedronRenderer } from "./grokDodecahedronLoader.js";
 import {
   extractAiActionProposal,
   extractAiQuestions,
@@ -8734,6 +8735,45 @@ function isTextualAttachment(mimeType, fileName) {
   );
 }
 
+function compressImageDataUrl(dataUrl, mimeType, maxDimension = 1440) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth || img.width || 0;
+        const h = img.naturalHeight || img.height || 0;
+        if (!w || !h) {
+          resolve(null);
+          return;
+        }
+        const scale = Math.min(1, maxDimension / Math.max(w, h));
+        const targetW = Math.max(1, Math.round(w * scale));
+        const targetH = Math.max(1, Math.round(h * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(null);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, targetW, targetH);
+        const outMime = "image/jpeg";
+        const compressedUrl = canvas.toDataURL(outMime, 0.82);
+        const commaIdx = compressedUrl.indexOf(",");
+        resolve({
+          mime_type: outMime,
+          data_base64: commaIdx >= 0 ? compressedUrl.slice(commaIdx + 1) : compressedUrl
+        });
+      } catch (_) {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+
 function readFileAsAttachment(file) {
   return new Promise((resolve, reject) => {
     if (!file) {
@@ -8750,7 +8790,7 @@ function readFileAsAttachment(file) {
           name,
           mime_type: mimeType,
           data_base64: "",
-          text_content: String(reader.result || "").slice(0, 120000)
+          text_content: String(reader.result || "").slice(0, 45000)
         });
       };
       reader.onerror = () => reject(reader.error || new Error("Failed to read text file"));
@@ -8759,13 +8799,21 @@ function readFileAsAttachment(file) {
     }
 
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const dataUrl = String(reader.result || "");
       const commaIdx = dataUrl.indexOf(",");
-      const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+      let finalMime = mimeType;
+      let base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+      if (mimeType.startsWith("image/") && mimeType !== "image/gif" && base64.length > 350000) {
+        const compressed = await compressImageDataUrl(dataUrl, mimeType);
+        if (compressed && compressed.data_base64.length < base64.length) {
+          finalMime = compressed.mime_type;
+          base64 = compressed.data_base64;
+        }
+      }
       resolve({
         name,
-        mime_type: mimeType,
+        mime_type: finalMime,
         data_base64: base64,
         text_content: ""
       });
@@ -8829,7 +8877,7 @@ function buildAttachmentFromPathBytes(filePath, bytes) {
       name,
       mime_type: mimeType,
       data_base64: "",
-      text_content: decoder.decode(arr).slice(0, 120000)
+      text_content: decoder.decode(arr).slice(0, 45000)
     };
   }
 
@@ -9010,6 +9058,13 @@ function initAiTranslatorPanel() {
     panel.style.width = `${AI_PANEL_DEFAULT_WIDTH}px`;
   }
 
+  const topbarGrokCanvas = document.getElementById("topbarGrokDodecahedron");
+  const topbarGrokLoader = topbarGrokCanvas
+    ? new GrokDodecahedronRenderer(topbarGrokCanvas, { size: 30, speed: 0.35, intensity: 0.65 })
+    : null;
+  topbarGrokLoader?.start();
+  let chatGrokLoader = null;
+
   function updateChatTopbarIndicator() {
     if (!openChatBtn) return;
     const isChatVisible = !panel.hidden && currentMode === "chat";
@@ -9018,12 +9073,20 @@ function initAiTranslatorPanel() {
     }
     openChatBtn.classList.toggle("thinking", chatBusy);
     openChatBtn.classList.toggle("has-unread", !chatBusy && chatHasUnread && !isChatVisible);
-    if (chatBusy) {
+    if (isChatVisible) {
+      topbarGrokLoader?.stop();
+    } else if (chatBusy) {
+      topbarGrokLoader?.setState({ speed: 1.5, intensity: 1 });
+      topbarGrokLoader?.start();
       openChatBtn.title = "AI Chat (IA pensando...)";
-    } else if (chatHasUnread && !isChatVisible) {
-      openChatBtn.title = "AI Chat (Nova resposta pronta)";
     } else {
-      openChatBtn.title = "AI Chat";
+      topbarGrokLoader?.setState({ speed: 0.35, intensity: 0.65 });
+      topbarGrokLoader?.start();
+      if (chatHasUnread && !isChatVisible) {
+        openChatBtn.title = "AI Chat (Nova resposta pronta)";
+      } else {
+        openChatBtn.title = "AI Chat";
+      }
     }
   }
 
@@ -9486,14 +9549,28 @@ function initAiTranslatorPanel() {
   syncDirectionUi();
   applyTranslatorModeUi();
 
+  const translateGrokLoaders = translateView
+    ? Array.from(translateView.querySelectorAll(".grok-canvas-translate")).map(canvas => {
+        const loader = new GrokDodecahedronRenderer(canvas, { size: 22, speed: 0.35, intensity: 0.52 });
+        loader.start();
+        return loader;
+      })
+    : [];
+
   function setTranslateStatus(stateName, label) {
+    const isBusy = stateName === "busy";
     if (trStatusDot) {
       trStatusDot.className = `ai-status-dot ${stateName}`;
     }
     if (trStatusText) {
       trStatusText.textContent = label;
+      trStatusText.classList.toggle("grok-shimmer-text", isBusy);
     }
-    translateView?.classList.toggle("is-thinking", stateName === "busy");
+    translateView?.classList.toggle("is-thinking", isBusy);
+    translateGrokLoaders.forEach(loader => {
+      loader.setState(isBusy ? { speed: 1.5, intensity: 1 } : { speed: 0.35, intensity: 0.45 });
+      loader.start();
+    });
   }
 
   function scheduleRealtimeTranslation(delayMs = 320) {
@@ -10059,6 +10136,10 @@ function initAiTranslatorPanel() {
   function renderChatMessages() {
     if (!chatMessagesEl) return;
     cancelActiveTypingAnimation();
+    if (chatGrokLoader) {
+      chatGrokLoader.stop();
+      chatGrokLoader = null;
+    }
     chatMessagesEl.innerHTML = "";
     const session = getActiveSession();
     const messages = session.messages || [];
@@ -10685,9 +10766,18 @@ function initAiTranslatorPanel() {
 
     if (chatBusy) {
       const working = document.createElement("div");
-      working.className = "ai-chat-working";
-      working.innerHTML = `<span class="ai-wave-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="ai-chat-working-text">Pensando...</span>`;
+      working.className = "ai-chat-working grok-thinking-badge";
+      const canvas = document.createElement("canvas");
+      canvas.className = "grok-canvas-20";
+      canvas.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.className = "grok-shimmer-text";
+      label.textContent = "Pensando...";
+      working.appendChild(canvas);
+      working.appendChild(label);
       chatMessagesEl.appendChild(working);
+      chatGrokLoader = new GrokDodecahedronRenderer(canvas, { size: 24 });
+      chatGrokLoader.start();
     }
 
     chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
@@ -10734,19 +10824,35 @@ function initAiTranslatorPanel() {
       let reply = "";
       let usedModel = "";
       if (invoke) {
-        const payloadMessages = session.messages
+        const filteredHistory = session.messages
           .filter(m => !(m.role === "model" && typeof m.text === "string" && m.text.trimStart().startsWith("Error:")))
-          .slice(-18)
-          .map(m => ({
+          .slice(-18);
+        const lastMsgIndex = filteredHistory.length - 1;
+        const payloadMessages = filteredHistory.map((m, idx) => {
+          const isCurrentTurn = idx === lastMsgIndex;
+          return {
             role: m.role,
             text: m.text || "",
-            attachments: (m.attachments || []).map(a => ({
-              name: a.name || "",
-              mime_type: a.mime_type || "",
-              data_base64: a.data_base64 || "",
-              text_content: a.text_content || ""
-            }))
-          }));
+            attachments: (m.attachments || []).map(a => {
+              if (isCurrentTurn) {
+                return {
+                  name: a.name || "",
+                  mime_type: a.mime_type || "",
+                  data_base64: a.data_base64 || "",
+                  text_content: String(a.text_content || "").slice(0, 45000)
+                };
+              }
+              return {
+                name: a.name || "",
+                mime_type: a.mime_type || "",
+                data_base64: "",
+                text_content: a.text_content
+                  ? String(a.text_content).slice(0, 3000)
+                  : `[Anexo anterior: ${a.name || "arquivo"}]`
+              };
+            })
+          };
+        });
         if (isTranslatorFloating && currentMode === "chat" && payloadMessages.length > 0) {
           try {
             const screenBase64 = await invoke("capture_current_monitor_png");

@@ -338,6 +338,138 @@ fn mark_model_cooldown(model: &str, duration: Duration) {
     }
 }
 
+fn is_token_limit_error(status: u16, err_lower: &str) -> bool {
+    let mentions_tokens = err_lower.contains("token")
+        || err_lower.contains("payload size")
+        || err_lower.contains("request payload")
+        || err_lower.contains("too large")
+        || err_lower.contains("context length");
+    if status == 429 && mentions_tokens {
+        return true;
+    }
+    if matches!(status, 400 | 413) && mentions_tokens {
+        return true;
+    }
+    false
+}
+
+fn is_gemini_supported_inline_mime(mime: &str) -> bool {
+    let m = mime.trim().to_lowercase();
+    matches!(
+        m.as_str(),
+        "image/png"
+            | "image/jpeg"
+            | "image/jpg"
+            | "image/webp"
+            | "image/gif"
+            | "image/heic"
+            | "image/heif"
+            | "application/pdf"
+            | "audio/wav"
+            | "audio/mp3"
+            | "audio/mpeg"
+            | "audio/aiff"
+            | "audio/aac"
+            | "audio/ogg"
+            | "audio/flac"
+            | "audio/mp4"
+            | "audio/x-m4a"
+            | "video/mp4"
+            | "video/mpeg"
+            | "video/mov"
+            | "video/quicktime"
+            | "video/avi"
+            | "video/x-flv"
+            | "video/mpg"
+            | "video/webm"
+            | "video/wmv"
+            | "video/3gpp"
+    )
+}
+
+fn is_gemma_supported_inline_mime(mime: &str) -> bool {
+    let m = mime.trim().to_lowercase();
+    matches!(m.as_str(), "image/png" | "image/jpeg" | "image/jpg" | "image/webp" | "image/gif")
+}
+
+fn sanitize_payload_for_gemma(mut payload: serde_json::Value) -> serde_json::Value {
+    if let Some(contents) = payload.get_mut("contents").and_then(|c| c.as_array_mut()) {
+        for entry in contents.iter_mut() {
+            if let Some(parts) = entry.get_mut("parts").and_then(|p| p.as_array_mut()) {
+                for part in parts.iter_mut() {
+                    let unsupported_mime = part
+                        .get("inlineData")
+                        .and_then(|d| d.get("mimeType"))
+                        .and_then(|m| m.as_str())
+                        .filter(|mime| !is_gemma_supported_inline_mime(mime))
+                        .map(|m| m.to_string());
+                    if let Some(mime) = unsupported_mime {
+                        *part = serde_json::json!({
+                            "text": format!("[Anexo binário ({mime}) não suportado diretamente por este modelo de fallback]")
+                        });
+                    }
+                }
+            }
+        }
+    }
+    payload
+}
+
+fn truncate_utf8_chars(input: &str, max_chars: usize) -> String {
+    if input.chars().count() <= max_chars {
+        return input.to_string();
+    }
+    let truncated: String = input.chars().take(max_chars).collect();
+    format!("{truncated}\n...[conteúdo resumido para caber no limite de tokens do modelo]")
+}
+
+fn compact_payload_for_token_budget(
+    payload: &serde_json::Value,
+    max_part_chars: usize,
+    keep_only_last_inline_data: bool,
+) -> serde_json::Value {
+    let mut compacted = payload.clone();
+
+    if let Some(sys_parts) = compacted
+        .get_mut("systemInstruction")
+        .and_then(|s| s.get_mut("parts"))
+        .and_then(|p| p.as_array_mut())
+    {
+        for part in sys_parts.iter_mut() {
+            if let Some(txt) = part.get("text").and_then(|t| t.as_str()) {
+                let trimmed = truncate_utf8_chars(txt, 8000);
+                part["text"] = serde_json::Value::String(trimmed);
+            }
+        }
+    }
+
+    if let Some(contents) = compacted.get_mut("contents").and_then(|c| c.as_array_mut()) {
+        let last_idx = contents.len().saturating_sub(1);
+        for (idx, entry) in contents.iter_mut().enumerate() {
+            let is_last = idx == last_idx;
+            let limit = if is_last { max_part_chars } else { 1800 };
+            if let Some(parts) = entry.get_mut("parts").and_then(|p| p.as_array_mut()) {
+                for part in parts.iter_mut() {
+                    if let Some(txt) = part.get("text").and_then(|t| t.as_str()) {
+                        if txt.chars().count() > limit {
+                            part["text"] = serde_json::Value::String(truncate_utf8_chars(txt, limit));
+                        }
+                    } else if keep_only_last_inline_data && !is_last && part.get("inlineData").is_some() {
+                        let mime = part["inlineData"]["mimeType"]
+                            .as_str()
+                            .unwrap_or("application/octet-stream");
+                        *part = serde_json::json!({
+                            "text": format!("[Anexo anterior ({mime}) omitido para economizar tokens]")
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    compacted
+}
+
 fn is_quota_exhausted_error(status: u16, err_lower: &str) -> bool {
     if status == 429 {
         return true;
@@ -545,6 +677,11 @@ fn execute_gemini_fast_payload_with_model(
         "thinkingLevel": "MINIMAL"
     });
     let payload_compat = fold_system_instruction_into_user(payload.clone());
+    let payload_compact = compact_payload_for_token_budget(&payload, 14000, true);
+    let payload_gemma = sanitize_payload_for_gemma(payload_compat.clone());
+    let payload_gemma_compact = sanitize_payload_for_gemma(fold_system_instruction_into_user(
+        compact_payload_for_token_budget(&payload, 10000, true),
+    ));
 
     let mut tried = std::collections::HashSet::<String>::new();
     let filtered_models: Vec<String> = models
@@ -556,6 +693,7 @@ fn execute_gemini_fast_payload_with_model(
     let mut discovered_fallback = false;
     let mut tried_cooling_fallback = false;
     let mut saw_rate_limit = false;
+    let mut saw_token_limit = false;
     let mut saw_auth_error = false;
 
     loop {
@@ -598,18 +736,18 @@ fn execute_gemini_fast_payload_with_model(
         );
 
         let candidates = if model.starts_with("gemma-") {
-            vec![&payload_compat]
+            vec![&payload_gemma, &payload_gemma_compact]
         } else if model_prefers_minimal_thinking(&model) {
-            vec![&payload_fast_think, &payload, &payload_compat]
+            vec![&payload_fast_think, &payload, &payload_compat, &payload_compact]
         } else {
-            vec![&payload, &payload_compat]
+            vec![&payload, &payload_compat, &payload_compact]
         };
 
-        for candidate_payload in candidates {
+        for (cand_idx, candidate_payload) in candidates.iter().enumerate() {
             match agent
                 .post(&url)
                 .set("Content-Type", "application/json")
-                .send_json(candidate_payload.clone())
+                .send_json((*candidate_payload).clone())
             {
                 Ok(resp) => {
                     let body: serde_json::Value = resp
@@ -635,6 +773,14 @@ fn execute_gemini_fast_payload_with_model(
                     let err_body = resp.into_string().unwrap_or_default();
                     let err_lower = err_body.to_lowercase();
                     last_err = format!("Gemini HTTP {code} ({model}): {err_body}");
+                    if is_token_limit_error(code, &err_lower) {
+                        saw_token_limit = true;
+                        if cand_idx + 1 < candidates.len() {
+                            continue;
+                        }
+                        mark_model_cooldown(&model, Duration::from_secs(20));
+                        break;
+                    }
                     if is_quota_exhausted_error(code, &err_lower) {
                         saw_rate_limit = true;
                         mark_model_cooldown(&model, quota_cooldown_duration(&err_lower));
@@ -679,6 +825,9 @@ fn execute_gemini_fast_payload_with_model(
 
     if saw_auth_error {
         return Err("Chave da API Gemini inválida ou sem permissão. Verifique em Configurações.".to_string());
+    }
+    if saw_token_limit && !saw_rate_limit {
+        return Err("Os arquivos anexados excederam o limite de tokens/tamanho da API Gemini. Tente enviar arquivos menores ou menos arquivos por vez.".to_string());
     }
     if saw_rate_limit {
         return Err("Limite temporário de requisições da API Gemini atingido. Aguarde alguns segundos e tente novamente.".to_string());
@@ -1121,12 +1270,21 @@ async fn ai_chat_english(
                                     .unwrap_or("application/octet-stream")
                                     .trim()
                                     .to_string();
-                                parts.push(serde_json::json!({
-                                    "inlineData": {
-                                        "mimeType": clean_mime,
-                                        "data": clean_b64
-                                    }
-                                }));
+                                if is_gemini_supported_inline_mime(&clean_mime) {
+                                    parts.push(serde_json::json!({
+                                        "inlineData": {
+                                            "mimeType": clean_mime,
+                                            "data": clean_b64
+                                        }
+                                    }));
+                                } else {
+                                    parts.push(serde_json::json!({
+                                        "text": format!(
+                                            "[Arquivo anexado: {} (tipo {} não suportado como binário direto pela API Gemini)]",
+                                            att.name, clean_mime
+                                        )
+                                    }));
+                                }
                             }
                         }
                     }
@@ -4822,5 +4980,43 @@ mod gemini_failover_tests {
         assert_eq!(normalized[0]["role"], "user");
         assert_eq!(normalized[0]["parts"].as_array().unwrap().len(), 2);
         assert_eq!(normalized[1]["role"], "model");
+    }
+
+    #[test]
+    fn detects_token_limit_errors_separately_from_generic_errors() {
+        assert!(is_token_limit_error(429, "resource_exhausted: input tokens per minute exceeded"));
+        assert!(is_token_limit_error(400, "request payload size exceeds limit"));
+        assert!(is_token_limit_error(413, "payload too large"));
+        assert!(!is_token_limit_error(429, "daily requests per project exceeded"));
+    }
+
+    #[test]
+    fn sanitizes_non_image_inline_data_for_gemma_and_compacts_old_turns() {
+        let payload = serde_json::json!({
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        { "inlineData": { "mimeType": "application/pdf", "data": "AAAA" } },
+                        { "text": "old msg" }
+                    ]
+                },
+                {
+                    "role": "user",
+                    "parts": [
+                        { "inlineData": { "mimeType": "image/png", "data": "BBBB" } },
+                        { "text": "x".repeat(5000) }
+                    ]
+                }
+            ]
+        });
+
+        let gemma = sanitize_payload_for_gemma(payload.clone());
+        assert!(gemma["contents"][0]["parts"][0]["text"].is_string());
+        assert!(gemma["contents"][1]["parts"][0]["inlineData"].is_object());
+
+        let compact = compact_payload_for_token_budget(&payload, 500, true);
+        assert!(compact["contents"][0]["parts"][0]["text"].is_string());
+        assert!(compact["contents"][1]["parts"][1]["text"].as_str().unwrap().len() < 700);
     }
 }
