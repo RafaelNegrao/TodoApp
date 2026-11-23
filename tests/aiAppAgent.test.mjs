@@ -117,3 +117,34 @@ test("formatQuestionAnswersMessage formata selecao unica e multiplas perguntas",
     "1. Quais tasks apagar? → Task A, Task B\n2. Manter backup? → Sim"
   );
 });
+
+test("executeAiActionPlan executa acoes independentes de forma assincrona e emite onStepUpdate", async () => {
+  let concurrent = 0;
+  let maxConcurrent = 0;
+  const events = [];
+
+  const results = await executeAiActionPlan(
+    [
+      { type: "copy_text", text: "A" },
+      { type: "set_status_filter", filter: "ongoing" },
+      { type: "open_settings" }
+    ],
+    {
+      onStepUpdate: ev => events.push(`${ev.index}:${ev.status}`),
+      runAction: async action => {
+        concurrent += 1;
+        maxConcurrent = Math.max(maxConcurrent, concurrent);
+        await new Promise(resolve => setTimeout(resolve, 18));
+        concurrent -= 1;
+        return { message: `OK ${action.type}` };
+      }
+    }
+  );
+
+  assert.equal(results.length, 3);
+  assert.ok(results.every(r => r.ok));
+  assert.ok(maxConcurrent >= 2, `Esperava execucao concorrente, maxConcurrent=${maxConcurrent}`);
+  assert.ok(events.includes("0:in_progress"));
+  assert.ok(events.includes("1:in_progress"));
+  assert.ok(events.includes("2:done"));
+});

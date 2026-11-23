@@ -227,23 +227,131 @@ export function buildAppContextSnapshot(state, extras = {}) {
   });
 }
 
-export async function executeAiActionPlan(actions, api) {
-  const results = [];
-  let lastCreatedCardId = null;
-  let lastCreatedTaskId = null;
+function actionReferencesPlaceholder(action, token) {
+  if (!action || typeof action !== "object") return false;
+  return Object.values(action).some(val => val === token);
+}
 
-  for (const action of actions || []) {
-    if (!action || typeof action.type !== "string") continue;
-    try {
-      const ctx = { lastCreatedCardId, lastCreatedTaskId };
-      const outcome = await api.runAction(action, ctx);
-      if (outcome?.createdCardId) lastCreatedCardId = outcome.createdCardId;
-      if (outcome?.createdTaskId) lastCreatedTaskId = outcome.createdTaskId;
-      results.push({ ok: true, message: outcome?.message || describeAiAction(action) });
-    } catch (err) {
-      results.push({ ok: false, message: `${describeAiAction(action)}: ${String(err?.message || err)}` });
+export function buildActionDependencyMap(actions) {
+  const list = Array.isArray(actions) ? actions : [];
+  const deps = list.map(() => []);
+  let lastTaskCreatorIdx = -1;
+  let lastCardCreatorIdx = -1;
+  const createdTaskOrCardIndices = [];
+
+  list.forEach((action, idx) => {
+    if (!action || typeof action.type !== "string") return;
+    const needed = new Set();
+
+    if (actionReferencesPlaceholder(action, "$LAST_TASK") && lastTaskCreatorIdx >= 0) {
+      needed.add(lastTaskCreatorIdx);
     }
-  }
+    if (actionReferencesPlaceholder(action, "$LAST_CARD") && lastCardCreatorIdx >= 0) {
+      needed.add(lastCardCreatorIdx);
+    }
 
+    // Acoes sem taskId/taskTitle explicito apos um create_task aguardam a task ser criada
+    if (
+      lastTaskCreatorIdx >= 0 &&
+      !action.taskId &&
+      !action.taskTitle &&
+      (action.type === "create_card" ||
+        action.type === "update_task" ||
+        action.type === "focus_task" ||
+        action.type === "organize_canvas" ||
+        action.type === "center_canvas")
+    ) {
+      needed.add(lastTaskCreatorIdx);
+    }
+
+    // Organizar/centralizar canvas aguarda criacoes de cards anteriores
+    if (action.type === "organize_canvas" || action.type === "center_canvas") {
+      createdTaskOrCardIndices.forEach(depIdx => needed.add(depIdx));
+    }
+
+    deps[idx] = [...needed];
+
+    if (action.type === "create_task") {
+      lastTaskCreatorIdx = idx;
+      createdTaskOrCardIndices.push(idx);
+    } else if (action.type === "create_card") {
+      lastCardCreatorIdx = idx;
+      createdTaskOrCardIndices.push(idx);
+    }
+  });
+
+  return deps;
+}
+
+export async function executeAiActionPlan(actions, api) {
+  const validEntries = [];
+  (actions || []).forEach((action, idx) => {
+    if (action && typeof action.type === "string") {
+      validEntries.push({ action, index: idx });
+    }
+  });
+
+  if (!validEntries.length) return [];
+
+  const deps = buildActionDependencyMap(validEntries.map(e => e.action));
+  const results = new Array(validEntries.length);
+  const outcomes = new Array(validEntries.length);
+  const stepPromises = new Array(validEntries.length);
+
+  validEntries.forEach(({ action }, idx) => {
+    api.onStepUpdate?.({
+      index: idx,
+      status: "pending",
+      message: describeAiAction(action),
+      action
+    });
+  });
+
+  const runEntry = idx => {
+    if (stepPromises[idx]) return stepPromises[idx];
+    const { action } = validEntries[idx];
+
+    stepPromises[idx] = (async () => {
+      const depIndices = deps[idx] || [];
+      if (depIndices.length > 0) {
+        await Promise.all(depIndices.map(depIdx => runEntry(depIdx)));
+      }
+
+      let lastCreatedCardId = null;
+      let lastCreatedTaskId = null;
+      for (let j = idx - 1; j >= 0; j -= 1) {
+        if (!lastCreatedCardId && outcomes[j]?.createdCardId) {
+          lastCreatedCardId = outcomes[j].createdCardId;
+        }
+        if (!lastCreatedTaskId && outcomes[j]?.createdTaskId) {
+          lastCreatedTaskId = outcomes[j].createdTaskId;
+        }
+      }
+
+      api.onStepUpdate?.({
+        index: idx,
+        status: "in_progress",
+        message: describeAiAction(action),
+        action
+      });
+
+      try {
+        const ctx = { lastCreatedCardId, lastCreatedTaskId };
+        const outcome = await api.runAction(action, ctx);
+        outcomes[idx] = outcome || {};
+        const message = outcome?.message || describeAiAction(action);
+        results[idx] = { ok: true, message };
+        api.onStepUpdate?.({ index: idx, status: "done", message, action });
+      } catch (err) {
+        const message = `${describeAiAction(action)}: ${String(err?.message || err)}`;
+        results[idx] = { ok: false, message };
+        api.onStepUpdate?.({ index: idx, status: "failed", message, action });
+      }
+    })();
+
+    return stepPromises[idx];
+  };
+
+  await Promise.all(validEntries.map((_, idx) => runEntry(idx)));
   return results;
 }

@@ -6756,18 +6756,129 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   color: var(--muted);
 }
 
+.ai-action-card.status-running {
+  border-color: rgba(var(--hi-rgb), 0.18);
+}
+
+.ai-action-card.status-running .ai-action-status-pill {
+  background: rgba(var(--hi-rgb), 0.1);
+  color: var(--text-strong);
+}
+
 .ai-action-list {
   margin: 0;
-  padding-left: 16px;
+  padding: 2px 0 0 0;
+  list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 11.5px;
+  gap: 8px;
+  font-size: 12px;
   color: var(--text);
 }
 
-.ai-action-item.destructive {
+.ai-step-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  line-height: 1.38;
+  transition: color 180ms var(--ease-out), opacity 180ms var(--ease-out);
+}
+
+.ai-step-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.ai-step-icon svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+.ai-step-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+
+.ai-step-row.state-pending .ai-step-icon {
+  color: rgba(var(--hi-rgb), 0.36);
+}
+
+.ai-step-row.state-pending .ai-step-text {
+  color: var(--text);
+}
+
+.ai-step-row.state-in_progress .ai-step-icon {
+  color: var(--text-strong);
+}
+
+.ai-step-row.state-in_progress .ai-step-text {
+  color: var(--text-strong);
+  font-weight: 560;
+}
+
+.ai-step-row.state-done .ai-step-icon {
+  color: rgba(var(--hi-rgb), 0.56);
+}
+
+.ai-step-row.state-done .ai-step-text {
+  color: var(--muted);
+}
+
+.ai-step-row.state-failed .ai-step-icon {
   color: #f87171;
+}
+
+.ai-step-row.state-failed .ai-step-text {
+  color: #f87171;
+}
+
+.ai-step-row.destructive .ai-step-text {
+  color: #f87171;
+}
+
+/* Animacao dos 4 pontinhos (sem zoom/scale — apenas opacidade em onda) */
+.ai-step-dot {
+  fill: currentColor;
+  opacity: 0.25;
+  animation: ai-step-dot-wave 0.96s ease-in-out infinite;
+}
+
+.ai-step-dot.d1 { animation-delay: 0s; }
+.ai-step-dot.d2 { animation-delay: 0.24s; }
+.ai-step-dot.d3 { animation-delay: 0.48s; }
+.ai-step-dot.d4 { animation-delay: 0.72s; }
+
+@keyframes ai-step-dot-wave {
+  0%, 100% {
+    opacity: 0.22;
+  }
+  45% {
+    opacity: 1;
+  }
+}
+
+/* Animacao do check/erro desenhando o traco (sem zoom/scale) */
+.ai-step-check-stroke {
+  stroke-dasharray: 18;
+  stroke-dashoffset: 0;
+  animation: ai-step-stroke-draw 260ms var(--ease-out) both;
+}
+
+@keyframes ai-step-stroke-draw {
+  from {
+    stroke-dashoffset: 18;
+    opacity: 0.2;
+  }
+  to {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
 }
 
 .ai-action-card-foot {

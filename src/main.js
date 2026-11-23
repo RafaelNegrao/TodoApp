@@ -8995,24 +8995,54 @@ function initAiTranslatorPanel() {
         const cardEl = document.createElement("div");
         cardEl.className = `ai-action-card status-${proposal.status || "pending"}`;
 
+        const renderStepIconSvg = status => {
+          if (status === "done") {
+            return `<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.35" opacity="0.85"/><path class="ai-step-check-stroke" d="M6.8 10.2 9.1 12.5 13.4 7.8" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+          }
+          if (status === "in_progress") {
+            return `<svg viewBox="0 0 20 20" aria-hidden="true"><circle class="ai-step-dot d1" cx="7.2" cy="7.2" r="1.85"/><circle class="ai-step-dot d2" cx="12.8" cy="7.2" r="1.85"/><circle class="ai-step-dot d3" cx="12.8" cy="12.8" r="1.85"/><circle class="ai-step-dot d4" cx="7.2" cy="12.8" r="1.85"/></svg>`;
+          }
+          if (status === "failed") {
+            return `<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.35" opacity="0.85"/><path class="ai-step-check-stroke" d="M7.4 7.4 12.6 12.6M12.6 7.4 7.4 12.6" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"/></svg>`;
+          }
+          return `<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.35"/></svg>`;
+        };
+
         const head = document.createElement("div");
         head.className = "ai-action-card-head";
         const badgeText =
           proposal.status === "approved"
             ? "Executado ✓"
-            : proposal.status === "rejected"
-              ? "Recusado"
-              : "Permissão necessária";
+            : proposal.status === "running"
+              ? "Executando..."
+              : proposal.status === "rejected"
+                ? "Recusado"
+                : "Permissão necessária";
         head.innerHTML = `<span class="ai-action-card-title">${escapeHtml(proposal.summary || "Ações no app")}</span><span class="ai-action-status-pill">${badgeText}</span>`;
         cardEl.appendChild(head);
 
         const list = document.createElement("ul");
         list.className = "ai-action-list";
-        proposal.actions.forEach(act => {
+        const stepRows = proposal.actions.map((act, idx) => {
           const li = document.createElement("li");
-          li.className = `ai-action-item${isDestructiveAction(act) ? " destructive" : ""}`;
-          li.textContent = describeAiAction(act);
+          const savedResult = Array.isArray(proposal.results) ? proposal.results[idx] : null;
+          const initialState = savedResult
+            ? (savedResult.ok ? "done" : "failed")
+            : (proposal.stepStates?.[idx] || "pending");
+          li.className = `ai-step-row state-${initialState}${isDestructiveAction(act) ? " destructive" : ""}`;
+          li.dataset.stepIndex = String(idx);
+
+          const iconEl = document.createElement("span");
+          iconEl.className = "ai-step-icon";
+          iconEl.innerHTML = renderStepIconSvg(initialState);
+
+          const textEl = document.createElement("span");
+          textEl.className = "ai-step-text";
+          textEl.textContent = savedResult?.message || describeAiAction(act);
+
+          li.append(iconEl, textEl);
           list.appendChild(li);
+          return { li, iconEl, textEl, act };
         });
         cardEl.appendChild(list);
 
@@ -9025,14 +9055,33 @@ function initAiTranslatorPanel() {
           approveBtn.className = "ai-action-approve-btn";
           approveBtn.textContent = "Permitir e executar";
           approveBtn.addEventListener("click", async () => {
-            approveBtn.disabled = true;
-            rejectBtn.disabled = true;
-            approveBtn.textContent = "Executando...";
+            proposal.status = "running";
+            proposal.stepStates = proposal.actions.map(() => "pending");
+            cardEl.className = "ai-action-card status-running";
+            const pill = head.querySelector(".ai-action-status-pill");
+            if (pill) pill.textContent = "Executando...";
+            foot.remove();
+
             const results = await executeAiActionPlan(proposal.actions, {
-              runAction: runSingleAiAppAction
+              onStepUpdate: ({ index, status, message }) => {
+                proposal.stepStates[index] = status;
+                const target = stepRows[index];
+                if (!target) return;
+                target.li.className = `ai-step-row state-${status}${isDestructiveAction(target.act) ? " destructive" : ""}`;
+                target.iconEl.innerHTML = renderStepIconSvg(status);
+                if (message) {
+                  target.textEl.textContent = message;
+                }
+              },
+              runAction: async (action, ctx) => {
+                await new Promise(resolve => requestAnimationFrame(resolve));
+                return runSingleAiAppAction(action, ctx);
+              }
             });
+
             proposal.status = "approved";
             proposal.results = results;
+            delete proposal.stepStates;
             saveChatSessions();
             renderChatMessages();
           });
@@ -9049,16 +9098,6 @@ function initAiTranslatorPanel() {
 
           foot.append(approveBtn, rejectBtn);
           cardEl.appendChild(foot);
-        } else if (Array.isArray(proposal.results) && proposal.results.length > 0) {
-          const resBox = document.createElement("div");
-          resBox.className = "ai-action-results";
-          proposal.results.forEach(r => {
-            const line = document.createElement("div");
-            line.className = `ai-action-result-line ${r.ok ? "ok" : "err"}`;
-            line.textContent = `${r.ok ? "✓" : "✕"} ${r.message}`;
-            resBox.appendChild(line);
-          });
-          cardEl.appendChild(resBox);
         }
 
         row.appendChild(cardEl);
