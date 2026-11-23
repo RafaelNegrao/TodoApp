@@ -10686,7 +10686,7 @@ function initAiTranslatorPanel() {
     if (chatBusy) {
       const working = document.createElement("div");
       working.className = "ai-chat-working";
-      working.innerHTML = `<span class="ai-chat-working-text">Thinking...</span>`;
+      working.innerHTML = `<span class="ai-wave-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="ai-chat-working-text">Pensando...</span>`;
       chatMessagesEl.appendChild(working);
     }
 

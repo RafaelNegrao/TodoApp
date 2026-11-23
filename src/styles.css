@@ -5155,18 +5155,26 @@ button {
 
 .topbar-ai-chat-btn.thinking {
   color: var(--accent-strong);
-  background: rgba(var(--accent-rgb), 0.16);
-  animation: ai-chat-btn-pulse 1.3s ease-in-out infinite;
+  background: rgba(var(--accent-rgb), 0.14);
+  box-shadow: none;
+}
+
+.topbar-ai-chat-btn.thinking .ai-chip-core {
+  fill: var(--accent-strong);
+  animation: ai-chip-core-pulse 1.2s ease-in-out infinite;
 }
 
 .topbar-ai-chat-btn.thinking .ai-chat-thinking-indicator {
-  opacity: 1;
-  transform: scale(1);
-  border: 2px solid var(--warn, #f59e0b);
-  border-top-color: transparent;
-  background: transparent;
-  box-sizing: border-box;
-  animation: ai-chat-spin 0.75s linear infinite;
+  display: none !important;
+}
+
+@keyframes ai-chip-core-pulse {
+  0%, 100% {
+    opacity: 0.28;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .topbar-ai-chat-btn.has-unread:not(.thinking) .ai-chat-thinking-indicator {
@@ -6395,21 +6403,64 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   background: rgba(var(--hi-rgb), 0.08);
 }
 
-/* Indicador 'Thinking...' com shimmer suave */
+/* Indicador minimalista e clean de "Pensando..." (sem sombra) */
 .ai-chat-working {
-  padding: 4px 4px;
-  font-size: 12.5px;
-  font-weight: 580;
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--hi-rgb), 0.08);
+  background: rgba(var(--hi-rgb), 0.035);
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 560;
   color: var(--muted);
   display: inline-flex;
   align-items: center;
+  gap: 8px;
+  animation: ai-card-enter 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.ai-wave-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3.5px;
+  height: 12px;
+}
+
+.ai-wave-dots span {
+  width: 4.5px;
+  height: 4.5px;
+  border-radius: 50%;
+  background: var(--accent-strong, var(--accent));
+  opacity: 0.35;
+  animation: ai-wave-dot 1.15s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+
+.ai-wave-dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.ai-wave-dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes ai-wave-dot {
+  0%, 100% {
+    transform: translateY(0);
+    opacity: 0.3;
+  }
+  40% {
+    transform: translateY(-3.5px);
+    opacity: 1;
+  }
 }
 
 .ai-chat-working-text {
   background: linear-gradient(90deg,
-      rgba(var(--hi-rgb), 0.48) 0%,
-      var(--text-strong) 45%,
-      rgba(var(--hi-rgb), 0.48) 90%);
+      rgba(var(--hi-rgb), 0.45) 0%,
+      var(--text-strong) 50%,
+      rgba(var(--hi-rgb), 0.45) 100%);
   background-size: 220% 100%;
   -webkit-background-clip: text;
   background-clip: text;
