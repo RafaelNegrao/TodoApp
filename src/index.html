@@ -237,6 +237,11 @@
             <button class="recording-indicator-stop" id="recordingIndicatorStop" type="button"
               aria-label="Stop">Stop</button>
           </div>
+          <div class="recorded-video-toast" id="recordedVideoToast" hidden>
+            <span class="recorded-video-toast-text" id="recordedVideoToastText">Vídeo gravado salvo</span>
+            <button class="recorded-video-toast-action" id="recordedVideoToastInsert" type="button">Colocar no card</button>
+            <button class="recorded-video-toast-close" id="recordedVideoToastClose" type="button" aria-label="Fechar" title="Fechar">×</button>
+          </div>
           <div class="transcribe-indicator" id="transcribeIndicator" hidden>
             <span class="transcribe-mic-badge" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -575,9 +580,11 @@
     <form class="new-card-popup" id="newCardForm" hidden>
       <button class="new-card-create-button" type="submit">+ New action</button>
       <button class="new-card-create-button" type="button" id="newTodoTableButton">+ Todo list</button>
+      <button class="new-card-create-button" type="button" id="newRecordedVideoButton">+ Vídeo gravado</button>
     </form>
 
     <input type="file" accept="image/*" id="inlineImageInput" hidden />
+    <input type="file" accept="video/*" id="inlineVideoInput" hidden />
     <input type="file" accept="image/*" id="updateImageInput" hidden />
 
     <form class="user-create-popup" id="userCreateForm" hidden>

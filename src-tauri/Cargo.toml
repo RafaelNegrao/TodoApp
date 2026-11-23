@@ -1,6 +1,6 @@
 [package]
 name = "todocompanion"
-version = "0.1.27"
+version = "0.1.28"
 description = "A right-edge task companion built with Tauri"
 authors = ["Rafael"]
 edition = "2021"
@@ -32,6 +32,7 @@ windows = { version = "0.61", features = [
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Controls_Dialogs",
     "Win32_Media_MediaFoundation",
     "Win32_System_Com",
 ] }

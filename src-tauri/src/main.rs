@@ -844,6 +844,7 @@ mod win_screen_recorder {
         MFCreateMemoryBuffer, MFCreateSample, MFCreateSinkWriterFromURL, MFMediaType_Audio,
         MFMediaType_Video, MFShutdown, MFStartup, MFVideoFormat_H264, MFVideoFormat_RGB32,
         MFVideoInterlace_Progressive, MFSTARTUP_NOSOCKET, MF_LOW_LATENCY,
+        MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, MF_MT_AAC_PAYLOAD_TYPE,
         MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
         MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS,
         MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_AVG_BITRATE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE,
@@ -866,48 +867,329 @@ mod win_screen_recorder {
     const MAX_VIDEO_HEIGHT: i32 = 1200;
     const H264_PROFILE_HIGH: u32 = 100;
     const AUDIO_SAMPLE_RATE: u32 = 48_000;
-    const AUDIO_CHANNELS: u32 = 1;
+    const AUDIO_CHANNELS: u32 = 2;
     const AUDIO_BITS_PER_SAMPLE: u32 = 16;
-    const AUDIO_AVG_BYTES_PER_SEC: u32 = 8_000; // 64 kbps AAC mono (~0.48 MB/min)
+    const AUDIO_AVG_BYTES_PER_SEC: u32 = 16_000; // 128 kbps AAC-LC estereo (~0.96 MB/min, compatibilidade total WebView2)
     const HNS_PER_SEC: i64 = 10_000_000;
     // Buffer circular maximo de 1 segundo por canal (evita crescimento de RAM em gravacoes longas)
     const MAX_RING_SAMPLES: usize = AUDIO_SAMPLE_RATE as usize;
+    const AUDIO_PREROLL_MS: u64 = 60;
+    const MIC_START_BUFFER_SAMPLES: usize = (AUDIO_SAMPLE_RATE as usize) / 50; // 20 ms
+    const SYS_START_BUFFER_SAMPLES: usize = (AUDIO_SAMPLE_RATE as usize) / 25; // 40 ms
+    const MAX_CHANNEL_LATENCY_SAMPLES: usize = (AUDIO_SAMPLE_RATE as usize) / 4; // 250 ms
+    const FADE_IN_SAMPLES: usize = (AUDIO_SAMPLE_RATE as usize) / 500; // 2 ms
 
     fn pack_u32_pair(hi: u32, lo: u32) -> u64 {
         ((hi as u64) << 32) | (lo as u64)
     }
 
-    fn push_resampled_48k(dest: &Arc<Mutex<VecDeque<f32>>>, mono_chunk: &[f32], in_rate: u32) {
-        if mono_chunk.is_empty() || in_rate == 0 {
+    fn soft_limit(sample: f32) -> f32 {
+        const THRESHOLD: f32 = 0.85;
+        let abs_val = sample.abs();
+        if abs_val <= THRESHOLD {
+            return sample;
+        }
+        let excess = (abs_val - THRESHOLD) / (1.0 - THRESHOLD);
+        let limited = THRESHOLD + (1.0 - THRESHOLD) * excess.tanh();
+        limited.copysign(sample)
+    }
+
+    struct LinearResampler {
+        in_rate: u32,
+        out_rate: u32,
+        step: f64,
+        phase: f64,
+        prev_sample: f32,
+        lp_state: f32,
+        lp_alpha: f32,
+    }
+
+    impl LinearResampler {
+        fn new(in_rate: u32, out_rate: u32) -> Self {
+            let safe_in = in_rate.max(1);
+            let safe_out = out_rate.max(1);
+            let lp_alpha = if safe_in > safe_out {
+                let cutoff = 0.45 * (safe_out as f32);
+                let rc = 1.0 / (2.0 * std::f32::consts::PI * cutoff);
+                let dt = 1.0 / (safe_in as f32);
+                dt / (rc + dt)
+            } else {
+                1.0
+            };
+
+            Self {
+                in_rate: safe_in,
+                out_rate: safe_out,
+                step: (safe_in as f64) / (safe_out as f64),
+                phase: 0.0,
+                prev_sample: 0.0,
+                lp_state: 0.0,
+                lp_alpha,
+            }
+        }
+
+        fn resample_into(&mut self, input: &[f32], output: &mut Vec<f32>) {
+            output.clear();
+            if input.is_empty() {
+                return;
+            }
+            if self.in_rate == self.out_rate {
+                output.extend_from_slice(input);
+                return;
+            }
+
+            let needs_lowpass = self.in_rate > self.out_rate;
+            for &raw in input {
+                let sample = if needs_lowpass {
+                    self.lp_state += self.lp_alpha * (raw - self.lp_state);
+                    self.lp_state
+                } else {
+                    raw
+                };
+
+                while self.phase < 1.0 {
+                    let interp = self.prev_sample + (sample - self.prev_sample) * (self.phase as f32);
+                    output.push(interp);
+                    self.phase += self.step;
+                }
+                self.phase -= 1.0;
+                self.prev_sample = sample;
+            }
+        }
+    }
+
+    struct MicrophoneConditioner {
+        hp_alpha: f32,
+        hp_prev_in: f32,
+        hp_prev_out: f32,
+        envelope: f32,
+        env_attack: f32,
+        env_release: f32,
+        gain: f32,
+        gain_attack: f32,
+        gain_release: f32,
+        hold_remaining: usize,
+        hold_samples: usize,
+    }
+
+    impl MicrophoneConditioner {
+        fn new(sample_rate: u32) -> Self {
+            let sr = sample_rate.max(1) as f32;
+            let rc = 1.0 / (2.0 * std::f32::consts::PI * 80.0);
+            let dt = 1.0 / sr;
+            Self {
+                hp_alpha: rc / (rc + dt),
+                hp_prev_in: 0.0,
+                hp_prev_out: 0.0,
+                envelope: 0.0,
+                env_attack: 1.0 - (-1.0 / (0.004 * sr)).exp(),
+                env_release: 1.0 - (-1.0 / (0.060 * sr)).exp(),
+                gain: 0.04,
+                gain_attack: 1.0 - (-1.0 / (0.005 * sr)).exp(),
+                gain_release: 1.0 - (-1.0 / (0.180 * sr)).exp(),
+                hold_remaining: 0,
+                hold_samples: (0.150 * sr) as usize,
+            }
+        }
+
+        fn process(&mut self, sample: f32) -> f32 {
+            const OPEN_THRESHOLD: f32 = 0.0045;
+            const CLOSE_THRESHOLD: f32 = 0.0020;
+            const FLOOR_GAIN: f32 = 0.12;
+            const VOICE_GAIN: f32 = 1.15;
+
+            let hp = self.hp_alpha * (self.hp_prev_out + sample - self.hp_prev_in);
+            self.hp_prev_in = sample;
+            self.hp_prev_out = hp;
+
+            let level = hp.abs();
+            let env_coeff = if level > self.envelope {
+                self.env_attack
+            } else {
+                self.env_release
+            };
+            self.envelope += env_coeff * (level - self.envelope);
+
+            let target_gain = if self.envelope >= OPEN_THRESHOLD {
+                self.hold_remaining = self.hold_samples;
+                VOICE_GAIN
+            } else if self.hold_remaining > 0 {
+                self.hold_remaining -= 1;
+                VOICE_GAIN
+            } else if self.envelope <= CLOSE_THRESHOLD {
+                FLOOR_GAIN
+            } else {
+                let t = (self.envelope - CLOSE_THRESHOLD) / (OPEN_THRESHOLD - CLOSE_THRESHOLD);
+                FLOOR_GAIN + t * (VOICE_GAIN - FLOOR_GAIN)
+            };
+
+            let gain_coeff = if target_gain > self.gain {
+                self.gain_attack
+            } else {
+                self.gain_release
+            };
+            self.gain += gain_coeff * (target_gain - self.gain);
+
+            hp * self.gain
+        }
+    }
+
+    struct ChannelStreamBuffer {
+        active: bool,
+        min_start_samples: usize,
+        max_latency_samples: usize,
+        last_sample: f32,
+        fade_in_remaining: usize,
+    }
+
+    impl ChannelStreamBuffer {
+        fn new(min_start_samples: usize, max_latency_samples: usize) -> Self {
+            Self {
+                active: false,
+                min_start_samples,
+                max_latency_samples,
+                last_sample: 0.0,
+                fade_in_remaining: 0,
+            }
+        }
+
+        fn prepare_for_drain(&mut self, queue: &mut VecDeque<f32>) {
+            if queue.len() > self.max_latency_samples {
+                let keep = self.max_latency_samples / 2;
+                let excess = queue.len().saturating_sub(keep);
+                queue.drain(..excess);
+            }
+            if !self.active && queue.len() >= self.min_start_samples {
+                self.active = true;
+                self.fade_in_remaining = FADE_IN_SAMPLES;
+            }
+        }
+
+        fn next_sample(&mut self, queue: &mut VecDeque<f32>) -> f32 {
+            if self.active {
+                if let Some(sample) = queue.pop_front() {
+                    let out = if self.fade_in_remaining > 0 {
+                        let progress =
+                            1.0 - (self.fade_in_remaining as f32) / (FADE_IN_SAMPLES.max(1) as f32);
+                        self.fade_in_remaining -= 1;
+                        sample * progress
+                    } else {
+                        sample
+                    };
+                    self.last_sample = out;
+                    return out;
+                }
+                self.active = false;
+            }
+
+            self.last_sample *= 0.985;
+            if self.last_sample.abs() < 1e-5 {
+                self.last_sample = 0.0;
+            }
+            self.last_sample
+        }
+    }
+
+    struct AudioCaptureSession {
+        _mic_stream: Option<cpal::Stream>,
+        _sys_stream: Option<cpal::Stream>,
+        mic_queue: Arc<Mutex<VecDeque<f32>>>,
+        sys_queue: Arc<Mutex<VecDeque<f32>>>,
+        mic_channel: ChannelStreamBuffer,
+        sys_channel: ChannelStreamBuffer,
+        mic_conditioner: MicrophoneConditioner,
+    }
+
+    impl AudioCaptureSession {
+        fn start() -> Self {
+            let mic_queue = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(MAX_RING_SAMPLES)));
+            let sys_queue = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(MAX_RING_SAMPLES)));
+            let host = cpal::default_host();
+
+            let _mic_stream = host.default_input_device().and_then(|dev| {
+                let cfg = dev.default_input_config().ok()?;
+                let stream = build_48k_stream(&dev, &cfg, Arc::clone(&mic_queue))?;
+                stream.play().ok()?;
+                Some(stream)
+            });
+
+            let _sys_stream = host.default_output_device().and_then(|dev| {
+                let cfg = dev.default_output_config().ok()?;
+                let stream = build_48k_stream(&dev, &cfg, Arc::clone(&sys_queue))?;
+                stream.play().ok()?;
+                Some(stream)
+            });
+
+            if _mic_stream.is_some() || _sys_stream.is_some() {
+                thread::sleep(Duration::from_millis(AUDIO_PREROLL_MS));
+            }
+
+            Self {
+                _mic_stream,
+                _sys_stream,
+                mic_queue,
+                sys_queue,
+                mic_channel: ChannelStreamBuffer::new(
+                    MIC_START_BUFFER_SAMPLES,
+                    MAX_CHANNEL_LATENCY_SAMPLES,
+                ),
+                sys_channel: ChannelStreamBuffer::new(
+                    SYS_START_BUFFER_SAMPLES,
+                    MAX_CHANNEL_LATENCY_SAMPLES,
+                ),
+                mic_conditioner: MicrophoneConditioner::new(AUDIO_SAMPLE_RATE),
+            }
+        }
+
+        fn mix_into_pcm(&mut self, sample_count: usize, pcm_out: &mut Vec<u8>) {
+            pcm_out.clear();
+            let mut mic_guard = self.mic_queue.lock().ok();
+            let mut sys_guard = self.sys_queue.lock().ok();
+
+            if let Some(ref mut q) = mic_guard {
+                self.mic_channel.prepare_for_drain(q);
+            }
+            if let Some(ref mut q) = sys_guard {
+                self.sys_channel.prepare_for_drain(q);
+            }
+
+            for _ in 0..sample_count {
+                let mic_raw = mic_guard
+                    .as_mut()
+                    .map(|q| self.mic_channel.next_sample(q))
+                    .unwrap_or(0.0);
+                let sys_raw = sys_guard
+                    .as_mut()
+                    .map(|q| self.sys_channel.next_sample(q))
+                    .unwrap_or(0.0);
+
+                let mic_clean = self.mic_conditioner.process(mic_raw);
+                let mixed = soft_limit(mic_clean + sys_raw);
+                let sample_i16 = (mixed.clamp(-1.0, 1.0) * 32767.0).round() as i16;
+                let le = sample_i16.to_le_bytes();
+                pcm_out.extend_from_slice(&le);
+                pcm_out.extend_from_slice(&le);
+            }
+        }
+    }
+
+    fn samples_to_hns(sample_count: u64) -> i64 {
+        (((sample_count as i128) * (HNS_PER_SEC as i128)) / (AUDIO_SAMPLE_RATE as i128)) as i64
+    }
+
+    fn push_samples_to_ring(dest: &Arc<Mutex<VecDeque<f32>>>, samples: &[f32]) {
+        if samples.is_empty() {
             return;
         }
         let Ok(mut buf) = dest.lock() else {
             return;
         };
-
-        if in_rate == AUDIO_SAMPLE_RATE {
-            for &s in mono_chunk {
-                if buf.len() >= MAX_RING_SAMPLES {
-                    buf.pop_front();
-                }
-                buf.push_back(s);
-            }
-            return;
+        let total = buf.len() + samples.len();
+        if total > MAX_RING_SAMPLES {
+            let drop_count = (total - MAX_RING_SAMPLES).min(buf.len());
+            buf.drain(..drop_count);
         }
-
-        let ratio = AUDIO_SAMPLE_RATE as f64 / in_rate as f64;
-        let out_len = ((mono_chunk.len() as f64) * ratio).max(1.0).round() as usize;
-        for i in 0..out_len {
-            let src_pos = (i as f64) / ratio;
-            let idx = src_pos.floor() as usize;
-            let frac = (src_pos - (idx as f64)) as f32;
-            let s0 = mono_chunk.get(idx).copied().unwrap_or(0.0);
-            let s1 = mono_chunk.get(idx + 1).copied().unwrap_or(s0);
-            if buf.len() >= MAX_RING_SAMPLES {
-                buf.pop_front();
-            }
-            buf.push_back(s0 + (s1 - s0) * frac);
-        }
+        buf.extend(samples.iter().copied());
     }
 
     fn build_48k_stream(
@@ -923,7 +1205,9 @@ mod win_screen_recorder {
 
         match sample_format {
             cpal::SampleFormat::F32 => {
-                let mut scratch = Vec::<f32>::with_capacity(2048);
+                let mut mono_scratch = Vec::<f32>::with_capacity(2048);
+                let mut resampled = Vec::<f32>::with_capacity(2400);
+                let mut resampler = LinearResampler::new(in_rate, AUDIO_SAMPLE_RATE);
                 device
                     .build_input_stream(
                         &stream_config,
@@ -931,12 +1215,13 @@ mod win_screen_recorder {
                             if channels == 0 {
                                 return;
                             }
-                            scratch.clear();
-                            scratch.extend(
+                            mono_scratch.clear();
+                            mono_scratch.extend(
                                 data.chunks(channels)
                                     .map(|f| f.iter().copied().sum::<f32>() / (f.len() as f32)),
                             );
-                            push_resampled_48k(&dest, &scratch, in_rate);
+                            resampler.resample_into(&mono_scratch, &mut resampled);
+                            push_samples_to_ring(&dest, &resampled);
                         },
                         err_fn,
                         None,
@@ -944,7 +1229,9 @@ mod win_screen_recorder {
                     .ok()
             }
             cpal::SampleFormat::I16 => {
-                let mut scratch = Vec::<f32>::with_capacity(2048);
+                let mut mono_scratch = Vec::<f32>::with_capacity(2048);
+                let mut resampled = Vec::<f32>::with_capacity(2400);
+                let mut resampler = LinearResampler::new(in_rate, AUDIO_SAMPLE_RATE);
                 device
                     .build_input_stream(
                         &stream_config,
@@ -952,12 +1239,13 @@ mod win_screen_recorder {
                             if channels == 0 {
                                 return;
                             }
-                            scratch.clear();
-                            scratch.extend(data.chunks(channels).map(|f| {
+                            mono_scratch.clear();
+                            mono_scratch.extend(data.chunks(channels).map(|f| {
                                 let sum: f32 = f.iter().map(|&s| (s as f32) / 32768.0).sum();
                                 sum / (f.len() as f32)
                             }));
-                            push_resampled_48k(&dest, &scratch, in_rate);
+                            resampler.resample_into(&mono_scratch, &mut resampled);
+                            push_samples_to_ring(&dest, &resampled);
                         },
                         err_fn,
                         None,
@@ -965,7 +1253,9 @@ mod win_screen_recorder {
                     .ok()
             }
             cpal::SampleFormat::U16 => {
-                let mut scratch = Vec::<f32>::with_capacity(2048);
+                let mut mono_scratch = Vec::<f32>::with_capacity(2048);
+                let mut resampled = Vec::<f32>::with_capacity(2400);
+                let mut resampler = LinearResampler::new(in_rate, AUDIO_SAMPLE_RATE);
                 device
                     .build_input_stream(
                         &stream_config,
@@ -973,13 +1263,14 @@ mod win_screen_recorder {
                             if channels == 0 {
                                 return;
                             }
-                            scratch.clear();
-                            scratch.extend(data.chunks(channels).map(|f| {
+                            mono_scratch.clear();
+                            mono_scratch.extend(data.chunks(channels).map(|f| {
                                 let sum: f32 =
                                     f.iter().map(|&s| ((s as f32) - 32768.0) / 32768.0).sum();
                                 sum / (f.len() as f32)
                             }));
-                            push_resampled_48k(&dest, &scratch, in_rate);
+                            resampler.resample_into(&mono_scratch, &mut resampled);
+                            push_samples_to_ring(&dest, &resampled);
                         },
                         err_fn,
                         None,
@@ -1077,6 +1368,9 @@ mod win_screen_recorder {
         out_type
             .SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, AUDIO_AVG_BYTES_PER_SEC)
             .map_err(|e| e.to_string())?;
+        let _ = out_type.SetUINT32(&MF_MT_AUDIO_BLOCK_ALIGNMENT, 1);
+        let _ = out_type.SetUINT32(&MF_MT_AAC_PAYLOAD_TYPE, 0);
+        let _ = out_type.SetUINT32(&MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29);
 
         let stream_index = writer.AddStream(&out_type).map_err(|e| e.to_string())?;
 
@@ -1446,75 +1740,41 @@ mod win_screen_recorder {
             return Err(err);
         }
 
-        let mic_buf = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(MAX_RING_SAMPLES)));
-        let sys_buf = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(MAX_RING_SAMPLES)));
-        let host = cpal::default_host();
-
-        let _mic_stream = host.default_input_device().and_then(|dev| {
-            let cfg = dev.default_input_config().ok()?;
-            let s = build_48k_stream(&dev, &cfg, Arc::clone(&mic_buf))?;
-            s.play().ok()?;
-            Some(s)
-        });
-
-        let _sys_stream = host.default_output_device().and_then(|dev| {
-            let cfg = dev.default_output_config().ok()?;
-            let s = build_48k_stream(&dev, &cfg, Arc::clone(&sys_buf))?;
-            s.play().ok()?;
-            Some(s)
-        });
+        let mut audio_session = AudioCaptureSession::start();
 
         let _ = ready_tx.send(Ok(()));
 
         let start_instant = Instant::now();
         let tick_interval = Duration::from_millis(50);
-        let mut prev_wall_hns: i64 = 0;
-        let mut media_cursor_hns: i64 = 0;
+        let mut total_audio_samples: u64 = 0;
         let mut pcm_bytes = Vec::<u8>::with_capacity((AUDIO_SAMPLE_RATE as usize / 2) * 2);
 
         while running.load(Ordering::Relaxed) {
             let loop_tick = Instant::now();
-            let now_wall_hns = (start_instant.elapsed().as_secs_f64() * (HNS_PER_SEC as f64)) as i64;
-            let raw_delta_hns = (now_wall_hns - prev_wall_hns).max(HNS_PER_SEC / 40);
-            prev_wall_hns = now_wall_hns;
+            let elapsed_hns =
+                (start_instant.elapsed().as_secs_f64() * (HNS_PER_SEC as f64)) as i64;
+            let target_samples = (((elapsed_hns.max(0) as i128) * (AUDIO_SAMPLE_RATE as i128))
+                / (HNS_PER_SEC as i128)) as u64;
+            let needed_samples = target_samples.saturating_sub(total_audio_samples);
 
-            let step_hns_approx = raw_delta_hns.clamp(HNS_PER_SEC / 25, HNS_PER_SEC / 3);
-            let step_samples = (((step_hns_approx as i128) * (AUDIO_SAMPLE_RATE as i128))
-                / (HNS_PER_SEC as i128))
-                .max(480) as usize;
-            let exact_step_hns =
-                ((step_samples as i64) * HNS_PER_SEC) / (AUDIO_SAMPLE_RATE as i64);
+            if needed_samples >= 480 {
+                let step_samples = needed_samples.min((AUDIO_SAMPLE_RATE as u64) / 3) as usize;
+                let sample_ts_hns = samples_to_hns(total_audio_samples);
+                let next_ts_hns = samples_to_hns(total_audio_samples + (step_samples as u64));
+                let exact_dur_hns = (next_ts_hns - sample_ts_hns).max(1);
 
-            pcm_bytes.clear();
-            let mut mb_guard = mic_buf.lock().ok();
-            let mut sb_guard = sys_buf.lock().ok();
+                audio_session.mix_into_pcm(step_samples, &mut pcm_bytes);
 
-            for _ in 0..step_samples {
-                let m_raw = mb_guard.as_mut().and_then(|q| q.pop_front()).unwrap_or(0.0);
-                let s_raw = sb_guard.as_mut().and_then(|q| q.pop_front()).unwrap_or(0.0);
-                let m = (m_raw * 1.6).clamp(-1.0, 1.0);
-                let s = s_raw.clamp(-1.0, 1.0);
-                let mixed = if m.abs() > 0.001 && s.abs() > 0.001 {
-                    (m + s) * 0.75
-                } else {
-                    m + s
-                };
-                let sample_i16 = (mixed.clamp(-1.0, 1.0) * 32767.0) as i16;
-                pcm_bytes.extend_from_slice(&sample_i16.to_le_bytes());
+                let _ = write_mf_sample(
+                    &writer,
+                    audio_stream,
+                    &pcm_bytes,
+                    sample_ts_hns,
+                    exact_dur_hns,
+                );
+
+                total_audio_samples += step_samples as u64;
             }
-
-            drop(mb_guard);
-            drop(sb_guard);
-
-            let _ = write_mf_sample(
-                &writer,
-                audio_stream,
-                &pcm_bytes,
-                media_cursor_hns,
-                exact_step_hns,
-            );
-
-            media_cursor_hns += exact_step_hns;
 
             let spent = loop_tick.elapsed();
             if spent < tick_interval {
@@ -1522,8 +1782,7 @@ mod win_screen_recorder {
             }
         }
 
-        drop(_mic_stream);
-        drop(_sys_stream);
+        drop(audio_session);
 
         if let Err(e) = writer.Finalize() {
             eprintln!("[audio-rec] writer.Finalize warning/error: {e}");
@@ -1669,23 +1928,7 @@ mod win_screen_recorder {
         }
 
         // Inicia a captura simultanea de Microfone + Audio do Sistema (WASAPI Loopback)
-        let mic_buf = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(MAX_RING_SAMPLES)));
-        let sys_buf = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(MAX_RING_SAMPLES)));
-        let host = cpal::default_host();
-
-        let _mic_stream = host.default_input_device().and_then(|dev| {
-            let cfg = dev.default_input_config().ok()?;
-            let s = build_48k_stream(&dev, &cfg, Arc::clone(&mic_buf))?;
-            s.play().ok()?;
-            Some(s)
-        });
-
-        let _sys_stream = host.default_output_device().and_then(|dev| {
-            let cfg = dev.default_output_config().ok()?;
-            let s = build_48k_stream(&dev, &cfg, Arc::clone(&sys_buf))?;
-            s.play().ok()?;
-            Some(s)
-        });
+        let mut audio_session = AudioCaptureSession::start();
 
         // Sinaliza que a gravacao comecou com sucesso!
         let _ = ready_tx.send(Ok(()));
@@ -1694,11 +1937,9 @@ mod win_screen_recorder {
         let frame_interval = Duration::from_micros(1_000_000 / (VIDEO_FPS as u64));
         let frame_byte_len = (out_w * out_h * 4) as usize;
 
-        // Linha do tempo unica e estritamente sincrona entre Audio e Video:
-        // Garante que o muxer MP4 (FMPEG4Sink) descarregue os pacotes no disco a cada frame
-        // sem acumular filas de interleaving na RAM durante gravacoes longas (1h+).
         let mut prev_wall_hns: i64 = 0;
-        let mut media_cursor_hns: i64 = 0;
+        let mut video_cursor_hns: i64 = 0;
+        let mut total_audio_samples: u64 = 0;
         let mut pcm_bytes = Vec::<u8>::with_capacity((AUDIO_SAMPLE_RATE as usize / 2) * 2);
 
         while running.load(Ordering::Relaxed) {
@@ -1707,14 +1948,9 @@ mod win_screen_recorder {
             let raw_delta_hns = (now_wall_hns - prev_wall_hns).max(HNS_PER_SEC / 60);
             prev_wall_hns = now_wall_hns;
 
-            // Limita saltos individuais a no maximo 350ms caso a CPU tenha congelado momentaneamente,
+            // Limita saltos individuais a no maximo 333ms caso a CPU tenha congelado momentaneamente,
             // evitando pacotes gigantes ou buracos que corrompem o Finalize() do MP4
-            let step_hns_approx = raw_delta_hns.clamp(HNS_PER_SEC / 30, HNS_PER_SEC / 3);
-            let step_samples = (((step_hns_approx as i128) * (AUDIO_SAMPLE_RATE as i128))
-                / (HNS_PER_SEC as i128))
-                .max(480) as usize;
-            let exact_step_hns =
-                ((step_samples as i64) * HNS_PER_SEC) / (AUDIO_SAMPLE_RATE as i64);
+            let video_dur_hns = raw_delta_hns.clamp(HNS_PER_SEC / 30, HNS_PER_SEC / 3);
 
             let frame_slice_mut =
                 std::slice::from_raw_parts_mut(dib_bits as *mut u8, frame_byte_len);
@@ -1773,43 +2009,39 @@ mod win_screen_recorder {
                 &writer,
                 video_stream,
                 frame_slice_mut,
-                media_cursor_hns,
-                exact_step_hns,
+                video_cursor_hns,
+                video_dur_hns,
             );
+            video_cursor_hns += video_dur_hns;
 
-            // 2. Mixa o audio (Microfone + Audio do PC) no mesmo timestamp e duracao exata do frame de video
+            // 2. Mixa o audio (Microfone + Audio do PC) com linha do tempo exata por amostra
             if let Some(a_stream) = audio_stream {
-                pcm_bytes.clear();
-                let mut mb_guard = mic_buf.lock().ok();
-                let mut sb_guard = sys_buf.lock().ok();
+                let audio_now_hns =
+                    (start_instant.elapsed().as_secs_f64() * (HNS_PER_SEC as f64)) as i64;
+                let target_samples =
+                    (((audio_now_hns.max(0) as i128) * (AUDIO_SAMPLE_RATE as i128))
+                        / (HNS_PER_SEC as i128)) as u64;
+                let needed_samples = target_samples.saturating_sub(total_audio_samples);
 
-                for _ in 0..step_samples {
-                    let m_raw = mb_guard.as_mut().and_then(|q| q.pop_front()).unwrap_or(0.0);
-                    let s_raw = sb_guard.as_mut().and_then(|q| q.pop_front()).unwrap_or(0.0);
-                    let m = (m_raw * 1.6).clamp(-1.0, 1.0);
-                    let s = s_raw.clamp(-1.0, 1.0);
-                    let mixed = if m.abs() > 0.001 && s.abs() > 0.001 {
-                        (m + s) * 0.75
-                    } else {
-                        m + s
-                    };
-                    let sample_i16 = (mixed.clamp(-1.0, 1.0) * 32767.0) as i16;
-                    pcm_bytes.extend_from_slice(&sample_i16.to_le_bytes());
+                if needed_samples >= 480 {
+                    let step_samples = needed_samples.min((AUDIO_SAMPLE_RATE as u64) / 3) as usize;
+                    let sample_ts_hns = samples_to_hns(total_audio_samples);
+                    let next_ts_hns = samples_to_hns(total_audio_samples + (step_samples as u64));
+                    let exact_dur_hns = (next_ts_hns - sample_ts_hns).max(1);
+
+                    audio_session.mix_into_pcm(step_samples, &mut pcm_bytes);
+
+                    let _ = write_mf_sample(
+                        &writer,
+                        a_stream,
+                        &pcm_bytes,
+                        sample_ts_hns,
+                        exact_dur_hns,
+                    );
+
+                    total_audio_samples += step_samples as u64;
                 }
-
-                drop(mb_guard);
-                drop(sb_guard);
-
-                let _ = write_mf_sample(
-                    &writer,
-                    a_stream,
-                    &pcm_bytes,
-                    media_cursor_hns,
-                    exact_step_hns,
-                );
             }
-
-            media_cursor_hns += exact_step_hns;
 
             let spent = loop_tick.elapsed();
             if spent < frame_interval {
@@ -1818,8 +2050,7 @@ mod win_screen_recorder {
         }
 
         // Para os streams de audio antes do Finalize para liberar a CPU imediatamente
-        drop(_mic_stream);
-        drop(_sys_stream);
+        drop(audio_session);
 
         if let Err(e) = writer.Finalize() {
             eprintln!("[screen-rec] writer.Finalize warning/error: {e}");
@@ -1831,6 +2062,125 @@ mod win_screen_recorder {
         let _ = ReleaseDC(None, hdc_screen);
 
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn resampler_44100_to_48000_is_continuous_and_drift_free() {
+            let mut resampler = LinearResampler::new(44_100, 48_000);
+            let mut out = Vec::new();
+            let mut all_out = Vec::new();
+            let freq = 440.0_f32;
+
+            // 1 segundo em blocos de 441 amostras (10 ms cada), simulando callbacks WASAPI
+            for chunk_idx in 0..100 {
+                let mut chunk = Vec::with_capacity(441);
+                for i in 0..441 {
+                    let n = (chunk_idx * 441 + i) as f32;
+                    chunk.push((2.0 * std::f32::consts::PI * freq * n / 44_100.0).sin() * 0.5);
+                }
+                resampler.resample_into(&chunk, &mut out);
+                all_out.extend_from_slice(&out);
+            }
+
+            assert!(
+                (all_out.len() as isize - 48_000).abs() <= 2,
+                "expected ~48000 samples, got {}",
+                all_out.len()
+            );
+
+            // Verifica que nao ha saltos bruscos (clicks) entre blocos adjacentes
+            let max_step = all_out
+                .windows(2)
+                .skip(10)
+                .map(|w| (w[1] - w[0]).abs())
+                .fold(0.0_f32, f32::max);
+            assert!(max_step < 0.05, "unexpected discontinuity: max_step={max_step}");
+        }
+
+        #[test]
+        fn mic_conditioner_suppresses_dc_and_low_hiss_but_passes_voice() {
+            let mut cond = MicrophoneConditioner::new(48_000);
+            let mut hiss_peak = 0.0_f32;
+
+            // Simula 750 ms de offset DC + chiado baixo (-56 dBFS) para o filtro HP e release assentarem
+            for i in 0..36_000 {
+                let hiss = if i % 2 == 0 { 0.0015 } else { -0.0015 };
+                let out = cond.process(0.15 + hiss);
+                if i > 28_800 {
+                    hiss_peak = hiss_peak.max(out.abs());
+                }
+            }
+            assert!(hiss_peak < 0.001, "expected hiss suppressed, got {hiss_peak}");
+
+            // Simula 200 ms de voz (senoide 400 Hz a 0.25 de amplitude)
+            let mut voice_peak = 0.0_f32;
+            for i in 0..9_600 {
+                let sample = (2.0 * std::f32::consts::PI * 400.0 * (i as f32) / 48_000.0).sin() * 0.25;
+                let out = cond.process(sample);
+                if i > 2_400 {
+                    voice_peak = voice_peak.max(out.abs());
+                }
+            }
+            assert!(voice_peak > 0.20, "expected voice preserved, got {voice_peak}");
+        }
+
+        #[test]
+        fn channel_buffer_fades_out_smoothly_on_underrun() {
+            let mut channel = ChannelStreamBuffer::new(4, 100);
+            let mut queue: VecDeque<f32> = (0..10).map(|_| 0.5_f32).collect();
+            channel.prepare_for_drain(&mut queue);
+
+            let mut prev = 0.0_f32;
+            for _ in 0..10 {
+                prev = channel.next_sample(&mut queue);
+            }
+            // Proxima amostra e underrun: deve decair suavemente em vez de cair direto para 0.0
+            let after_underrun = channel.next_sample(&mut queue);
+            assert!(
+                (prev - after_underrun).abs() < 0.02 && after_underrun > 0.0,
+                "expected smooth fade-out from {prev}, got {after_underrun}"
+            );
+        }
+
+        #[test]
+        fn soft_limiter_is_linear_below_threshold_and_bounded_above() {
+            assert!((soft_limit(0.5) - 0.5).abs() < 1e-6);
+            assert!((soft_limit(-0.8) - (-0.8)).abs() < 1e-6);
+            assert!(soft_limit(2.0) < 1.0 && soft_limit(2.0) > 0.85);
+            assert!(soft_limit(-2.0) > -1.0 && soft_limit(-2.0) < -0.85);
+        }
+
+        #[test]
+        fn mf_sink_writer_configures_video_and_audio_streams() {
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET).expect("MFStartup failed");
+                let temp_path = std::env::temp_dir().join("todocompanion_mf_audio_test.mp4");
+                let wide_url: Vec<u16> = temp_path
+                    .as_os_str()
+                    .to_string_lossy()
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect();
+                let writer = create_optimized_sink_writer(&wide_url).expect("sink writer failed");
+                let v_idx = configure_video_streams(&writer, 640, 360).expect("video stream failed");
+                let a_res = configure_audio_streams(&writer);
+                println!("video_stream={v_idx}, audio_stream={a_res:?}");
+                let a_idx = a_res.expect("audio stream failed");
+                writer.BeginWriting().expect("BeginWriting failed");
+                let pcm = vec![0u8; 4800 * (AUDIO_CHANNELS as usize) * 2];
+                write_mf_sample(&writer, a_idx, &pcm, 0, 1_000_000).expect("write audio failed");
+                let _ = writer.Finalize();
+                drop(writer);
+                let _ = std::fs::remove_file(&temp_path);
+                let _ = MFShutdown();
+                CoUninitialize();
+            }
+        }
     }
 }
 
@@ -2427,14 +2777,16 @@ fn infer_media_mime(path: &Path) -> &'static str {
         .map(|s| s.to_lowercase())
         .as_deref()
     {
-        Some("mp4") => "video/mp4",
+        Some("mp4") | Some("m4v") => "video/mp4",
         Some("m4a") => "audio/mp4",
         Some("mp3") => "audio/mpeg",
         Some("wav") => "audio/wav",
         Some("webm") => "video/webm",
         Some("ogg") => "audio/ogg",
+        Some("ogv") => "video/ogg",
         Some("mov") => "video/quicktime",
         Some("mkv") => "video/x-matroska",
+        Some("avi") => "video/x-msvideo",
         Some("aac") => "audio/aac",
         Some("flac") => "audio/flac",
         _ => "audio/mp4",
@@ -2669,10 +3021,24 @@ fn attachment_save_from_path(
         dir = dir.join(&sub);
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     }
-    let stored_name = unique_filename(&dir, &original_name);
-    let dest = dir.join(&stored_name);
-    fs::copy(&src, &dest).map_err(|e| e.to_string())?;
-    
+
+    // Se o arquivo escolhido ja esta dentro da pasta de anexos desta task, reutiliza sem duplicar
+    let already_in_dir = src
+        .parent()
+        .and_then(|p| p.canonicalize().ok())
+        .zip(dir.canonicalize().ok())
+        .map(|(src_parent, target_dir)| src_parent == target_dir)
+        .unwrap_or(false);
+
+    let (stored_name, dest) = if already_in_dir && src.is_file() {
+        (original_name.clone(), src.clone())
+    } else {
+        let unique = unique_filename(&dir, &original_name);
+        let target = dir.join(&unique);
+        fs::copy(&src, &target).map_err(|e| e.to_string())?;
+        (unique, target)
+    };
+
     // The relative path from the user's directory
     let relative_file = if let Some(sub) = dir.strip_prefix(app_root(&app)?.join(&user_id)).ok() {
         sub.join(&stored_name).to_string_lossy().replace("\\", "/")
@@ -2683,9 +3049,209 @@ fn attachment_save_from_path(
     let size = fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
     Ok(AttachmentInfo {
         file: relative_file,
-        original_name,
+        original_name: stored_name,
         size,
     })
+}
+
+fn sanitize_attachment_rename(raw_name: &str, current_name: &str) -> Result<String, String> {
+    let cleaned: String = raw_name
+        .trim()
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+        .collect();
+    let trimmed = cleaned.trim().trim_end_matches('.').trim();
+    if trimmed.is_empty() {
+        return Err("Nome de arquivo invalido".to_string());
+    }
+
+    let current_ext = Path::new(current_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .filter(|e| !e.is_empty());
+    let new_has_ext = Path::new(trimmed)
+        .extension()
+        .and_then(|e| e.to_str())
+        .filter(|e| !e.is_empty())
+        .is_some();
+
+    if !new_has_ext {
+        if let Some(ext) = current_ext {
+            return Ok(format!("{trimmed}.{ext}"));
+        }
+    }
+    Ok(trimmed.to_string())
+}
+
+#[tauri::command]
+fn attachment_list_dir(
+    app: tauri::AppHandle,
+    user_id: String,
+    sub_dir: Option<String>,
+) -> Result<Vec<AttachmentInfo>, String> {
+    let user_root = app_root(&app)?.join(&user_id);
+    let mut dir = user_root.clone();
+    if let Some(sub) = sub_dir {
+        dir = dir.join(&sub);
+    }
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut entries = Vec::new();
+    let read_dir = fs::read_dir(&dir).map_err(|e| e.to_string())?;
+    for item in read_dir.flatten() {
+        let path = item.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name_os) = path.file_name() else {
+            continue;
+        };
+        let name = name_os.to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        let size = item.metadata().map(|m| m.len()).unwrap_or(0);
+        let relative_file = path
+            .strip_prefix(&user_root)
+            .map(|p| p.to_string_lossy().replace("\\", "/"))
+            .unwrap_or_else(|_| name.clone());
+        entries.push(AttachmentInfo {
+            file: relative_file,
+            original_name: name,
+            size,
+        });
+    }
+
+    entries.sort_by(|a, b| {
+        a.original_name
+            .to_lowercase()
+            .cmp(&b.original_name.to_lowercase())
+    });
+    Ok(entries)
+}
+
+#[tauri::command]
+fn attachment_rename(
+    app: tauri::AppHandle,
+    user_id: String,
+    file: String,
+    new_name: String,
+) -> Result<AttachmentInfo, String> {
+    let user_root = app_root(&app)?.join(&user_id);
+    let old_path = user_root.join(&file);
+    if !old_path.is_file() {
+        return Err("Arquivo nao encontrado".to_string());
+    }
+    let canon_root = user_root.canonicalize().map_err(|e| e.to_string())?;
+    let canon_old = old_path.canonicalize().map_err(|e| e.to_string())?;
+    if !canon_old.starts_with(&canon_root) {
+        return Err("Caminho invalido".to_string());
+    }
+
+    let current_name = old_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let final_name = sanitize_attachment_rename(&new_name, &current_name)?;
+
+    let parent = old_path
+        .parent()
+        .ok_or_else(|| "Diretorio invalido".to_string())?;
+    let new_path = parent.join(&final_name);
+
+    if final_name != current_name {
+        if new_path.exists() && final_name.to_lowercase() != current_name.to_lowercase() {
+            return Err("Ja existe um arquivo com esse nome".to_string());
+        }
+        fs::rename(&old_path, &new_path).map_err(|e| format!("Falha ao renomear: {e}"))?;
+    }
+
+    let relative_file = new_path
+        .strip_prefix(&user_root)
+        .map(|p| p.to_string_lossy().replace("\\", "/"))
+        .unwrap_or_else(|_| final_name.clone());
+    let size = fs::metadata(&new_path).map(|m| m.len()).unwrap_or(0);
+
+    Ok(AttachmentInfo {
+        file: relative_file,
+        original_name: final_name,
+        size,
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn open_native_file_dialog(initial_dir: &Path, filter_kind: &str) -> Option<String> {
+    use windows::core::{PCWSTR, PWSTR};
+    use windows::Win32::UI::Controls::Dialogs::{
+        GetOpenFileNameW, OFN_EXPLORER, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST,
+        OPENFILENAMEW,
+    };
+
+    let filter_str = match filter_kind {
+        "video" => "Videos (*.mp4;*.webm;*.mov;*.mkv;*.m4v;*.avi;*.ogg)\0*.mp4;*.webm;*.mov;*.mkv;*.m4v;*.avi;*.ogg\0Todos os arquivos (*.*)\0*.*\0\0",
+        "image" => "Imagens (*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp)\0*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp\0Todos os arquivos (*.*)\0*.*\0\0",
+        _ => "Todos os arquivos (*.*)\0*.*\0\0",
+    };
+
+    let filter_wide: Vec<u16> = filter_str.encode_utf16().collect();
+    let dir_wide: Vec<u16> = initial_dir
+        .as_os_str()
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut file_buf = vec![0u16; 4096];
+
+    let mut ofn = OPENFILENAMEW {
+        lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
+        lpstrFilter: PCWSTR(filter_wide.as_ptr()),
+        nFilterIndex: 1,
+        lpstrFile: PWSTR(file_buf.as_mut_ptr()),
+        nMaxFile: file_buf.len() as u32,
+        lpstrInitialDir: PCWSTR(dir_wide.as_ptr()),
+        Flags: OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR,
+        ..Default::default()
+    };
+
+    let ok = unsafe { GetOpenFileNameW(&mut ofn).as_bool() };
+    if !ok {
+        return None;
+    }
+    let end = file_buf.iter().position(|&c| c == 0).unwrap_or(file_buf.len());
+    if end == 0 {
+        return None;
+    }
+    Some(String::from_utf16_lossy(&file_buf[..end]))
+}
+
+#[tauri::command]
+async fn attachment_pick_file(
+    app: tauri::AppHandle,
+    user_id: String,
+    sub_dir: Option<String>,
+    filter_kind: Option<String>,
+) -> Result<Option<String>, String> {
+    let mut dir = ensure_user_dir(&app, &user_id)?;
+    if let Some(sub) = sub_dir {
+        dir = dir.join(&sub);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    let kind = filter_kind.unwrap_or_default();
+
+    #[cfg(target_os = "windows")]
+    {
+        tauri::async_runtime::spawn_blocking(move || open_native_file_dialog(&dir, &kind))
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (dir, kind);
+        Ok(None)
+    }
 }
 
 #[tauri::command]
@@ -3454,6 +4020,229 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+mod local_media_protocol {
+    use super::{app_root, infer_media_mime};
+    use std::fs::File;
+    use std::io::{Read, Seek, SeekFrom};
+    use std::path::{Component, Path, PathBuf};
+
+    const MAX_STREAM_CHUNK_BYTES: u64 = 2 * 1024 * 1024;
+
+    pub fn percent_decode(raw: &str) -> String {
+        let bytes = raw.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                    out.push((hi << 4) | lo);
+                    i += 3;
+                    continue;
+                }
+            }
+            out.push(bytes[i]);
+            i += 1;
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    fn hex_val(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    pub fn parse_byte_range(header_val: &str, total_len: u64) -> Option<(u64, u64)> {
+        if total_len == 0 {
+            return None;
+        }
+        let spec = header_val.trim().strip_prefix("bytes=")?;
+        let first_range = spec.split(',').next()?.trim();
+        let (start_str, end_str) = first_range.split_once('-')?;
+
+        let (start, mut end) = if start_str.is_empty() {
+            let suffix: u64 = end_str.parse().ok()?;
+            if suffix == 0 {
+                return None;
+            }
+            (total_len.saturating_sub(suffix), total_len - 1)
+        } else {
+            let s: u64 = start_str.parse().ok()?;
+            if s >= total_len {
+                return None;
+            }
+            let e = if end_str.is_empty() {
+                (s + MAX_STREAM_CHUNK_BYTES - 1).min(total_len - 1)
+            } else {
+                end_str.parse::<u64>().ok()?.min(total_len - 1)
+            };
+            (s, e)
+        };
+
+        if start > end {
+            return None;
+        }
+        let max_end = (start + MAX_STREAM_CHUNK_BYTES - 1).min(total_len - 1);
+        if end > max_end {
+            end = max_end;
+        }
+        Some((start, end))
+    }
+
+    fn resolve_safe_path(app: &tauri::AppHandle, request_path: &str) -> Result<PathBuf, String> {
+        let decoded = percent_decode(request_path);
+        let trimmed = decoded.trim_start_matches('/');
+        if trimmed.is_empty() {
+            return Err("Empty media path".to_string());
+        }
+
+        let rel = Path::new(trimmed);
+        let mut safe_rel = PathBuf::new();
+        for comp in rel.components() {
+            match comp {
+                Component::Normal(part) => safe_rel.push(part),
+                _ => return Err("Invalid media path".to_string()),
+            }
+        }
+
+        let root = app_root(app)?;
+        let candidate = root.join(safe_rel);
+        let canon_root = root.canonicalize().map_err(|e| e.to_string())?;
+        let canon_file = candidate.canonicalize().map_err(|e| e.to_string())?;
+        if !canon_file.starts_with(&canon_root) || !canon_file.is_file() {
+            return Err("Access denied".to_string());
+        }
+        Ok(canon_file)
+    }
+
+    fn error_response(status: u16, body: &str) -> tauri::http::Response<Vec<u8>> {
+        tauri::http::Response::builder()
+            .status(status)
+            .header("Content-Type", "text/plain; charset=utf-8")
+            .header("Access-Control-Allow-Origin", "*")
+            .body(body.as_bytes().to_vec())
+            .unwrap()
+    }
+
+    pub fn handle_request(
+        app: &tauri::AppHandle,
+        request: tauri::http::Request<Vec<u8>>,
+    ) -> tauri::http::Response<Vec<u8>> {
+        let path = match resolve_safe_path(app, request.uri().path()) {
+            Ok(p) => p,
+            Err(_) => return error_response(404, "Media not found"),
+        };
+
+        let mut file = match File::open(&path) {
+            Ok(f) => f,
+            Err(_) => return error_response(404, "Media not readable"),
+        };
+        let total_len = match file.metadata() {
+            Ok(m) => m.len(),
+            Err(_) => return error_response(500, "Failed to read metadata"),
+        };
+        let mime = infer_media_mime(&path);
+
+        if request.method() == "HEAD" {
+            return tauri::http::Response::builder()
+                .status(200)
+                .header("Content-Type", mime)
+                .header("Accept-Ranges", "bytes")
+                .header("Content-Length", total_len.to_string())
+                .header("Cache-Control", "no-store")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Vec::new())
+                .unwrap();
+        }
+
+        if let Some(range_hdr) = request
+            .headers()
+            .get("range")
+            .and_then(|v| v.to_str().ok())
+        {
+            let Some((start, end)) = parse_byte_range(range_hdr, total_len) else {
+                return tauri::http::Response::builder()
+                    .status(416)
+                    .header("Content-Range", format!("bytes */{total_len}"))
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(Vec::new())
+                    .unwrap();
+            };
+
+            let len = (end - start + 1) as usize;
+            let mut buf = vec![0u8; len];
+            if file.seek(SeekFrom::Start(start)).is_err() || file.read_exact(&mut buf).is_err() {
+                return error_response(500, "Failed to read media range");
+            }
+
+            return tauri::http::Response::builder()
+                .status(206)
+                .header("Content-Type", mime)
+                .header("Accept-Ranges", "bytes")
+                .header("Content-Range", format!("bytes {start}-{end}/{total_len}"))
+                .header("Content-Length", len.to_string())
+                .header("Access-Control-Allow-Origin", "*")
+                .body(buf)
+                .unwrap();
+        }
+
+        let mut buf = Vec::with_capacity(total_len.min(MAX_STREAM_CHUNK_BYTES) as usize);
+        if file.read_to_end(&mut buf).is_err() {
+            return error_response(500, "Failed to read media");
+        }
+
+        tauri::http::Response::builder()
+            .status(200)
+            .header("Content-Type", mime)
+            .header("Accept-Ranges", "bytes")
+            .header("Content-Length", buf.len().to_string())
+            .header("Access-Control-Allow-Origin", "*")
+            .body(buf)
+            .unwrap()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn percent_decode_handles_spaces_and_utf8() {
+            assert_eq!(
+                percent_decode("/user1/task1/anexos/Meu%20V%C3%ADdeo.mp4"),
+                "/user1/task1/anexos/Meu Vídeo.mp4"
+            );
+        }
+
+        #[test]
+        fn parse_byte_range_caps_large_open_ranges() {
+            let total = 50 * 1024 * 1024;
+            assert_eq!(
+                parse_byte_range("bytes=0-", total),
+                Some((0, MAX_STREAM_CHUNK_BYTES - 1))
+            );
+            assert_eq!(parse_byte_range("bytes=100-199", total), Some((100, 199)));
+            assert_eq!(parse_byte_range("bytes=-500", 1000), Some((500, 999)));
+            assert_eq!(parse_byte_range("bytes=2000-", 1000), None);
+        }
+
+        #[test]
+        fn sanitize_attachment_rename_preserves_extension_and_strips_invalid_chars() {
+            assert_eq!(
+                super::super::sanitize_attachment_rename("Daily 01", "Recording-123.mp4").unwrap(),
+                "Daily 01.mp4"
+            );
+            assert_eq!(
+                super::super::sanitize_attachment_rename("aula:1/2*.webm", "old.mp4").unwrap(),
+                "aula12.webm"
+            );
+            assert!(super::super::sanitize_attachment_rename("   ///  ", "old.mp4").is_err());
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() >= 3 && args[1] == "--cleanup-old" {
@@ -3464,6 +4253,9 @@ fn main() {
     refresh_autostart_path_if_needed();
 
     tauri::Builder::default()
+        .register_uri_scheme_protocol("todomedia", |ctx, request| {
+            local_media_protocol::handle_request(ctx.app_handle(), request)
+        })
         .setup(|app| {
             let conn = init_db(app.handle()).map_err(|e| {
                 eprintln!("Failed to initialize TODOCompanion database: {e}");
@@ -3501,6 +4293,9 @@ fn main() {
             state_save,
             attachment_save_from_path,
             attachment_save_from_bytes,
+            attachment_list_dir,
+            attachment_rename,
+            attachment_pick_file,
             attachment_delete,
             attachment_open,
             attachment_open_folder,

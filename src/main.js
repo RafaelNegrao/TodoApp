@@ -79,6 +79,7 @@ const icons = {
   paperclip: `<svg class="icon" viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`,
   file: `<svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`,
   image: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>`,
+  video: `<svg class="icon" viewBox="0 0 24 24"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="m16 10 6-3v10l-6-3z"/></svg>`,
   externalLink: `<svg class="icon" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>`,
   info: `<svg class="icon" viewBox="0 0 24 24"><path d="M12 18v-8"/><path d="M12 6h.01"/></svg>`,
   grip: `<svg class="card-drag-icon" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="5" cy="19" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="19" r="1.6" fill="currentColor" stroke="none"/></svg>`,
@@ -97,6 +98,7 @@ const icons = {
   table: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>`,
   formatClear: `<svg class="icon" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m13.3 9 5.5 5.5"/></svg>`,
   micAi: `<svg class="icon" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4M8 22h8"/></svg>`,
+  moreHorizontal: `<svg class="icon" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>`,
   menu: `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`
 };
 
@@ -167,6 +169,7 @@ const canvasCancelButton = document.querySelector("#canvasCancelButton");
 const canvasCancelIcon = document.querySelector("#canvasCancelIcon");
 const newCardForm = document.querySelector("#newCardForm");
 const inlineImageInput = document.querySelector("#inlineImageInput");
+const inlineVideoInput = document.querySelector("#inlineVideoInput");
 const updateImageInput = document.querySelector("#updateImageInput");
 const userCreateForm = document.querySelector("#userCreateForm");
 const userCreateNameInput = document.querySelector("#userCreateNameInput");
@@ -317,6 +320,9 @@ async function init() {
 
   newCardForm.addEventListener("submit", saveNewCard);
   document.getElementById("newTodoTableButton")?.addEventListener("click", saveNewTodoTableCard);
+  document.getElementById("newRecordedVideoButton")?.addEventListener("click", saveNewRecordedVideoCard);
+  document.getElementById("recordedVideoToastInsert")?.addEventListener("click", insertPendingRecordedVideoIntoCard);
+  document.getElementById("recordedVideoToastClose")?.addEventListener("click", hideRecordedVideoToast);
   updateImageInput?.addEventListener("change", handleUpdateImage);
   inlineImageInput?.addEventListener("change", event => {
     const file = event.target.files[0];
@@ -338,6 +344,16 @@ async function init() {
     reader.readAsDataURL(file);
     event.target.value = "";
   });
+  inlineVideoInput?.addEventListener("change", async event => {
+    const file = event.target.files[0];
+    const targetNode = window.inlineVideoNodeTarget;
+    const targetCard = window.inlineVideoCardTarget;
+    window.inlineVideoNodeTarget = null;
+    window.inlineVideoCardTarget = null;
+    event.target.value = "";
+    if (!file || !targetNode) return;
+    await attachVideoFileToCard(targetNode, targetCard, file);
+  });
 
   userCreateForm.addEventListener("submit", saveUserCreatePopup);
   userCreateCancelButton.addEventListener("click", closeUserCreatePopup);
@@ -346,7 +362,8 @@ async function init() {
     if (!userCreateForm.hidden && !userCreateForm.contains(event.target) && !addBoardButton.contains(event.target)) closeUserCreatePopup();
     const tep = document.querySelector("#taskEditPopup");
     if (!tep.hidden && !tep.contains(event.target) && !event.target.closest(".user-task-info")) closeTaskEditPopup();
-    if (!attachmentsPopup.hidden && !attachmentsPopup.contains(event.target) && !canvasAttachButton.contains(event.target)) closeAttachmentsPopup();
+    if (!attachmentsPopup.hidden && !attachmentsPopup.contains(event.target) && !canvasAttachButton.contains(event.target) && !event.target.closest(".attachments-row-menu")) closeAttachmentsPopup();
+    if (!event.target.closest(".attachments-row-menu") && !event.target.closest(".attachments-more-btn")) closeAllAttachmentRowMenus();
     if (!attachmentReferencePopup.hidden && !attachmentReferencePopup.contains(event.target) && !attachmentReferenceState?.editor?.contains(event.target)) {
       closeAttachmentReferencePicker();
     }
@@ -357,6 +374,9 @@ async function init() {
   window.addEventListener("resize", () => {
     applyViewport();
     renderLinks();
+  });
+  window.addEventListener("focus", () => {
+    syncActiveTaskAttachmentsWithDisk();
   });
 
   window.addEventListener("app:link-style-changed", () => {
@@ -1409,9 +1429,62 @@ function updateFormatButtonStates(card) {
   });
 }
 
+function capturePreservedCardVideos(currentBoardId) {
+  const preserved = new Map();
+  if (!currentBoardId || nodesLayer.dataset.boardId !== currentBoardId) {
+    nodesLayer.querySelectorAll(".card-inline-video-wrap video").forEach(vid => {
+      try { vid.pause(); } catch (_) { }
+    });
+    return preserved;
+  }
+
+  nodesLayer.querySelectorAll(".task-card").forEach(cardEl => {
+    const nodeId = cardEl.dataset.id;
+    if (!nodeId) return;
+    cardEl.querySelectorAll(".card-inline-video-wrap").forEach((wrap, idx) => {
+      const videoEl = wrap.querySelector("video");
+      const mediaRef = wrap.dataset.videoSrc || "";
+      if (!videoEl || !mediaRef) return;
+      const key = `${nodeId}::${mediaRef}::${idx}`;
+      preserved.set(key, {
+        videoEl,
+        wasPlaying: !videoEl.paused && !videoEl.ended,
+        currentTime: videoEl.currentTime
+      });
+    });
+  });
+  return preserved;
+}
+
+function restorePreservedCardVideos(card, nodeId, preservedVideos) {
+  const toResume = [];
+  card.querySelectorAll(".card-inline-video-wrap").forEach((wrap, idx) => {
+    const placeholder = wrap.querySelector("video");
+    const mediaRef = wrap.dataset.videoSrc || "";
+    if (!placeholder || !mediaRef) return;
+
+    const key = `${nodeId}::${mediaRef}::${idx}`;
+    const entry = preservedVideos.get(key);
+    if (entry) {
+      preservedVideos.delete(key);
+      placeholder.replaceWith(entry.videoEl);
+      if (entry.wasPlaying) {
+        toResume.push(entry);
+      }
+    } else {
+      placeholder.muted = false;
+      placeholder.volume = 1.0;
+    }
+  });
+  return toResume;
+}
+
 function renderNodes() {
   const board = activeBoard();
+  const preservedVideos = capturePreservedCardVideos(board?.id || "");
+  const videosToResume = [];
   nodesLayer.innerHTML = "";
+  nodesLayer.dataset.boardId = board?.id || "";
   if (!board) return;
 
   board.nodes.forEach(node => {
@@ -1519,6 +1592,7 @@ function renderNodes() {
             <button class="card-format-btn" type="button" data-command="insertTable" title="Insert Table (Excel)">${icons.table}</button>
             <div class="card-format-bar-sep"></div>
             <button class="card-format-btn" type="button" data-command="insertImageInline" title="Insert Image">${icons.image}</button>
+            <button class="card-format-btn" type="button" data-command="insertVideoInline" title="Inserir vídeo">${icons.video}</button>
             <button class="card-format-btn" type="button" data-command="removeFormat" title="Clear Formatting">${icons.formatClear}</button>
           </div>
         `}
@@ -1545,7 +1619,7 @@ function renderNodes() {
     });
 
     card.addEventListener("dblclick", event => {
-      if (event.target.closest("input, textarea, button, .resize-handle, .port")) {
+      if (event.target.closest("input, textarea, button, video, .card-inline-video-wrap, .resize-handle, .port")) {
         return;
       }
       focusCardOnNode(node.id);
@@ -1641,7 +1715,7 @@ function renderNodes() {
 
     if (bodyEditor) {
       bodyEditor.addEventListener("pointerdown", event => {
-        if (event.target.closest(".card-todo-btn, .card-todo-wrap, .card-inline-img-del, .card-table-wrap")) {
+        if (event.target.closest(".card-todo-btn, .card-todo-wrap, .card-inline-img-del, .card-inline-video-wrap, .card-inline-video-del, .card-table-wrap")) {
           event.stopPropagation();
         }
       });
@@ -1683,6 +1757,27 @@ function renderNodes() {
           const imgWrap = imgDelBtn.closest(".card-inline-img-wrap");
           if (imgWrap) {
             imgWrap.remove();
+            setNodeContent(node, serializeEditableContent(bodyEditor));
+            saveState();
+            renderLinks();
+            setTimeout(() => scheduleNodeHeightSync(node.id, card), 50);
+          }
+          return;
+        }
+
+        const videoDelBtn = event.target.closest(".card-inline-video-del");
+        if (videoDelBtn) {
+          event.preventDefault();
+          event.stopPropagation();
+          const videoWrap = videoDelBtn.closest(".card-inline-video-wrap");
+          if (videoWrap) {
+            const vid = videoWrap.querySelector("video");
+            if (vid) {
+              vid.pause();
+              vid.removeAttribute("src");
+              vid.load();
+            }
+            videoWrap.remove();
             setNodeContent(node, serializeEditableContent(bodyEditor));
             saveState();
             renderLinks();
@@ -1864,9 +1959,11 @@ function renderNodes() {
         const editor = card.querySelector(".card-body");
         if (editor) {
           if (command === "insertImageInline") {
-            window.inlineImageEditorTarget = editor;
-            window.inlineImageNodeTarget = node;
-            document.getElementById('inlineImageInput').click();
+            pickAndInsertImageIntoCard(node, editor, card);
+            return;
+          }
+          if (command === "insertVideoInline") {
+            pickAndInsertVideoIntoCard(node, card);
             return;
           }
           if (command === "insertTable") {
@@ -1954,7 +2051,27 @@ function renderNodes() {
       });
     }
 
+    const resumedForCard = restorePreservedCardVideos(card, node.id, preservedVideos);
+    if (resumedForCard.length) {
+      videosToResume.push(...resumedForCard);
+    }
+
     nodesLayer.appendChild(card);
+  });
+
+  // Retoma a reproducao dos videos preservados sem reiniciar nem perder o ponto atual
+  videosToResume.forEach(({ videoEl, currentTime }) => {
+    if (Number.isFinite(currentTime) && Math.abs(videoEl.currentTime - currentTime) > 0.25) {
+      try { videoEl.currentTime = currentTime; } catch (_) { }
+    }
+    if (videoEl.paused) {
+      videoEl.play().catch(() => { });
+    }
+  });
+
+  // Pausa qualquer video que nao existe mais no board (ex: card removido)
+  preservedVideos.forEach(({ videoEl }) => {
+    try { videoEl.pause(); } catch (_) { }
   });
 
   // Segunda passada: com todos os cards no DOM, ler offsetHeight de uma vez
@@ -3714,6 +3831,45 @@ function saveNewTodoTableCard(event) {
   });
 }
 
+async function saveNewRecordedVideoCard(event) {
+  event.preventDefault();
+  const savedPos = newCardPosition ? { ...newCardPosition } : null;
+  closeNewCardModal();
+
+  const user = activeUser();
+  const task = activeMainTask();
+  if (!user || !task) return;
+
+  if (invoke) {
+    try {
+      const subDir = `task${task.number}/anexos`;
+      const pickedPath = await invoke("attachment_pick_file", {
+        userId: user.id,
+        subDir,
+        filterKind: "video"
+      });
+      if (!pickedPath) return;
+      const info = await invoke("attachment_save_from_path", {
+        userId: user.id,
+        subDir,
+        sourcePath: pickedPath
+      });
+      pushAttachment(task, info, inferMimeFromFileName(info.original_name) || "video/mp4");
+      newCardPosition = savedPos;
+      const id = createCanvasCardAtPopup(`![video](${user.id}/${info.file})\n`, 360, 288);
+      if (id) {
+        setTimeout(() => {
+          const cardEl = nodesLayer.querySelector(`.task-card[data-id="${id}"]`);
+          if (cardEl) scheduleNodeHeightSync(id, cardEl);
+        }, 120);
+      }
+      return;
+    } catch (error) {
+      console.warn("Falha ao criar card com vídeo gravado", error);
+    }
+  }
+}
+
 // Dimensiona um card de imagem a partir do tamanho natural do arquivo, limitando
 // a largura e arredondando para a grade — assim o card ja nasce alinhado, como
 // qualquer outro, em vez de comecar num tamanho quebrado.
@@ -4663,8 +4819,209 @@ function makeId(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+const VIDEO_FILE_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "m4v", "ogg", "ogv", "avi"]);
+
+function isVideoFileName(nameOrPath) {
+  const ext = String(nameOrPath || "").split(".").pop()?.toLowerCase() || "";
+  return VIDEO_FILE_EXTENSIONS.has(ext);
+}
+
+function isVideoAttachment(att) {
+  if (!att) return false;
+  if (String(att.type || "").toLowerCase().startsWith("video/")) return true;
+  return isVideoFileName(att.name || att.file);
+}
+
+function buildLocalMediaUrl(mediaRef) {
+  const raw = String(mediaRef || "").trim();
+  if (!raw) return "";
+  if (/^(https?:|blob:|data:|todomedia:)/i.test(raw)) {
+    return raw;
+  }
+  const encodedPath = raw
+    .replaceAll("\\", "/")
+    .split("/")
+    .filter(Boolean)
+    .map(segment => encodeURIComponent(segment))
+    .join("/");
+  const isWindows = typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent || "");
+  return isWindows
+    ? `http://todomedia.localhost/${encodedPath}`
+    : `todomedia://localhost/${encodedPath}`;
+}
+
+function insertVideoTokenIntoNode(node, mediaRef, cardEl = null) {
+  if (!node || !mediaRef) return;
+  const currentContent = getNodeContent(node) || "";
+  const separator = currentContent && !currentContent.endsWith("\n") ? "\n" : "";
+  setNodeContent(node, `${currentContent}${separator}![video](${mediaRef})\n`);
+  if ((node.w || 288) < 336) {
+    node.w = 336;
+  }
+  if ((node.h || 144) < 240) {
+    node.h = 240;
+  }
+  saveState();
+  renderNodes();
+  renderLinks();
+  setTimeout(() => {
+    const resolvedCard = cardEl?.isConnected
+      ? cardEl
+      : nodesLayer.querySelector(`.task-card[data-id="${node.id}"]`);
+    if (resolvedCard) {
+      scheduleNodeHeightSync(node.id, resolvedCard);
+    }
+  }, 120);
+}
+
+async function attachVideoFileToCard(node, cardEl, file) {
+  if (!node || !file) return;
+  const user = activeUser();
+  const task = activeMainTask();
+  if (invoke && user && task) {
+    try {
+      const buffer = await file.arrayBuffer();
+      const bytes = Array.from(new Uint8Array(buffer));
+      const subDir = `task${task.number}/anexos`;
+      const info = await invoke("attachment_save_from_bytes", {
+        userId: user.id,
+        subDir,
+        fileName: file.name || "video.mp4",
+        bytes
+      });
+      pushAttachment(task, info, file.type || "video/mp4");
+      insertVideoTokenIntoNode(node, `${user.id}/${info.file}`, cardEl);
+      return;
+    } catch (error) {
+      console.warn("Falha ao salvar vídeo no card", error);
+    }
+  }
+  const objectUrl = URL.createObjectURL(file);
+  insertVideoTokenIntoNode(node, objectUrl, cardEl);
+}
+
+async function attachVideoPathToCard(node, cardEl, sourcePath) {
+  if (!node || !sourcePath || !invoke) return;
+  const user = activeUser();
+  const task = activeMainTask();
+  if (!user || !task) return;
+  try {
+    const subDir = `task${task.number}/anexos`;
+    const info = await invoke("attachment_save_from_path", {
+      userId: user.id,
+      subDir,
+      sourcePath
+    });
+    pushAttachment(task, info, "video/mp4");
+    insertVideoTokenIntoNode(node, `${user.id}/${info.file}`, cardEl);
+  } catch (error) {
+    console.warn("Falha ao anexar vídeo no card", error);
+  }
+}
+
+async function pickAndInsertVideoIntoCard(node, cardEl) {
+  if (!node) return;
+  const user = activeUser();
+  const task = activeMainTask();
+  if (invoke && user && task) {
+    try {
+      const subDir = `task${task.number}/anexos`;
+      const pickedPath = await invoke("attachment_pick_file", {
+        userId: user.id,
+        subDir,
+        filterKind: "video"
+      });
+      if (pickedPath) {
+        await attachVideoPathToCard(node, cardEl, pickedPath);
+      }
+      return;
+    } catch (error) {
+      console.warn("Falha ao abrir seletor nativo de vídeo", error);
+    }
+  }
+  window.inlineVideoNodeTarget = node;
+  window.inlineVideoCardTarget = cardEl;
+  document.getElementById("inlineVideoInput")?.click();
+}
+
+async function pickAndInsertImageIntoCard(node, editor, cardEl) {
+  if (!node || !editor) return;
+  const user = activeUser();
+  const task = activeMainTask();
+  if (invoke && user && task) {
+    try {
+      const subDir = `task${task.number}/anexos`;
+      const pickedPath = await invoke("attachment_pick_file", {
+        userId: user.id,
+        subDir,
+        filterKind: "image"
+      });
+      if (!pickedPath) return;
+      const bytes = await invoke("read_file_bytes", { path: pickedPath });
+      if (!bytes || !bytes.length) return;
+      const ext = pickedPath.split(".").pop()?.toLowerCase() || "png";
+      let mimeType = "image/png";
+      if (ext === "jpg" || ext === "jpeg") mimeType = "image/jpeg";
+      else if (ext === "gif") mimeType = "image/gif";
+      else if (ext === "webp") mimeType = "image/webp";
+      else if (ext === "svg") mimeType = "image/svg+xml";
+      else if (ext === "bmp") mimeType = "image/bmp";
+
+      let binary = "";
+      const CHUNK_SIZE = 0x8000;
+      for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+        binary += String.fromCharCode.apply(null, bytes.slice(i, i + CHUNK_SIZE));
+      }
+      const dataUrl = `data:${mimeType};base64,${window.btoa(binary)}`;
+      const currentContent = getNodeContent(node) || "";
+      const separator = currentContent && !currentContent.endsWith("\n") ? "\n" : "";
+      setNodeContent(node, `${currentContent}${separator}![image](${dataUrl})\n`);
+      saveState();
+      renderNodes();
+      renderLinks();
+      setTimeout(() => {
+        const resolvedCard = cardEl?.isConnected
+          ? cardEl
+          : nodesLayer.querySelector(`.task-card[data-id="${node.id}"]`);
+        if (resolvedCard) scheduleNodeHeightSync(node.id, resolvedCard);
+      }, 60);
+      return;
+    } catch (error) {
+      console.warn("Falha ao abrir seletor nativo de imagem", error);
+    }
+  }
+  window.inlineImageEditorTarget = editor;
+  window.inlineImageNodeTarget = node;
+  document.getElementById("inlineImageInput")?.click();
+}
+
+function embedVideoAttachmentIntoBoard(att) {
+  const user = activeUser();
+  const board = activeBoard();
+  if (!user || !board || !att?.file) return;
+  const mediaRef = `${user.id}/${att.file}`;
+
+  const selected = selectedNodeId
+    ? board.nodes.find(n => n.id === selectedNodeId && !n.isRoot && n.type !== "image")
+    : null;
+
+  closeAttachmentsPopup();
+  if (selected) {
+    insertVideoTokenIntoNode(selected, mediaRef);
+    return;
+  }
+
+  const id = createCanvasCardAtPopup(`![video](${mediaRef})\n`, 360, 288);
+  if (id) {
+    setTimeout(() => {
+      const cardEl = nodesLayer.querySelector(`.task-card[data-id="${id}"]`);
+      if (cardEl) scheduleNodeHeightSync(id, cardEl);
+    }, 120);
+  }
+}
+
 const URL_PATTERN = /(?:https?:\/\/|www\.)[^\s<>"]+/g;
-const BODY_TOKEN_PATTERN = /\[\[table:([A-Za-z0-9_-]+)\]\]|!\[image\]\(([^)]+)\)|@\[([^\]\r\n]+)\]\(attachment:([^)]+)\)|\[([ xX])\] |(?:https?:\/\/|www\.)(?:(?!@\[)[^\s<>"])+/g;
+const BODY_TOKEN_PATTERN = /\[\[table:([A-Za-z0-9_-]+)\]\]|!\[image\]\(([^)]+)\)|@\[([^\]\r\n]+)\]\(attachment:([^)]+)\)|\[([ xX])\] |!\[video\]\(([^)]+)\)|(?:https?:\/\/|www\.)(?:(?!@\[)[^\s<>"])+/g;
 
 function extractUrl(text) {
   const match = String(text || "").match(URL_PATTERN);
@@ -4701,6 +5058,10 @@ function renderBodyHtml(text) {
     } else if (match[5] !== undefined) {
       const isChecked = match[5].toLowerCase() === "x";
       html += `<span class="card-todo-wrap" contenteditable="false" data-checked="${isChecked}"><button type="button" class="card-todo-btn${isChecked ? " checked" : ""}" role="checkbox" aria-checked="${isChecked}">${isChecked ? icons.check : ""}</button></span> `;
+    } else if (match[6] !== undefined) {
+      const mediaRef = match[6];
+      const videoUrl = buildLocalMediaUrl(mediaRef);
+      html += `<span class="card-inline-video-wrap" contenteditable="false" data-video-src="${escapeAttr(mediaRef)}"><video controls playsinline preload="metadata" src="${escapeAttr(videoUrl)}"></video><button type="button" class="card-inline-video-del" title="Remover vídeo" aria-label="Remover vídeo">${icons.close}</button></span>`;
     } else {
       const url = match[0];
       html += `<a class="card-body-link" href="${escapeAttr(toAbsoluteUrl(url))}">${escapeHtml(url)}</a>`;
@@ -4751,6 +5112,9 @@ function serializeEditableContent(el) {
       } else if (node.matches?.(".card-inline-img-wrap")) {
         const img = node.querySelector("img");
         if (img) result += `![image](${img.getAttribute("src")})`;
+      } else if (node.matches?.(".card-inline-video-wrap")) {
+        const videoRef = node.dataset.videoSrc || node.querySelector("video")?.getAttribute("src") || "";
+        if (videoRef) result += `![video](${videoRef})`;
       } else if (node.matches?.(".card-attachment-link")) {
         result += node.dataset.attachmentToken || "";
       } else if (node.matches?.(".card-todo-wrap") || node.matches?.(".card-todo-btn")) {
@@ -5779,6 +6143,19 @@ async function attachFromPath(sourcePath) {
 
 function pushAttachment(task, info, type = "") {
   task.attachments = task.attachments || [];
+  const existing = task.attachments.find(a => a.file === info.file);
+  if (existing) {
+    existing.name = info.original_name || existing.name;
+    existing.size = info.size ?? existing.size;
+    if (type && !existing.type) existing.type = type;
+    saveState();
+    renderUserTasks();
+    updateAttachButtonState();
+    if (!attachmentsPopup.hidden) {
+      renderAttachmentsPopup();
+    }
+    return existing;
+  }
   const attachment = {
     id: makeId("att"),
     file: info.file,
@@ -5819,7 +6196,7 @@ async function handleAttachInputChange(event) {
 // ------------------------------------------------------------------
 const RECORDING_TIMESLICE_MS = 2000;
 const RECORDING_VIDEO_BPS = 800000;
-const RECORDING_AUDIO_BPS = 64000;
+const RECORDING_AUDIO_BPS = 128000;
 
 let recordingState = null;
 let isStartingRecording = false;
@@ -6240,6 +6617,57 @@ function stopScreenRecording() {
   }
 }
 
+let pendingRecordedVideoToast = null;
+let recordedVideoToastTimer = null;
+
+function showRecordedVideoToast(userId, taskId, attachment) {
+  if (!attachment?.file) return;
+  const toast = document.getElementById("recordedVideoToast");
+  const textEl = document.getElementById("recordedVideoToastText");
+  if (!toast) return;
+
+  pendingRecordedVideoToast = { userId, taskId, attachment };
+  if (textEl) {
+    textEl.textContent = "Gravação salva";
+  }
+  toast.hidden = false;
+
+  if (recordedVideoToastTimer) {
+    clearTimeout(recordedVideoToastTimer);
+  }
+  recordedVideoToastTimer = setTimeout(() => {
+    hideRecordedVideoToast();
+  }, 12000);
+}
+
+function hideRecordedVideoToast() {
+  const toast = document.getElementById("recordedVideoToast");
+  if (toast) toast.hidden = true;
+  pendingRecordedVideoToast = null;
+  if (recordedVideoToastTimer) {
+    clearTimeout(recordedVideoToastTimer);
+    recordedVideoToastTimer = null;
+  }
+}
+
+function insertPendingRecordedVideoIntoCard() {
+  const pending = pendingRecordedVideoToast;
+  hideRecordedVideoToast();
+  if (!pending) return;
+
+  const targetUser = state.users.find(u => u.id === pending.userId);
+  const targetTask = targetUser?.tasks?.find(t => t.id === pending.taskId);
+  if (!targetUser || !targetTask) return;
+
+  if (state.activeUserId !== targetUser.id || targetUser.activeTaskId !== targetTask.id) {
+    state.activeUserId = targetUser.id;
+    targetUser.activeTaskId = targetTask.id;
+    saveState();
+    render();
+  }
+  embedVideoAttachmentIntoBoard(pending.attachment);
+}
+
 async function finalizeNativeRecording(recState) {
   if (recState.finalized) return;
   recState.finalized = true;
@@ -6262,7 +6690,10 @@ async function finalizeNativeRecording(recState) {
     return;
   }
 
-  pushAttachment(targetTask, info, recState.mode === "audio" ? "audio/mp4" : "video/mp4");
+  const savedAttachment = pushAttachment(targetTask, info, recState.mode === "audio" ? "audio/mp4" : "video/mp4");
+  if (recState.mode !== "audio" && savedAttachment) {
+    showRecordedVideoToast(targetUser.id, targetTask.id, savedAttachment);
+  }
 }
 
 // Cada pedaco vai para o disco assim que sai do gravador, na ordem.
@@ -6368,7 +6799,10 @@ async function finalizeRecording(recState) {
     return;
   }
 
-  pushAttachment(targetTask, info, recState.mode === "audio" ? "audio/webm" : "video/webm");
+  const savedAttachment = pushAttachment(targetTask, info, recState.mode === "audio" ? "audio/webm" : "video/webm");
+  if (recState.mode !== "audio" && savedAttachment) {
+    showRecordedVideoToast(targetUser.id, targetTask.id, savedAttachment);
+  }
 }
 
 async function mixAudioStreams(streams) {
@@ -6997,8 +7431,13 @@ async function setupFileDrop() {
       const board = activeBoard();
       const node = board.nodes.find(n => n.id === targetCardId);
       if (node) {
+        const cardEl = nodesLayer.querySelector(`.task-card[data-id="${targetCardId}"]`);
         for (const path of paths) {
           try {
+            if (isVideoFileName(path) && node.type !== "image") {
+              await attachVideoPathToCard(node, cardEl, path);
+              continue;
+            }
             const bytes = await invoke("read_file_bytes", { path });
             if (bytes && bytes.length) {
               const ext = path.split('.').pop().toLowerCase();
@@ -7059,13 +7498,365 @@ function updateAttachButtonState() {
   canvasAttachButton.classList.toggle("has-attachments", activeTaskHasAttachments());
 }
 
-function handleAttachButtonClick() {
-  if (activeTaskHasAttachments()) {
-    if (attachmentsPopup.hidden) {
-      openAttachmentsPopup();
-    } else {
-      closeAttachmentsPopup();
+function inferMimeFromFileName(name) {
+  const ext = String(name || "").split(".").pop()?.toLowerCase() || "";
+  const map = {
+    mp4: "video/mp4",
+    m4v: "video/mp4",
+    webm: "video/webm",
+    mov: "video/quicktime",
+    mkv: "video/x-matroska",
+    avi: "video/x-msvideo",
+    ogv: "video/ogg",
+    m4a: "audio/mp4",
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+    aac: "audio/aac",
+    flac: "audio/flac",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+    pdf: "application/pdf"
+  };
+  return map[ext] || "";
+}
+
+function updateCardReferencesForRenamedAttachment(task, userId, oldFile, newFile, attId, newName) {
+  if (!task?.nodes?.length) return false;
+  const oldMediaRef = `${userId}/${oldFile}`;
+  const newMediaRef = `${userId}/${newFile}`;
+  const safeLabel = String(newName || "anexo")
+    .replaceAll("]", ")")
+    .replaceAll("\r", " ")
+    .replaceAll("\n", " ")
+    .trim() || "anexo";
+  const escapedId = String(attId || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const chipPattern = escapedId
+    ? new RegExp(`@\\[[^\\]\\r\\n]+\\]\\(attachment:${escapedId}\\)`, "g")
+    : null;
+
+  let nodesChanged = false;
+  task.nodes.forEach(node => {
+    const content = getNodeContent(node);
+    if (!content) return;
+    let updated = content;
+    if (oldFile && newFile && oldFile !== newFile) {
+      updated = updated.replaceAll(`![video](${oldMediaRef})`, `![video](${newMediaRef})`);
     }
+    if (chipPattern) {
+      updated = updated.replace(chipPattern, `@[${safeLabel}](attachment:${attId})`);
+    }
+    if (updated !== content) {
+      setNodeContent(node, updated);
+      nodesChanged = true;
+    }
+  });
+  return nodesChanged;
+}
+
+let isSyncingAttachments = false;
+
+async function syncActiveTaskAttachmentsWithDisk() {
+  if (!invoke || isSyncingAttachments) return false;
+  const user = activeUser();
+  const task = activeMainTask();
+  if (!user || !task) return false;
+
+  isSyncingAttachments = true;
+  try {
+    const subDir = `task${task.number}/anexos`;
+    const diskEntries = await invoke("attachment_list_dir", {
+      userId: user.id,
+      subDir
+    });
+    if (!Array.isArray(diskEntries)) return false;
+
+    task.attachments = task.attachments || [];
+    const diskByFile = new Map(diskEntries.map(item => [item.file, item]));
+    const matchedDiskFiles = new Set();
+    const missingAttachments = [];
+    let stateChanged = false;
+    let nodesChanged = false;
+
+    for (const att of task.attachments) {
+      const diskItem = diskByFile.get(att.file);
+      if (diskItem) {
+        matchedDiskFiles.add(diskItem.file);
+        if (att.name !== diskItem.original_name) {
+          att.name = diskItem.original_name;
+          if (updateCardReferencesForRenamedAttachment(task, user.id, att.file, att.file, att.id, att.name)) {
+            nodesChanged = true;
+          }
+          stateChanged = true;
+        }
+        if (att.size !== diskItem.size) {
+          att.size = diskItem.size;
+          stateChanged = true;
+        }
+        if (!att.type) {
+          const inferred = inferMimeFromFileName(diskItem.original_name);
+          if (inferred) {
+            att.type = inferred;
+            stateChanged = true;
+          }
+        }
+      } else {
+        missingAttachments.push(att);
+      }
+    }
+
+    const unmatchedDisk = diskEntries.filter(item => !matchedDiskFiles.has(item.file));
+
+    // Se um arquivo foi renomeado manualmente na pasta (mesmo tamanho, correspondencia 1-para-1), preserva o anexo e atualiza referencias nos cards
+    const adoptedDiskFiles = new Set();
+    const removedAttachmentIds = new Set();
+    for (const missing of missingAttachments) {
+      const sameSizeCandidates = unmatchedDisk.filter(
+        d => !adoptedDiskFiles.has(d.file) && d.size === missing.size
+      );
+      if (sameSizeCandidates.length === 1) {
+        const renamedDisk = sameSizeCandidates[0];
+        const oldFile = missing.file;
+        missing.file = renamedDisk.file;
+        missing.name = renamedDisk.original_name;
+        missing.size = renamedDisk.size;
+        missing.type = inferMimeFromFileName(renamedDisk.original_name) || missing.type;
+        adoptedDiskFiles.add(renamedDisk.file);
+        if (updateCardReferencesForRenamedAttachment(task, user.id, oldFile, missing.file, missing.id, missing.name)) {
+          nodesChanged = true;
+        }
+        stateChanged = true;
+      } else {
+        removedAttachmentIds.add(missing.id);
+        stateChanged = true;
+      }
+    }
+
+    if (removedAttachmentIds.size > 0) {
+      task.attachments = task.attachments.filter(a => !removedAttachmentIds.has(a.id));
+    }
+
+    for (const added of unmatchedDisk) {
+      if (adoptedDiskFiles.has(added.file)) continue;
+      task.attachments.push({
+        id: makeId("att"),
+        file: added.file,
+        name: added.original_name,
+        size: added.size,
+        type: inferMimeFromFileName(added.original_name),
+        addedAt: Date.now()
+      });
+      stateChanged = true;
+    }
+
+    if (stateChanged) {
+      saveState();
+      renderUserTasks();
+      updateAttachButtonState();
+      if (!attachmentsPopup.hidden) {
+        renderAttachmentsPopup();
+      }
+      if (nodesChanged) {
+        renderNodes();
+        renderLinks();
+      }
+    }
+    return stateChanged;
+  } catch (error) {
+    console.warn("Falha ao sincronizar anexos com a pasta", error);
+    return false;
+  } finally {
+    isSyncingAttachments = false;
+  }
+}
+
+async function renameAttachment(att, rawNewName) {
+  if (!invoke || !att) return false;
+  const user = activeUser();
+  const task = activeMainTask();
+  if (!user || !task) return false;
+  const trimmed = String(rawNewName || "").trim();
+  if (!trimmed || trimmed === att.name) return false;
+
+  try {
+    const oldFile = att.file;
+    const info = await invoke("attachment_rename", {
+      userId: user.id,
+      file: oldFile,
+      newName: trimmed
+    });
+    att.file = info.file;
+    att.name = info.original_name;
+    att.size = info.size;
+    att.type = inferMimeFromFileName(info.original_name) || att.type;
+
+    const nodesChanged = updateCardReferencesForRenamedAttachment(
+      task,
+      user.id,
+      oldFile,
+      att.file,
+      att.id,
+      att.name
+    );
+    saveState();
+    renderUserTasks();
+    renderAttachmentsPopup();
+    if (nodesChanged) {
+      renderNodes();
+      renderLinks();
+    }
+    return true;
+  } catch (error) {
+    console.warn("Falha ao renomear anexo", error);
+    alert(String(error || "Não foi possível renomear o arquivo."));
+    return false;
+  }
+}
+
+let activeAttachmentRowMenu = null;
+let activeAttachmentMenuAnchor = null;
+
+function closeAllAttachmentRowMenus() {
+  if (activeAttachmentRowMenu?.isConnected) {
+    activeAttachmentRowMenu.remove();
+  }
+  activeAttachmentRowMenu = null;
+  activeAttachmentMenuAnchor = null;
+}
+
+function openAttachmentRowMenu(anchorBtn, row, nameEl, att) {
+  if (activeAttachmentMenuAnchor === anchorBtn && activeAttachmentRowMenu?.isConnected) {
+    closeAllAttachmentRowMenus();
+    return;
+  }
+  closeAllAttachmentRowMenus();
+
+  const menu = document.createElement("div");
+  menu.className = "attachments-row-menu";
+  menu.setAttribute("role", "menu");
+
+  if (isVideoAttachment(att)) {
+    const embedItem = document.createElement("button");
+    embedItem.type = "button";
+    embedItem.className = "attachments-row-menu-item";
+    embedItem.innerHTML = `${icons.video}<span>Colocar no card</span>`;
+    embedItem.addEventListener("click", event => {
+      event.stopPropagation();
+      closeAllAttachmentRowMenus();
+      embedVideoAttachmentIntoBoard(att);
+    });
+    menu.appendChild(embedItem);
+  }
+
+  const renameItem = document.createElement("button");
+  renameItem.type = "button";
+  renameItem.className = "attachments-row-menu-item";
+  renameItem.innerHTML = `${icons.edit}<span>Renomear</span>`;
+  renameItem.addEventListener("click", event => {
+    event.stopPropagation();
+    closeAllAttachmentRowMenus();
+    startInlineAttachmentRename(row, nameEl, att);
+  });
+  menu.appendChild(renameItem);
+
+  menu.style.visibility = "hidden";
+  document.body.appendChild(menu);
+
+  const btnRect = anchorBtn.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  const margin = 8;
+
+  let left = btnRect.right - menuRect.width;
+  left = Math.max(margin, Math.min(left, window.innerWidth - menuRect.width - margin));
+
+  const spaceBelow = window.innerHeight - btnRect.bottom - margin;
+  let top = spaceBelow >= menuRect.height + 4
+    ? btnRect.bottom + 4
+    : Math.max(margin, btnRect.top - menuRect.height - 4);
+
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+  menu.style.visibility = "visible";
+
+  activeAttachmentRowMenu = menu;
+  activeAttachmentMenuAnchor = anchorBtn;
+}
+
+function startInlineAttachmentRename(row, nameEl, att) {
+  if (!row || !nameEl || !att) return;
+  closeAllAttachmentRowMenus();
+  const existingInput = row.querySelector(".attachments-rename-input");
+  if (existingInput) {
+    existingInput.focus();
+    return;
+  }
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "attachments-rename-input";
+  input.value = att.name;
+  input.setAttribute("aria-label", "Renomear anexo");
+
+  nameEl.hidden = true;
+  nameEl.parentElement.insertBefore(input, nameEl);
+  input.focus();
+
+  const dotIdx = att.name.lastIndexOf(".");
+  if (dotIdx > 0) {
+    input.setSelectionRange(0, dotIdx);
+  } else {
+    input.select();
+  }
+
+  let finished = false;
+  const cleanup = () => {
+    if (input.isConnected) input.remove();
+    nameEl.hidden = false;
+  };
+  const commit = async () => {
+    if (finished) return;
+    finished = true;
+    const nextName = input.value.trim();
+    cleanup();
+    if (nextName && nextName !== att.name) {
+      await renameAttachment(att, nextName);
+    }
+  };
+  const cancel = () => {
+    if (finished) return;
+    finished = true;
+    cleanup();
+  };
+
+  input.addEventListener("pointerdown", e => e.stopPropagation());
+  input.addEventListener("click", e => e.stopPropagation());
+  input.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commit();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancel();
+    }
+  });
+  input.addEventListener("blur", () => {
+    commit();
+  });
+}
+
+async function handleAttachButtonClick() {
+  if (!attachmentsPopup.hidden) {
+    closeAttachmentsPopup();
+    return;
+  }
+  await syncActiveTaskAttachmentsWithDisk();
+  if (activeTaskHasAttachments()) {
+    openAttachmentsPopup();
   } else {
     canvasAttachInput.click();
   }
@@ -7076,9 +7867,11 @@ function openAttachmentsPopup() {
   canvasAttachButton?.classList.add("active");
   attachmentsPopup.hidden = false;
   requestAnimationFrame(() => attachmentsPopup.classList.add("visible"));
+  syncActiveTaskAttachmentsWithDisk();
 }
 
 function closeAttachmentsPopup() {
+  closeAllAttachmentRowMenus();
   canvasAttachButton?.classList.remove("active");
   attachmentsPopup.classList.remove("visible");
   attachmentsPopup.hidden = true;
@@ -7241,6 +8034,7 @@ async function transcribeAttachmentToCard(att) {
 }
 
 function renderAttachmentsPopup() {
+  closeAllAttachmentRowMenus();
   const task = activeMainTask();
   const items = task?.attachments || [];
   attachmentsList.innerHTML = "";
@@ -7310,7 +8104,19 @@ function renderAttachmentsPopup() {
       deleteAttachment(att);
     });
 
+    const moreBtn = document.createElement("button");
+    moreBtn.type = "button";
+    moreBtn.className = "attachments-action attachments-more-btn";
+    moreBtn.title = "Mais opções";
+    moreBtn.setAttribute("aria-label", "Mais opções");
+    moreBtn.innerHTML = icons.moreHorizontal;
+    moreBtn.addEventListener("click", event => {
+      event.stopPropagation();
+      openAttachmentRowMenu(moreBtn, row, name, att);
+    });
+
     row.appendChild(openBtn);
+    row.appendChild(moreBtn);
     row.appendChild(delBtn);
     attachmentsList.appendChild(row);
   });
