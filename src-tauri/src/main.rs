@@ -823,7 +823,7 @@ async fn ai_chat_english(
              APP FEATURES & CAPABILITIES (know everything the app has):\n\
              1. Hierarchy: Users -> Main Tasks (status: ongoing|stopped|complete, priority: low|normal|high|urgent, criticality: 0|1|2, startDate, endDate, attachments) -> Canvas Cards & Links.\n\
              2. Card Types:\n\
-                - Action Card (type: \"action\"): rich text (<b>, <i>, <u>, <s>, lists), inline checklists (\"[ ] item\" / \"[x] item\"), inline images, inline video player (\"![video](userId/file)\" for recorded/attached videos), attachment chips (\"@[name](attachment:id)\").\n\
+                - Action Card (type: \"action\"): plain text with '\\n' for line breaks, optional inline checklists (\"[ ] item\" / \"[x] item\"), inline images, inline video player (\"![video](userId/file)\" for recorded/attached videos), attachment chips (\"@[name](attachment:id)\"). NEVER put HTML tags like <br>, <p>, <div>, <strong>, <em>, <span> in card bodies or table cells — always use '\\n' for line breaks and plain text.\n\
                 - Table Card (type: \"table\", hasCheckboxes: false): the table itself IS the card (compact minimal borders, no bottom format bar, auto-fit height, individual input & output connection ports on EVERY ROW, horizontal resize).\n\
                 - Todo List Table Card (type: \"table\", hasCheckboxes: true): same clean table-card style with interactive checkboxes (\"[ ]\" / \"[x]\") in column A + per-row input/output connection ports.\n\
                 - Image Card (type: \"image\"): standalone visual image card with fullscreen preview.\n\

@@ -7283,6 +7283,36 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   color: #f87171;
 }
 
+.ai-step-row[hidden] {
+  display: none;
+}
+
+.ai-step-count-badge {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  background: rgba(var(--hi-rgb), 0.1);
+  color: var(--text-strong);
+}
+
+.ai-action-expand-btn {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 4px;
+  cursor: pointer;
+  transition: color 150ms ease;
+}
+
+.ai-action-expand-btn:hover {
+  color: var(--text-strong);
+}
+
 /* Animacao dos 4 pontinhos (sem zoom/scale — apenas opacidade em onda) */
 .ai-step-dot {
   fill: currentColor;

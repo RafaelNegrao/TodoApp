@@ -5341,8 +5341,76 @@ function escapeHtmlPreservingFormats(value) {
 
 function preserveFormatTags(escaped) {
   return escaped
+    .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
     .replace(/&lt;(b|i|u|s|ul|ol|li)&gt;/gi, (_, tag) => `<${tag.toLowerCase()}>`)
     .replace(/&lt;\/(b|i|u|s|ul|ol|li)&gt;/gi, (_, tag) => `</${tag.toLowerCase()}>`);
+}
+
+function sanitizeAiCardBody(raw) {
+  return String(raw || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6])>/gi, "\n")
+    .replace(/<(p|div|h[1-6]|span)(\s[^>]*)?>/gi, "")
+    .replace(/<\/span>/gi, "")
+    .replace(/<strong(\s[^>]*)?>/gi, "<b>")
+    .replace(/<\/strong>/gi, "</b>")
+    .replace(/<em(\s[^>]*)?>/gi, "<i>")
+    .replace(/<\/em>/gi, "</i>")
+    .replace(/<del(\s[^>]*)?>/gi, "<s>")
+    .replace(/<\/del>/gi, "</s>")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function sanitizeAiTableCell(raw) {
+  return String(raw ?? "")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+}
+
+function shortCardLabel(text, fallback = "Card") {
+  const firstLine = String(text || "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\[\[table:[^\]]+\]\]/g, "")
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .find(Boolean);
+  if (!firstLine) return fallback;
+  return firstLine.length > 42 ? `${firstLine.slice(0, 41)}…` : firstLine;
+}
+
+function buildCompactStepGroups(proposal) {
+  const groups = [];
+  proposal.actions.forEach((act, idx) => {
+    const savedResult = Array.isArray(proposal.results) ? proposal.results[idx] : null;
+    const state = savedResult
+      ? (savedResult.ok ? "done" : "failed")
+      : (proposal.stepStates?.[idx] || "pending");
+    const text = savedResult?.message || describeAiAction(act);
+    const destructive = isDestructiveAction(act);
+    const prev = groups[groups.length - 1];
+    if (
+      proposal.status !== "running" &&
+      prev &&
+      prev.text === text &&
+      prev.state === state &&
+      prev.destructive === destructive
+    ) {
+      prev.count += 1;
+      prev.indices.push(idx);
+    } else {
+      groups.push({
+        act,
+        state,
+        text,
+        destructive,
+        count: 1,
+        indices: [idx]
+      });
+    }
+  });
+  return groups;
 }
 
 function renderAttachmentReferenceHtml(label, attachmentId, rawToken = "") {
@@ -10131,29 +10199,65 @@ function initAiTranslatorPanel() {
 
         const list = document.createElement("ul");
         list.className = "ai-action-list";
-        const stepRows = proposal.actions.map((act, idx) => {
+        const displayGroups = buildCompactStepGroups(proposal);
+        const COLLAPSE_LIMIT = 4;
+        const canCollapse = proposal.status !== "running" && displayGroups.length > COLLAPSE_LIMIT + 1;
+        let isExpanded = Boolean(proposal._expanded);
+
+        const stepRows = new Array(proposal.actions.length);
+        const rowElements = displayGroups.map((grp, gIdx) => {
           const li = document.createElement("li");
-          const savedResult = Array.isArray(proposal.results) ? proposal.results[idx] : null;
-          const initialState = savedResult
-            ? (savedResult.ok ? "done" : "failed")
-            : (proposal.stepStates?.[idx] || "pending");
-          li.className = `ai-step-row state-${initialState}${isDestructiveAction(act) ? " destructive" : ""}`;
-          li.dataset.stepIndex = String(idx);
-          li.style.setProperty("--step-idx", String(idx));
+          li.className = `ai-step-row state-${grp.state}${grp.destructive ? " destructive" : ""}`;
+          li.style.setProperty("--step-idx", String(gIdx));
+          if (canCollapse && !isExpanded && gIdx >= COLLAPSE_LIMIT) {
+            li.hidden = true;
+          }
 
           const iconEl = document.createElement("span");
           iconEl.className = "ai-step-icon";
-          iconEl.innerHTML = renderStepIconSvg(initialState);
+          iconEl.innerHTML = renderStepIconSvg(grp.state);
 
           const textEl = document.createElement("span");
           textEl.className = "ai-step-text";
-          textEl.textContent = savedResult?.message || describeAiAction(act);
+          textEl.textContent = grp.text;
 
           li.append(iconEl, textEl);
+          if (grp.count > 1) {
+            const countBadge = document.createElement("span");
+            countBadge.className = "ai-step-count-badge";
+            countBadge.textContent = `×${grp.count}`;
+            li.appendChild(countBadge);
+          }
+
           list.appendChild(li);
-          return { li, iconEl, textEl, act };
+          grp.indices.forEach(origIdx => {
+            stepRows[origIdx] = { li, iconEl, textEl, act: grp.act };
+          });
+          return li;
         });
         cardEl.appendChild(list);
+
+        if (canCollapse) {
+          const toggleMoreBtn = document.createElement("button");
+          toggleMoreBtn.type = "button";
+          toggleMoreBtn.className = "ai-action-expand-btn";
+          const hiddenCount = displayGroups.length - COLLAPSE_LIMIT;
+          const syncExpandLabel = () => {
+            toggleMoreBtn.textContent = isExpanded
+              ? "Mostrar menos ▴"
+              : `Ver mais ${hiddenCount} ${hiddenCount === 1 ? "etapa" : "etapas"} ▾`;
+          };
+          syncExpandLabel();
+          toggleMoreBtn.addEventListener("click", () => {
+            isExpanded = !isExpanded;
+            proposal._expanded = isExpanded;
+            rowElements.forEach((el, idx) => {
+              if (idx >= COLLAPSE_LIMIT) el.hidden = !isExpanded;
+            });
+            syncExpandLabel();
+          });
+          cardEl.appendChild(toggleMoreBtn);
+        }
 
         if (proposal.status === "pending") {
           const foot = document.createElement("div");
@@ -11004,7 +11108,9 @@ async function runSingleAiAppAction(action, ctx) {
       let tableData;
       if (Array.isArray(action.rows) && action.rows.length > 0) {
         const preparedRows = action.rows.map(row => {
-          const cells = Array.isArray(row) ? row.map(c => String(c ?? "")) : [String(row ?? "")];
+          const cells = Array.isArray(row)
+            ? row.map(c => sanitizeAiTableCell(c))
+            : [sanitizeAiTableCell(row)];
           if (hasCheckboxes) {
             const first = String(cells[0] || "").trim().toLowerCase();
             if (first !== "[ ]" && first !== "[x]" && first !== "true" && first !== "false") {
@@ -11084,12 +11190,15 @@ async function runSingleAiAppAction(action, ctx) {
         : (activeUser() && activeBoard() ? { user: activeUser(), task: activeBoard() } : null);
       const board = target?.task;
       if (!board) throw new Error("Nenhuma task encontrada para criar o card");
-      let bodyText = String(action.body || "");
+      let bodyText = sanitizeAiCardBody(action.body || "");
       if (Array.isArray(action.tableRows) && action.tableRows.length > 0) {
+        const cleanedRows = action.tableRows.map(row =>
+          Array.isArray(row) ? row.map(c => sanitizeAiTableCell(c)) : [sanitizeAiTableCell(row)]
+        );
         const token = serializeTableToken(
           action.hasCheckboxes
-            ? { rows: action.tableRows, hasCheckboxes: true }
-            : { rows: action.tableRows }
+            ? { rows: cleanedRows, hasCheckboxes: true }
+            : { rows: cleanedRows }
         );
         bodyText = bodyText ? `${bodyText}\n${token}` : token;
       }
@@ -11128,7 +11237,8 @@ async function runSingleAiAppAction(action, ctx) {
       render();
       const cardEl = nodesLayer.querySelector(`[data-id="${id}"]`);
       if (cardEl) scheduleNodeHeightSync(id, cardEl);
-      return { createdCardId: id, message: `Card criado em "${board.title}"` };
+      const label = shortCardLabel(bodyText, "Card");
+      return { createdCardId: id, message: `Card "${label}" criado` };
     }
 
     case "update_card": {
@@ -11137,10 +11247,11 @@ async function runSingleAiAppAction(action, ctx) {
       if (!loc) throw new Error("Card não encontrado");
       const { node, task } = loc;
       if (action.body !== undefined) {
-        setNodeContent(node, String(action.body));
+        setNodeContent(node, sanitizeAiCardBody(action.body));
       } else if (action.appendBody) {
         const cur = String(getNodeContent(node) || "").trim();
-        setNodeContent(node, cur ? `${cur}\n${action.appendBody}` : String(action.appendBody));
+        const extra = sanitizeAiCardBody(action.appendBody);
+        setNodeContent(node, cur ? `${cur}\n${extra}` : extra);
       }
       if (action.status) node.status = normalizeStatus(action.status);
       if (action.criticality !== undefined) node.criticality = clamp(Number(action.criticality), 0, 2);
@@ -11153,7 +11264,8 @@ async function runSingleAiAppAction(action, ctx) {
       render();
       const updatedEl = nodesLayer.querySelector(`[data-id="${node.id}"]`);
       if (updatedEl) scheduleNodeHeightSync(node.id, updatedEl);
-      return { message: `Card atualizado em "${task.title}"` };
+      const label = shortCardLabel(getNodeContent(node), "Card");
+      return { message: `Card "${label}" atualizado` };
     }
 
     case "delete_card": {
