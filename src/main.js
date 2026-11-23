@@ -1484,23 +1484,22 @@ function renderNodes() {
                 </div>
                 <input class="crit-range" type="range" min="0" max="2" step="1" value="${node.criticality ?? 0}" title="Criticality" />
               </div>
-              <button class="card-ai-btn card-transcribe-btn${transcribeState?.targetNodeId === node.id ? " recording" : ""}" type="button" aria-label="Transcribe audio with AI" title="Transcribe audio with AI">${icons.micAi}</button>
               <button class="card-action" type="button" aria-label="Remove" title="Remove">${icons.close}</button>
             </div>
           </div>
         `}
         <div class="card-body-wrap">
           ${rootCard
-          ? `<div class="root-card-header">
+        ? `<div class="root-card-header">
                  ${recordingState && recordingState.taskId === board.id ? `<span class="card-recording-dot" title="Gravando agora" aria-label="Gravando agora"></span>` : ""}
                  <strong class="root-card-title" contenteditable="true" spellcheck="false" role="textbox" aria-label="Board Title">${escapeHtml(board.title)}</strong>
                  <button class="root-card-edit" type="button" aria-label="Edit" title="Edit">${icons.edit}</button>
                </div>`
-          : node.type === "image"
-            ? node.imageUrl
-              ? `<div class="card-body image-card-body" role="img" aria-label="Attached image"><img src="${node.imageUrl}" alt="Card image" draggable="false" /></div>`
-              : `<div class="card-body image-card-body empty-image-card" role="button" aria-label="Add image" title="Add image" onclick="document.getElementById('updateImageInput').click(); window.nodeToUpdateImage = '${node.id}';">${icons.image}</div>`
-            : `<div class="card-body" contenteditable="true" role="textbox" aria-label="Card content">${renderBodyHtml(getNodeContent(node))}</div>`}
+        : node.type === "image"
+          ? node.imageUrl
+            ? `<div class="card-body image-card-body" role="img" aria-label="Attached image"><img src="${node.imageUrl}" alt="Card image" draggable="false" /></div>`
+            : `<div class="card-body image-card-body empty-image-card" role="button" aria-label="Add image" title="Add image" onclick="document.getElementById('updateImageInput').click(); window.nodeToUpdateImage = '${node.id}';">${icons.image}</div>`
+          : `<div class="card-body" contenteditable="true" role="textbox" aria-label="Card content">${renderBodyHtml(getNodeContent(node))}</div>`}
         </div>
         ${rootCard ? "" : node.type === "image" && node.imageUrl ? `
           <div class="image-card-bottom" contenteditable="false">
@@ -2216,7 +2215,7 @@ function getLinkMidpoint(pathEl, fallbackStart, fallbackEnd) {
       const pt = pathEl.getPointAtLength(totalLength * 0.5);
       return { x: pt.x, y: pt.y };
     }
-  } catch (_) {}
+  } catch (_) { }
   return {
     x: (fallbackStart.x + fallbackEnd.x) * 0.5,
     y: (fallbackStart.y + fallbackEnd.y) * 0.5
@@ -3446,6 +3445,10 @@ function stepZoomAnim() {
 }
 
 function handleZoom(event) {
+  const cardBody = event.target?.closest?.(".card-body");
+  if (cardBody && !event.ctrlKey && cardBody.scrollHeight > cardBody.clientHeight + 2) {
+    return;
+  }
   const view = activeView();
   if (!view) return;
   event.preventDefault();
@@ -6392,15 +6395,15 @@ function pickRecorderMimeType(hasAudio = true) {
   if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return "";
   const candidates = hasAudio
     ? [
-        "video/webm;codecs=vp8,opus",
-        "video/webm;codecs=vp9,opus",
-        "video/webm"
-      ]
+      "video/webm;codecs=vp8,opus",
+      "video/webm;codecs=vp9,opus",
+      "video/webm"
+    ]
     : [
-        "video/webm;codecs=vp8",
-        "video/webm;codecs=vp9",
-        "video/webm"
-      ];
+      "video/webm;codecs=vp8",
+      "video/webm;codecs=vp9",
+      "video/webm"
+    ];
   return candidates.find(type => MediaRecorder.isTypeSupported(type)) || "";
 }
 
@@ -6679,7 +6682,7 @@ function flushLiveAudioSegment(tState, isFinalStop = false) {
   if (prevRecorder && prevRecorder.state !== "inactive") {
     try {
       prevRecorder.stop();
-    } catch (_) {}
+    } catch (_) { }
   }
 }
 
@@ -7027,6 +7030,162 @@ function closeAttachmentsPopup() {
   attachmentsPopup.hidden = true;
 }
 
+const transcribingAttachments = new Map();
+const cancelledTranscribeRuns = new Set();
+let transcribeRunSeq = 0;
+
+let transcribeIndicatorBound = false;
+
+function stopAllActiveTranscriptions() {
+  transcribingAttachments.forEach(entry => {
+    cancelledTranscribeRuns.add(entry.runId);
+  });
+  transcribingAttachments.clear();
+  updateTranscribeIndicatorUi();
+  renderAttachmentsPopup();
+}
+
+function updateTranscribeIndicatorUi() {
+  const indicator = document.getElementById("transcribeIndicator");
+  const textEl = document.getElementById("transcribeIndicatorText");
+  const targetBtn = document.getElementById("transcribeIndicatorTarget");
+  const stopBtn = document.getElementById("transcribeIndicatorStop");
+  const activeCount = transcribingAttachments.size;
+  if (!indicator) return;
+
+  if (!transcribeIndicatorBound) {
+    transcribeIndicatorBound = true;
+    targetBtn?.addEventListener("click", () => {
+      const first = transcribingAttachments.values().next().value;
+      if (!first) return;
+      const u = state.users.find(item => item.id === first.userId);
+      const t = u?.tasks.find(item => item.id === first.taskId);
+      if (!u || !t) return;
+      state.activeUserId = u.id;
+      u.activeTaskId = t.id;
+      saveState();
+      render();
+    });
+    stopBtn?.addEventListener("click", () => {
+      stopAllActiveTranscriptions();
+    });
+  }
+
+  if (activeCount === 0) {
+    indicator.hidden = true;
+    return;
+  }
+
+  const first = transcribingAttachments.values().next().value;
+  if (textEl) {
+    textEl.textContent =
+      activeCount > 1
+        ? `Transcrevendo (${activeCount})...`
+        : "Transcrevendo...";
+  }
+  if (targetBtn && first) {
+    targetBtn.textContent = `${first.userName} › ${first.taskTitle}`;
+    targetBtn.hidden = false;
+  }
+  indicator.classList.toggle("below-recording", Boolean(recordingState));
+  indicator.hidden = false;
+}
+
+function isAudioOrVideoAttachment(att) {
+  if (!att) return false;
+  const mime = String(att.mime || att.type || "").toLowerCase();
+  if (mime.startsWith("audio/") || mime.startsWith("video/")) return true;
+  const name = String(att.name || att.file || "").toLowerCase();
+  return /\.(mp4|m4a|mp3|wav|webm|ogg|mov|mkv|aac|flac)$/i.test(name);
+}
+
+async function transcribeAttachmentToCard(att) {
+  if (!invoke || !att) return;
+  const user = activeUser();
+  const task = activeMainTask();
+  if (!user || !task) return;
+
+  const key = att.id || att.file;
+  if (transcribingAttachments.has(key)) return;
+  const runId = ++transcribeRunSeq;
+  transcribingAttachments.set(key, {
+    runId,
+    userId: user.id,
+    userName: user.name,
+    taskId: task.id,
+    taskTitle: task.title,
+    fileName: att.name
+  });
+  updateTranscribeIndicatorUi();
+  renderAttachmentsPopup();
+
+  try {
+    const summaryText = await invoke("transcribe_attachment_zoom_summary", {
+      userId: user.id,
+      file: att.file,
+      displayName: att.name || null,
+      apiKey: localStorage.getItem(GEMINI_API_KEY_STORAGE) || null
+    });
+
+    if (cancelledTranscribeRuns.has(runId)) return;
+
+    const targetUser = state.users.find(u => u.id === user.id) || user;
+    const targetTask = targetUser?.tasks?.find(t => t.id === task.id) || task;
+    if (!targetTask || !summaryText) return;
+
+    const parentId = targetTask.nodes[0]?.id || null;
+    const id = makeId("action");
+    const w = 456;
+    const h = 336;
+    const rawPos = parentId ? getReplyActionPosition(targetTask, parentId) : { x: 96, y: 120 };
+    const freePos = findFreeCardPosition(targetTask, rawPos.x, rawPos.y, w, h, 48);
+
+    const newNode = {
+      id,
+      title: "",
+      body: String(summaryText).trim(),
+      status: "ongoing",
+      createdAt: new Date().toISOString(),
+      x: freePos.x,
+      y: freePos.y,
+      w,
+      h
+    };
+
+    if (parentId) {
+      targetTask.nodes.splice(getReplyInsertionIndex(targetTask, parentId), 0, newNode);
+      targetTask.links.push({ id: makeId("link"), from: parentId, to: id, fromPort: "out", toPort: "in" });
+    } else {
+      targetTask.nodes.push(newNode);
+    }
+
+    if (targetTask === activeBoard()) {
+      pendingCardPop.add(id);
+      selectedNodeId = id;
+    }
+
+    saveState();
+    render();
+
+    if (targetTask === activeBoard()) {
+      const cardEl = nodesLayer.querySelector(`[data-id="${id}"]`);
+      if (cardEl) scheduleNodeHeightSync(id, cardEl);
+      focusCardOnNode(id);
+    }
+  } catch (err) {
+    if (cancelledTranscribeRuns.has(runId)) return;
+    console.warn("Falha ao transcrever anexo com IA:", err);
+    window.alert(`Não foi possível transcrever "${att.name}": ${String(err?.message || err)}`);
+  } finally {
+    cancelledTranscribeRuns.delete(runId);
+    if (transcribingAttachments.get(key)?.runId === runId) {
+      transcribingAttachments.delete(key);
+    }
+    updateTranscribeIndicatorUi();
+    renderAttachmentsPopup();
+  }
+}
+
 function renderAttachmentsPopup() {
   const task = activeMainTask();
   const items = task?.attachments || [];
@@ -7056,6 +7215,25 @@ function renderAttachmentsPopup() {
     info.appendChild(name);
     info.appendChild(meta);
 
+    row.appendChild(info);
+
+    if (isAudioOrVideoAttachment(att)) {
+      const key = att.id || att.file;
+      const busy = transcribingAttachments.has(key);
+      const trBtn = document.createElement("button");
+      trBtn.type = "button";
+      trBtn.className = `attachments-action attachments-transcribe-btn${busy ? " busy" : ""}`;
+      trBtn.disabled = busy;
+      trBtn.title = busy ? "Transcrevendo com IA..." : "Transcrever com IA";
+      trBtn.setAttribute("aria-label", busy ? "Transcrevendo com IA" : "Transcrever com IA");
+      trBtn.innerHTML = icons.micAi;
+      trBtn.addEventListener("click", event => {
+        event.stopPropagation();
+        transcribeAttachmentToCard(att);
+      });
+      row.appendChild(trBtn);
+    }
+
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.className = "attachments-action";
@@ -7078,7 +7256,6 @@ function renderAttachmentsPopup() {
       deleteAttachment(att);
     });
 
-    row.appendChild(info);
     row.appendChild(openBtn);
     row.appendChild(delBtn);
     attachmentsList.appendChild(row);
@@ -7582,7 +7759,7 @@ function initAiTranslatorPanel() {
           }
         }
       }
-    } catch (_) {}
+    } catch (_) { }
 
     if (!chatSessions.length) {
       chatSessions = [createEmptySession()];
@@ -7616,7 +7793,7 @@ function initAiTranslatorPanel() {
           }))
         }));
         localStorage.setItem(AI_CHAT_SESSIONS_KEY, JSON.stringify(slimmed));
-      } catch (__) {}
+      } catch (__) { }
     }
   }
 
@@ -7806,7 +7983,7 @@ function initAiTranslatorPanel() {
       document.body.style.cursor = "col-resize";
       try {
         panelResizer.setPointerCapture(event.pointerId);
-      } catch (_) {}
+      } catch (_) { }
     });
 
     panelResizer.addEventListener("pointermove", event => {
@@ -7826,7 +8003,7 @@ function initAiTranslatorPanel() {
       document.body.style.cursor = "";
       try {
         panelResizer.releasePointerCapture(event.pointerId);
-      } catch (_) {}
+      } catch (_) { }
       const finalWidth = Math.round(panel.getBoundingClientRect().width || AI_PANEL_DEFAULT_WIDTH);
       localStorage.setItem(AI_PANEL_WIDTH_STORAGE_KEY, String(finalWidth));
       applyViewport();
@@ -8147,7 +8324,7 @@ function initAiTranslatorPanel() {
       setTimeout(() => {
         trCopyBtn.innerHTML = prevHtml;
       }, 1200);
-    } catch (_) {}
+    } catch (_) { }
   });
 
   // --- MODO 2: CHAT DE IA MODERNO COM ANEXOS E MODAL DE HISTORICO ---
@@ -8182,9 +8359,9 @@ function initAiTranslatorPanel() {
 
     const filtered = q
       ? allSaved.filter(s =>
-          String(s.title || "").toLowerCase().includes(q) ||
-          (s.messages || []).some(m => String(m.text || "").toLowerCase().includes(q))
-        )
+        String(s.title || "").toLowerCase().includes(q) ||
+        (s.messages || []).some(m => String(m.text || "").toLowerCase().includes(q))
+      )
       : allSaved;
 
     filtered.forEach(session => {
@@ -8461,7 +8638,7 @@ function initAiTranslatorPanel() {
           setTimeout(() => {
             copyBtn.innerHTML = copySvg;
           }, 1100);
-        } catch (_) {}
+        } catch (_) { }
       });
 
       if (isModel) {

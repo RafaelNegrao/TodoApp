@@ -2318,11 +2318,17 @@ async fn transcribe_audio_gemini(
         .to_string();
 
     tauri::async_runtime::spawn_blocking(move || {
-        let mut models: Vec<String> = Vec::new();
-        if !env_model.trim().is_empty() {
+        let mut models: Vec<String> = vec!["gemini-3.5-transcribe".to_string()];
+        if !env_model.trim().is_empty()
+            && !env_model.trim().starts_with("gemma-")
+            && !models.iter().any(|m| m == env_model.trim())
+        {
             models.push(env_model.trim().to_string());
         }
         for &fallback in GEMINI_MODEL_CASCADE {
+            if fallback.starts_with("gemma-") {
+                continue;
+            }
             if !models.iter().any(|m| m == fallback) {
                 models.push(fallback.to_string());
             }
@@ -2404,6 +2410,237 @@ async fn transcribe_audio_gemini(
         }
 
         Err(last_err)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn infer_media_mime(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .as_deref()
+    {
+        Some("mp4") => "video/mp4",
+        Some("m4a") => "audio/mp4",
+        Some("mp3") => "audio/mpeg",
+        Some("wav") => "audio/wav",
+        Some("webm") => "video/webm",
+        Some("ogg") => "audio/ogg",
+        Some("mov") => "video/quicktime",
+        Some("mkv") => "video/x-matroska",
+        Some("aac") => "audio/aac",
+        Some("flac") => "audio/flac",
+        _ => "audio/mp4",
+    }
+}
+
+fn upload_gemini_media_file(
+    key: &str,
+    path: &Path,
+    mime: &str,
+) -> Result<(String, String), String> {
+    let file = fs::File::open(path).map_err(|e| format!("Falha ao abrir arquivo: {e}"))?;
+    let upload_url = format!(
+        "https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=media&key={}",
+        key
+    );
+    let resp = ureq::post(&upload_url)
+        .set("Content-Type", mime)
+        .timeout(Duration::from_secs(300))
+        .send(file)
+        .map_err(|e| format!("Falha ao enviar midia para Gemini Files API: {e}"))?;
+    let body: serde_json::Value = resp
+        .into_json()
+        .map_err(|e| format!("Resposta invalida do upload Gemini: {e}"))?;
+    let file_name = body["file"]["name"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    let file_uri = body["file"]["uri"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    if file_name.is_empty() || file_uri.is_empty() {
+        return Err("Upload Gemini nao retornou URI do arquivo".to_string());
+    }
+
+    // Aguarda o processamento do arquivo de video/audio ficar ACTIVE
+    let status_url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/{}?key={}",
+        file_name, key
+    );
+    for _ in 0..45 {
+        let state_str = match ureq::get(&status_url).timeout(Duration::from_secs(15)).call() {
+            Ok(r) => r
+                .into_json::<serde_json::Value>()
+                .ok()
+                .and_then(|v| v["state"].as_str().map(|s| s.to_string()))
+                .unwrap_or_default(),
+            Err(_) => String::new(),
+        };
+        if state_str == "ACTIVE" {
+            return Ok((file_name, file_uri));
+        }
+        if state_str == "FAILED" {
+            return Err("Gemini falhou ao processar o arquivo de midia".to_string());
+        }
+        thread::sleep(Duration::from_secs(2));
+    }
+
+    Ok((file_name, file_uri))
+}
+
+#[tauri::command]
+async fn transcribe_attachment_zoom_summary(
+    app: tauri::AppHandle,
+    user_id: String,
+    file: String,
+    display_name: Option<String>,
+    api_key: Option<String>,
+) -> Result<String, String> {
+    let path = app_root(&app)?.join(&user_id).join(&file);
+    if !path.exists() {
+        return Err("Arquivo de anexo nao encontrado".to_string());
+    }
+    let (key, all_models) = resolve_gemini_key_and_models(api_key)?;
+    let title = display_name
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Gravação".to_string())
+        });
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mime = infer_media_mime(&path);
+        let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        if size == 0 {
+            return Err("Arquivo de midia vazio".to_string());
+        }
+
+        let mut uploaded_file_name: Option<String> = None;
+        let media_part = if size <= 15 * 1024 * 1024 {
+            let bytes = fs::read(&path).map_err(|e| format!("Falha ao ler arquivo: {e}"))?;
+            serde_json::json!({
+                "inlineData": {
+                    "mimeType": mime,
+                    "data": encode_base64(&bytes)
+                }
+            })
+        } else {
+            let (fname, furi) = upload_gemini_media_file(&key, &path, mime)?;
+            uploaded_file_name = Some(fname);
+            serde_json::json!({
+                "fileData": {
+                    "mimeType": mime,
+                    "fileUri": furi
+                }
+            })
+        };
+
+        let prompt = format!(
+            "Analise o áudio/vídeo anexado ('{title}') e gere uma transcrição e ata executiva super organizada no estilo Zoom AI Companion, no mesmo idioma falado na gravação.\n\
+             Regras de formatação (use APENAS texto limpo, tags <b>...</b> para títulos/negrito e '[ ] ' no início dos próximos passos — NÃO use markdown com # ou **):\n\n\
+             <b>Resumo — {title}</b>\n\n\
+             <b>Objetivo</b>\n\
+             (1 a 2 frases claras explicando o propósito principal da gravação/reunião)\n\n\
+             <b>Participantes / Quem falou</b>\n\
+             • Identifique cada pessoa pelo nome (se mencionado) ou como 'Locutor 1', 'Locutor 2', etc., resumindo brevemente sua participação.\n\n\
+             <b>Principais Tópicos e Decisões</b>\n\
+             • Liste os pontos mais importantes discutidos e decisões tomadas de forma objetiva.\n\n\
+             <b>Próximos Passos</b>\n\
+             [ ] Liste ações práticas e pendências mencionadas (com responsável/prazo se citados). Se não houver ações, escreva 'Nenhuma ação pendente mencionada.'\n\n\
+             <b>Transcrição Organizada</b>\n\
+             Apresente as falas principais organizadas por locutor (ex.: <b>Locutor 1:</b> ...), removendo vícios de linguagem mas preservando fielmente o conteúdo.\n\n\
+             Retorne APENAS o conteúdo pronto para o card, sem introduções fora dessa estrutura."
+        );
+
+        let payload = serde_json::json!({
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    { "text": prompt },
+                    media_part
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.2
+            }
+        });
+
+        let models: Vec<String> = all_models
+            .into_iter()
+            .filter(|m| !m.starts_with("gemma-") && m != "gemini-3.5-transcribe")
+            .collect();
+        let ordered = order_models_by_availability(models);
+
+        let mut last_err = String::from("Falha ao transcrever arquivo com Gemini");
+        let mut final_result: Option<String> = None;
+
+        for model in &ordered {
+            let url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+                model, key
+            );
+            match ureq::post(&url)
+                .set("Content-Type", "application/json")
+                .timeout(Duration::from_secs(180))
+                .send_json(payload.clone())
+            {
+                Ok(resp) => {
+                    let body: serde_json::Value = resp
+                        .into_json()
+                        .map_err(|e| format!("Resposta invalida do Gemini: {e}"))?;
+                    let mut combined = String::new();
+                    if let Some(parts) = body["candidates"][0]["content"]["parts"].as_array() {
+                        for p in parts {
+                            if p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                continue;
+                            }
+                            if let Some(t) = p["text"].as_str() {
+                                combined.push_str(t);
+                            }
+                        }
+                    }
+                    let cleaned = combined.trim();
+                    if !cleaned.is_empty() {
+                        final_result = Some(cleaned.to_string());
+                        break;
+                    }
+                }
+                Err(ureq::Error::Status(code, resp)) => {
+                    let err_body = resp.into_string().unwrap_or_default();
+                    last_err = format!("Gemini HTTP {code} ({model}): {err_body}");
+                    if code == 429 {
+                        let secs = if err_body.contains("PerDay") || err_body.contains("DAILY") {
+                            300
+                        } else {
+                            30
+                        };
+                        mark_model_cooldown(model, Duration::from_secs(secs));
+                    } else if code == 503 || code == 502 || code == 500 || code == 504 {
+                        mark_model_cooldown(model, Duration::from_secs(45));
+                    } else if code == 404 {
+                        mark_model_cooldown(model, Duration::from_secs(600));
+                    }
+                }
+                Err(e) => {
+                    last_err = format!("Erro de rede ao chamar Gemini ({model}): {e}");
+                }
+            }
+        }
+
+        if let Some(fname) = uploaded_file_name {
+            let del_url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/{}?key={}",
+                fname, key
+            );
+            let _ = ureq::delete(&del_url).timeout(Duration::from_secs(15)).call();
+        }
+
+        final_result.ok_or(last_err)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -3223,6 +3460,7 @@ fn main() {
             ai_translate_fast,
             ai_chat_english,
             transcribe_audio_gemini,
+            transcribe_attachment_zoom_summary,
             ai_audio_capture_start,
             ai_audio_capture_flush_and_transcribe,
             ai_audio_capture_stop_and_transcribe,

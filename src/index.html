@@ -237,6 +237,21 @@
             <button class="recording-indicator-stop" id="recordingIndicatorStop" type="button"
               aria-label="Stop">Stop</button>
           </div>
+          <div class="transcribe-indicator" id="transcribeIndicator" hidden>
+            <span class="transcribe-mic-badge" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="2" width="6" height="12" rx="3" />
+                <path d="M5 10a7 7 0 0 0 14 0" />
+                <path d="M12 17v4" />
+                <path d="M8 21h8" />
+              </svg>
+            </span>
+            <span id="transcribeIndicatorText">Transcrevendo...</span>
+            <button class="recording-indicator-target" id="transcribeIndicatorTarget" type="button"
+              title="Ir para a task" hidden></button>
+            <button class="recording-indicator-stop" id="transcribeIndicatorStop" type="button"
+              aria-label="Parar transcrição">Parar</button>
+          </div>
           <div class="record-mode-popup" id="recordModePopup" role="menu" aria-label="Modo de gravação" hidden>
             <div class="record-mode-head">Iniciar gravação</div>
             <button class="record-mode-option" type="button" role="menuitem" data-record-mode="all">
