@@ -338,6 +338,12 @@
                   <path d="M12 5v14M5 12h14" />
                 </svg>
               </button>
+              <button class="ai-head-icon-btn" id="aiMinimizeFloatingBtn" type="button"
+                aria-label="Minimizar janela flutuante" title="Minimizar" hidden>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 17h14" />
+                </svg>
+              </button>
               <button class="ai-head-icon-btn ai-panel-close" id="closeAiTranslatorButton" type="button"
                 aria-label="Close" title="Close (Esc)">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -457,6 +463,20 @@
 
           <!-- MODO 2: CHAT DE IAMODERNO COM ANEXOS E MODAL DE HISTORICO -->
           <div class="ai-chat-view" id="aiChatView" hidden>
+            <div class="ai-chat-drop-overlay" id="aiChatDropOverlay" hidden aria-hidden="true">
+              <div class="ai-chat-drop-overlay-card">
+                <div class="ai-chat-drop-overlay-icon">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 16V4" />
+                    <path d="m7 9 5-5 5 5" />
+                    <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+                  </svg>
+                </div>
+                <strong>Solte para anexar ao chat</strong>
+                <span>Imagens, PDFs, áudios, códigos ou arquivos</span>
+              </div>
+            </div>
+
             <div class="ai-chat-messages" id="aiChatMessages"></div>
 
             <form class="ai-chat-composer" id="aiChatForm">

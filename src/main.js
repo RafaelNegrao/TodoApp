@@ -5176,8 +5176,37 @@ function insertAttachmentReferenceFromPending(att) {
   }, att);
 }
 
+let aiChatBridge = null;
+
+function getClipboardAttachmentFiles(clipboardData) {
+  if (!clipboardData) return [];
+  const items = Array.from(clipboardData.items || []);
+  const fromItems = items
+    .filter(item => item.kind === "file")
+    .map(item => item.getAsFile())
+    .filter(Boolean);
+  if (fromItems.length > 0) {
+    return fromItems;
+  }
+  return Array.from(clipboardData.files || []).filter(Boolean);
+}
+
 function handleClipboardPaste(event) {
-  if (!event.clipboardData || !clipboardAttachModal.hidden) {
+  if (!event.clipboardData) {
+    return;
+  }
+
+  if (aiChatBridge?.isTargetOrHover(event.target)) {
+    const chatFiles = getClipboardAttachmentFiles(event.clipboardData);
+    if (chatFiles.length > 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      aiChatBridge.addFiles(chatFiles);
+    }
+    return;
+  }
+
+  if (!clipboardAttachModal.hidden) {
     return;
   }
 
@@ -6908,17 +6937,31 @@ async function setupFileDrop() {
   const listen = window.__TAURI__?.event?.listen;
   if (!listen) return;
 
-  // Sem task aberta nao ha onde anexar: o drop e ignorado por completo.
-  const onEnter = () => setDropOverlay(Boolean(activeBoard()));
+  const onEnter = event => {
+    if (aiChatBridge?.isPointInside(event?.payload?.position)) {
+      setDropOverlay(false);
+      aiChatBridge.setDropOverlay(true);
+      return;
+    }
+    setDropOverlay(Boolean(activeBoard()));
+  };
   const onOver = event => {
+    const pos = event.payload?.position;
+    if (aiChatBridge?.isPointInside(pos)) {
+      setDropOverlay(false);
+      aiChatBridge.setDropOverlay(true);
+      return;
+    }
+    aiChatBridge?.setDropOverlay(false);
+
     if (!activeBoard()) {
       setDropOverlay(false);
       return;
     }
     const scale = window.devicePixelRatio || 1;
-    const px = Number(event.payload?.position?.x || 0) / scale;
-    const py = Number(event.payload?.position?.y || 0) / scale;
-    const inside = isPointInsideBoardShell(event.payload?.position);
+    const px = Number(pos?.x || 0) / scale;
+    const py = Number(pos?.y || 0) / scale;
+    const inside = isPointInsideBoardShell(pos);
 
     let cardId = null;
     if (inside) {
@@ -6930,14 +6973,25 @@ async function setupFileDrop() {
     }
     setDropOverlay(inside, cardId);
   };
-  const onLeave = () => setDropOverlay(false);
+  const onLeave = () => {
+    setDropOverlay(false);
+    aiChatBridge?.setDropOverlay(false);
+  };
   const onDrop = async event => {
     const targetCardId = dropOverCardId;
+    const pos = event.payload?.position;
     setDropOverlay(false);
+    aiChatBridge?.setDropOverlay(false);
     const paths = event.payload?.paths || [];
     if (!paths.length) return;
+
+    if (aiChatBridge?.isPointInside(pos)) {
+      await aiChatBridge.addPaths(paths);
+      return;
+    }
+
     if (!activeBoard()) return;
-    if (!isPointInsideBoardShell(event.payload?.position)) return;
+    if (!isPointInsideBoardShell(pos)) return;
 
     if (targetCardId) {
       const board = activeBoard();
@@ -7573,6 +7627,72 @@ function readFileAsAttachment(file) {
   });
 }
 
+function inferMimeTypeFromFileName(fileName) {
+  const ext = String(fileName || "").split(".").pop()?.toLowerCase() || "";
+  const mimeMap = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+    bmp: "image/bmp",
+    pdf: "application/pdf",
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    m4a: "audio/mp4",
+    ogg: "audio/ogg",
+    flac: "audio/flac",
+    mp4: "video/mp4",
+    webm: "video/webm",
+    mov: "video/quicktime",
+    json: "application/json",
+    xml: "application/xml",
+    csv: "text/csv",
+    md: "text/markdown",
+    html: "text/html",
+    css: "text/css",
+    js: "text/javascript",
+    ts: "text/typescript"
+  };
+  if (mimeMap[ext]) return mimeMap[ext];
+  return isTextualAttachment("", fileName) ? "text/plain" : "application/octet-stream";
+}
+
+function bytesToBase64(bytes) {
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+  let binary = "";
+  const CHUNK_SIZE = 0x8000;
+  for (let i = 0; i < arr.length; i += CHUNK_SIZE) {
+    binary += String.fromCharCode.apply(null, arr.subarray(i, i + CHUNK_SIZE));
+  }
+  return window.btoa(binary);
+}
+
+function buildAttachmentFromPathBytes(filePath, bytes) {
+  const normalized = String(filePath || "").replace(/\\/g, "/");
+  const name = normalized.split("/").pop() || `attachment-${Date.now()}`;
+  const mimeType = inferMimeTypeFromFileName(name);
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+
+  if (isTextualAttachment(mimeType, name)) {
+    const decoder = new TextDecoder("utf-8", { fatal: false });
+    return {
+      name,
+      mime_type: mimeType,
+      data_base64: "",
+      text_content: decoder.decode(arr).slice(0, 120000)
+    };
+  }
+
+  return {
+    name,
+    mime_type: mimeType,
+    data_base64: bytesToBase64(arr),
+    text_content: ""
+  };
+}
+
 function formatSessionTimestamp(isoStr) {
   if (!isoStr) return "";
   try {
@@ -7643,6 +7763,7 @@ function initAiTranslatorPanel() {
   const openChatBtn = document.getElementById("openAiChatButton");
   const closeBtn = document.getElementById("closeAiTranslatorButton");
   const detachTranslatorBtn = document.getElementById("aiDetachTranslatorBtn");
+  const minimizeFloatingBtn = document.getElementById("aiMinimizeFloatingBtn");
   const panelHead = document.getElementById("aiPanelHead");
   const panel = document.getElementById("aiTranslatorPanel");
   const panelResizer = document.getElementById("aiPanelResizer");
@@ -7672,6 +7793,7 @@ function initAiTranslatorPanel() {
   const sessionsListEl = document.getElementById("aiChatSessionsList");
 
   const chatMessagesEl = document.getElementById("aiChatMessages");
+  const chatDropOverlay = document.getElementById("aiChatDropOverlay");
   const chatForm = document.getElementById("aiChatForm");
   const chatPendingListEl = document.getElementById("aiChatPendingList");
   const chatInput = document.getElementById("aiChatInput");
@@ -7697,6 +7819,10 @@ function initAiTranslatorPanel() {
   let pendingAttachments = [];
   let chatBusy = false;
   let chatHasUnread = false;
+  let animatingMessageRef = null;
+  let activeTypingRaf = 0;
+  let chatDropOverlayActive = false;
+  let chatHtmlDragDepth = 0;
 
   const savedWidth = Number(localStorage.getItem(AI_PANEL_WIDTH_STORAGE_KEY));
   if (Number.isFinite(savedWidth) && savedWidth >= AI_PANEL_MIN_WIDTH && savedWidth <= AI_PANEL_MAX_WIDTH) {
@@ -7825,6 +7951,7 @@ function initAiTranslatorPanel() {
     openChatBtn?.classList.toggle("active", isOpen && isChat);
     if (chatHistoryToggle) chatHistoryToggle.hidden = !isChat;
     if (newChatBtn) newChatBtn.hidden = !isChat;
+    if (minimizeFloatingBtn) minimizeFloatingBtn.hidden = !isTranslatorFloating || isChat;
     if (detachTranslatorBtn) {
       detachTranslatorBtn.hidden = isChat;
       detachTranslatorBtn.classList.toggle("floating-active", isTranslatorFloating);
@@ -7945,6 +8072,10 @@ function initAiTranslatorPanel() {
 
   detachTranslatorBtn?.addEventListener("click", () => {
     setTranslatorFloating(!isTranslatorFloating);
+  });
+
+  minimizeFloatingBtn?.addEventListener("click", () => {
+    minimizeWindow();
   });
 
   // Permite "soltar" o modulo de traducao simplesmente puxando/arrastando o cabecalho dele para fora
@@ -8498,6 +8629,20 @@ function initAiTranslatorPanel() {
     });
   }
 
+  function setChatDropOverlay(visible) {
+    const show = Boolean(visible && !panel.hidden && currentMode === "chat");
+    if (!chatDropOverlay) return;
+    if (show && !chatDropOverlayActive) {
+      chatDropOverlay.hidden = false;
+      requestAnimationFrame(() => chatDropOverlay.classList.add("visible"));
+      chatDropOverlayActive = true;
+    } else if (!show && chatDropOverlayActive) {
+      chatDropOverlay.classList.remove("visible");
+      chatDropOverlay.hidden = true;
+      chatDropOverlayActive = false;
+    }
+  }
+
   async function addFilesToPending(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
@@ -8513,6 +8658,45 @@ function initAiTranslatorPanel() {
     chatInput?.focus();
   }
 
+  async function addPathsToPending(paths) {
+    const list = Array.from(paths || []).filter(Boolean);
+    if (!list.length || !invoke) return;
+    for (const filePath of list) {
+      try {
+        const bytes = await invoke("read_file_bytes", { path: filePath });
+        if (bytes && bytes.length) {
+          pendingAttachments.push(buildAttachmentFromPathBytes(filePath, bytes));
+        }
+      } catch (err) {
+        console.warn("Falha ao ler arquivo arrastado para o chat:", err);
+      }
+    }
+    renderPendingAttachments();
+    chatInput?.focus();
+  }
+
+  aiChatBridge = {
+    isActive: () => !panel.hidden && currentMode === "chat",
+    isTargetOrHover: target => {
+      if (panel.hidden || currentMode !== "chat") return false;
+      if (target instanceof Node && panel.contains(target)) return true;
+      if (document.activeElement instanceof Node && panel.contains(document.activeElement)) return true;
+      return panel.matches(":hover");
+    },
+    isPointInside: point => {
+      if (panel.hidden || currentMode !== "chat" || !point) return false;
+      const rect = panel.getBoundingClientRect();
+      const scale = window.devicePixelRatio || 1;
+      const px = Number(point.x) / scale;
+      const py = Number(point.y) / scale;
+      if (!Number.isFinite(px) || !Number.isFinite(py)) return false;
+      return px >= rect.left && px <= rect.right && py >= rect.top && py <= rect.bottom;
+    },
+    setDropOverlay: setChatDropOverlay,
+    addFiles: addFilesToPending,
+    addPaths: addPathsToPending
+  };
+
   chatAttachBtn?.addEventListener("click", () => {
     chatFileInput?.click();
   });
@@ -8525,29 +8709,166 @@ function initAiTranslatorPanel() {
   });
 
   chatInput?.addEventListener("paste", async event => {
-    const items = Array.from(event.clipboardData?.items || []);
-    const fileItems = items.filter(item => item.kind === "file");
-    if (!fileItems.length) return;
-    const files = fileItems.map(item => item.getAsFile()).filter(Boolean);
-    if (files.length) {
-      event.preventDefault();
-      await addFilesToPending(files);
+    const files = getClipboardAttachmentFiles(event.clipboardData);
+    if (!files.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    await addFilesToPending(files);
+  });
+
+  const hasDraggedFiles = dataTransfer => {
+    if (!dataTransfer) return false;
+    if (dataTransfer.files?.length) return true;
+    return Array.from(dataTransfer.types || []).includes("Files");
+  };
+
+  panel.addEventListener("dragenter", event => {
+    if (currentMode !== "chat" || !hasDraggedFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    chatHtmlDragDepth += 1;
+    setChatDropOverlay(true);
+  });
+
+  panel.addEventListener("dragover", event => {
+    if (currentMode !== "chat" || !hasDraggedFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+    setChatDropOverlay(true);
+  });
+
+  panel.addEventListener("dragleave", event => {
+    if (currentMode !== "chat") return;
+    chatHtmlDragDepth = Math.max(0, chatHtmlDragDepth - 1);
+    if (chatHtmlDragDepth === 0) {
+      setChatDropOverlay(false);
     }
   });
 
-  chatView?.addEventListener("dragover", event => {
-    event.preventDefault();
-  });
-
-  chatView?.addEventListener("drop", async event => {
+  panel.addEventListener("drop", async event => {
+    if (currentMode !== "chat") return;
+    chatHtmlDragDepth = 0;
+    setChatDropOverlay(false);
     if (event.dataTransfer?.files?.length) {
       event.preventDefault();
+      event.stopPropagation();
       await addFilesToPending(event.dataTransfer.files);
     }
   });
 
+  function cancelActiveTypingAnimation() {
+    if (activeTypingRaf) {
+      cancelAnimationFrame(activeTypingRaf);
+      activeTypingRaf = 0;
+    }
+  }
+
+  function appendTypingCursorToBubble(bubbleEl) {
+    const cursor = document.createElement("span");
+    cursor.className = "ai-typing-cursor";
+    cursor.setAttribute("aria-hidden", "true");
+    const body = bubbleEl.querySelector(".ai-markdown-body") || bubbleEl;
+    const lastBlock = body.lastElementChild;
+    if (lastBlock && lastBlock.tagName === "UL" && lastBlock.lastElementChild) {
+      lastBlock.lastElementChild.appendChild(cursor);
+    } else if (lastBlock && lastBlock.tagName === "PRE") {
+      const codeEl = lastBlock.querySelector("code") || lastBlock;
+      codeEl.appendChild(cursor);
+    } else if (lastBlock) {
+      lastBlock.appendChild(cursor);
+    } else {
+      body.appendChild(cursor);
+    }
+  }
+
+  function startAiTypingAnimation({ msg, bubbleEl, rowEl, revealTargets }) {
+    cancelActiveTypingAnimation();
+    const fullText = String(msg.text || "");
+    if (!fullText) {
+      animatingMessageRef = null;
+      return;
+    }
+
+    rowEl.classList.add("is-typing", "just-arrived");
+    revealTargets.forEach(el => el?.classList.add("ai-reveal-pending"));
+
+    const totalLen = fullText.length;
+    const targetDurationMs = clamp(Math.round(totalLen * 11), 360, 2600);
+    let startTime = 0;
+    let lastRenderedLen = 0;
+    let finished = false;
+
+    const complete = () => {
+      if (finished) return;
+      finished = true;
+      cancelActiveTypingAnimation();
+      if (animatingMessageRef === msg) {
+        animatingMessageRef = null;
+      }
+      bubbleEl.innerHTML = renderAiMarkdownHtml(fullText);
+      rowEl.classList.remove("is-typing");
+      revealTargets.forEach(el => {
+        if (!el) return;
+        el.classList.remove("ai-reveal-pending");
+        el.classList.add("ai-reveal-shown");
+      });
+      if (chatMessagesEl) {
+        const distFromBottom = chatMessagesEl.scrollHeight - chatMessagesEl.scrollTop - chatMessagesEl.clientHeight;
+        if (distFromBottom < 90) {
+          chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+        }
+      }
+    };
+
+    bubbleEl.title = "Clique para exibir resposta completa";
+    bubbleEl.addEventListener("click", complete, { once: true });
+
+    const step = timestamp => {
+      if (finished || !bubbleEl.isConnected) {
+        cancelActiveTypingAnimation();
+        return;
+      }
+      if (!startTime) startTime = timestamp;
+      const elapsed = timestamp - startTime;
+      const progress = Math.min(1, elapsed / targetDurationMs);
+      const eased = 1 - Math.pow(1 - progress, 1.45);
+      let nextLen = Math.max(1, Math.round(totalLen * eased));
+
+      // Alinha suavemente ao fim de palavra quando faltam poucos caracteres
+      if (nextLen < totalLen && nextLen > lastRenderedLen) {
+        const nextSpace = fullText.indexOf(" ", nextLen);
+        if (nextSpace > nextLen && nextSpace - nextLen <= 5) {
+          nextLen = nextSpace;
+        }
+      }
+
+      if (nextLen >= totalLen) {
+        complete();
+        return;
+      }
+
+      if (nextLen !== lastRenderedLen) {
+        lastRenderedLen = nextLen;
+        const distFromBottom = chatMessagesEl
+          ? chatMessagesEl.scrollHeight - chatMessagesEl.scrollTop - chatMessagesEl.clientHeight
+          : 0;
+        bubbleEl.innerHTML = renderAiMarkdownHtml(fullText.slice(0, nextLen));
+        appendTypingCursorToBubble(bubbleEl);
+        if (chatMessagesEl && distFromBottom < 90) {
+          chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+        }
+      }
+
+      activeTypingRaf = requestAnimationFrame(step);
+    };
+
+    activeTypingRaf = requestAnimationFrame(step);
+  }
+
   function renderChatMessages() {
     if (!chatMessagesEl) return;
+    cancelActiveTypingAnimation();
     chatMessagesEl.innerHTML = "";
     const session = getActiveSession();
     const messages = session.messages || [];
@@ -8612,14 +8933,21 @@ function initAiTranslatorPanel() {
         row.appendChild(attWrap);
       }
 
+      const shouldAnimateTyping = isModel && msg === animatingMessageRef && Boolean(msg.text);
+      let bubbleEl = null;
+      const revealTargets = [];
+
       if (msg.text) {
         const bubble = document.createElement("div");
         bubble.className = "ai-chat-bubble";
         if (isModel) {
-          bubble.innerHTML = renderAiMarkdownHtml(msg.text);
+          if (!shouldAnimateTyping) {
+            bubble.innerHTML = renderAiMarkdownHtml(msg.text);
+          }
         } else {
           bubble.textContent = msg.text;
         }
+        bubbleEl = bubble;
         row.appendChild(bubble);
       }
 
@@ -8734,6 +9062,7 @@ function initAiTranslatorPanel() {
         }
 
         row.appendChild(cardEl);
+        revealTargets.push(cardEl);
       }
 
       if (isModel && msg.questionSet && Array.isArray(msg.questionSet.questions) && msg.questionSet.questions.length > 0) {
@@ -8928,10 +9257,16 @@ function initAiTranslatorPanel() {
         }
 
         row.appendChild(qCard);
+        revealTargets.push(qCard);
       }
 
       row.appendChild(actions);
+      revealTargets.push(actions);
       chatMessagesEl.appendChild(row);
+
+      if (shouldAnimateTyping && bubbleEl) {
+        startAiTypingAnimation({ msg, bubbleEl, rowEl: row, revealTargets });
+      }
     });
 
     const modelTagEl = document.getElementById("aiChatModelTag");
@@ -8944,7 +9279,7 @@ function initAiTranslatorPanel() {
     if (chatBusy) {
       const working = document.createElement("div");
       working.className = "ai-chat-working";
-      working.textContent = "Working...";
+      working.innerHTML = `<span class="ai-chat-working-text">Thinking...</span>`;
       chatMessagesEl.appendChild(working);
     }
 
@@ -9033,14 +9368,18 @@ function initAiTranslatorPanel() {
       const cleaned =
         cleanText ||
         (proposal ? proposal.summary : questionSet ? "" : "(No response)");
-      session.messages.push({
+      const newAiMsg = {
         role: "model",
         text: cleaned,
         model: usedModel,
         attachments: [],
         proposal: proposal || null,
         questionSet: questionSet || null
-      });
+      };
+      session.messages.push(newAiMsg);
+      if (!panel.hidden && currentMode === "chat") {
+        animatingMessageRef = newAiMsg;
+      }
       session.updatedAt = new Date().toISOString();
       if (panel.hidden || currentMode !== "chat") {
         chatHasUnread = true;
