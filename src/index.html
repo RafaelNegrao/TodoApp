@@ -467,7 +467,21 @@
               </div>
             </div>
 
+            <div class="ai-live-coach-bar" id="aiLiveCoachBar" hidden>
+              <span class="ai-live-coach-dot" aria-hidden="true"></span>
+              <span class="ai-live-coach-status" id="aiLiveCoachStatus">Listening to conversation...</span>
+              <button class="ai-live-coach-now-btn" id="aiLiveCoachNowBtn" type="button" title="Analyze latest audio now">
+                Help now
+              </button>
+              <button class="ai-live-coach-stop-btn" id="aiLiveCoachStopBtn" type="button" title="Stop Live Coach">
+                Stop
+              </button>
+            </div>
+
             <div class="ai-chat-messages" id="aiChatMessages"></div>
+            <button class="ai-chat-new-pill" id="aiChatNewPill" type="button" hidden>
+              New tip ↓
+            </button>
 
             <form class="ai-chat-composer" id="aiChatForm">
               <div class="ai-chat-pending-list" id="aiChatPendingList" hidden></div>
@@ -481,6 +495,16 @@
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M12 5v14M5 12h14" />
                     </svg>
+                  </button>
+                  <button class="ai-live-coach-btn" id="aiLiveCoachBtn" type="button"
+                    title="Live English Coach: listens to PC & mic and suggests what to say"
+                    aria-label="Toggle Live English Coach" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                      <path d="M12 19v3" />
+                    </svg>
+                    <span>Live Coach</span>
                   </button>
                   <span class="ai-composer-model-tag" id="aiChatModelTag">Auto</span>
                 </div>

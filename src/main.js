@@ -5,6 +5,7 @@ import {
   AI_CHAT_THINKING_PHRASES,
   AI_TRANSLATOR_THINKING_PHRASES
 } from "./grokDodecahedronLoader.js";
+import { LiveEnglishCoachController } from "./liveCoach.js";
 import {
   extractAiActionProposal,
   extractAiQuestions,
@@ -9076,6 +9077,38 @@ function initAiTranslatorPanel() {
   const chatFileInput = document.getElementById("aiChatFileInput");
   const chatAttachBtn = document.getElementById("aiChatAttachBtn");
   const chatSendBtn = document.getElementById("aiChatSendBtn");
+  const liveCoachBtn = document.getElementById("aiLiveCoachBtn");
+  const liveCoachBar = document.getElementById("aiLiveCoachBar");
+  const liveCoachStatusEl = document.getElementById("aiLiveCoachStatus");
+  const liveCoachNowBtn = document.getElementById("aiLiveCoachNowBtn");
+  const liveCoachStopBtn = document.getElementById("aiLiveCoachStopBtn");
+  const chatNewPillBtn = document.getElementById("aiChatNewPill");
+  let unreadBelowCount = 0;
+
+  function updateNewPillVisibility() {
+    if (!chatNewPillBtn) return;
+    if (unreadBelowCount <= 0) {
+      chatNewPillBtn.hidden = true;
+      return;
+    }
+    chatNewPillBtn.textContent =
+      unreadBelowCount === 1 ? "New tip ↓" : `${unreadBelowCount} new tips ↓`;
+    chatNewPillBtn.hidden = false;
+  }
+
+  chatMessagesEl?.addEventListener("scroll", () => {
+    if (!chatMessagesEl) return;
+    const dist = chatMessagesEl.scrollHeight - chatMessagesEl.scrollTop - chatMessagesEl.clientHeight;
+    if (dist < 40) {
+      unreadBelowCount = 0;
+      updateNewPillVisibility();
+    }
+  });
+  chatNewPillBtn?.addEventListener("click", () => {
+    unreadBelowCount = 0;
+    updateNewPillVisibility();
+    chatMessagesEl?.scrollTo({ top: chatMessagesEl.scrollHeight, behavior: "smooth" });
+  });
 
   if (!panel) return;
 
@@ -9639,10 +9672,10 @@ function initAiTranslatorPanel() {
 
   const translateGrokLoaders = translateView
     ? Array.from(translateView.querySelectorAll(".grok-canvas-translate")).map(canvas => {
-        const loader = new GrokDodecahedronRenderer(canvas, { size: 22, speed: 0.35, intensity: 0.52 });
-        loader.start();
-        return loader;
-      })
+      const loader = new GrokDodecahedronRenderer(canvas, { size: 22, speed: 0.35, intensity: 0.52 });
+      loader.start();
+      return loader;
+    })
     : [];
 
   function setTranslateStatus(stateName, label) {
@@ -10226,8 +10259,109 @@ function initAiTranslatorPanel() {
     activeTypingRaf = requestAnimationFrame(step);
   }
 
+  function buildCoachAdviceCard(advice, { animate = false, timestamp = null } = {}) {
+    const coachCard = document.createElement("div");
+    coachCard.className = "ai-coach-card";
+    if (!animate) {
+      coachCard.style.animation = "none";
+    }
+
+    if (advice.heardSummary || timestamp) {
+      const headEl = document.createElement("div");
+      headEl.className = "ai-coach-head";
+
+      const summaryEl = document.createElement("div");
+      summaryEl.className = "ai-coach-summary";
+      summaryEl.innerHTML = `<span class="ai-coach-summary-dot" aria-hidden="true"></span><span>${escapeHtml(advice.heardSummary || "Live Coach")}</span>`;
+      headEl.appendChild(summaryEl);
+
+      const timeDate = timestamp ? new Date(timestamp) : new Date();
+      if (!Number.isNaN(timeDate.getTime())) {
+        const timeEl = document.createElement("span");
+        timeEl.className = "ai-coach-time";
+        const hh = String(timeDate.getHours()).padStart(2, "0");
+        const mm = String(timeDate.getMinutes()).padStart(2, "0");
+        timeEl.textContent = `${hh}:${mm}`;
+        headEl.appendChild(timeEl);
+      }
+
+      coachCard.appendChild(headEl);
+    }
+
+    if (Array.isArray(advice.suggestions) && advice.suggestions.length > 0) {
+      const sugWrap = document.createElement("div");
+      sugWrap.className = "ai-coach-suggestions";
+      advice.suggestions.forEach(sug => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ai-coach-suggestion-btn";
+        btn.title = "Click to copy English reply";
+        btn.innerHTML = `
+          <span class="ai-coach-en-row">
+            <span class="ai-coach-en">${escapeHtml(sug.en)}</span>
+            <span class="ai-coach-tone-badge">${escapeHtml(sug.tone || "Natural")}</span>
+          </span>
+          ${sug.pt ? `<span class="ai-coach-pt">${escapeHtml(sug.pt)}</span>` : ""}
+        `;
+        btn.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(sug.en);
+            const badge = btn.querySelector(".ai-coach-tone-badge");
+            if (badge) {
+              const prev = badge.textContent;
+              badge.textContent = "Copied ✓";
+              window.setTimeout(() => {
+                badge.textContent = prev;
+              }, 1200);
+            }
+          } catch (_) { }
+        });
+        sugWrap.appendChild(btn);
+      });
+      coachCard.appendChild(sugWrap);
+    }
+
+    if (advice.tip) {
+      const tipEl = document.createElement("div");
+      tipEl.className = "ai-coach-tip";
+      tipEl.textContent = advice.tip;
+      coachCard.appendChild(tipEl);
+    }
+
+    return coachCard;
+  }
+
+  function appendCoachAdviceWithoutFlicker(advice, timestamp) {
+    if (!chatMessagesEl) return;
+    const emptyEl = chatMessagesEl.querySelector(".ai-chat-empty");
+    const hadEmptyState = Boolean(emptyEl);
+    if (emptyEl) emptyEl.remove();
+
+    const row = document.createElement("div");
+    row.className = "ai-chat-msg ai";
+    row.appendChild(buildCoachAdviceCard(advice, { animate: true, timestamp }));
+
+    const workingEl = chatMessagesEl.querySelector(".ai-chat-working");
+    if (workingEl) {
+      chatMessagesEl.insertBefore(row, workingEl);
+    } else {
+      chatMessagesEl.appendChild(row);
+    }
+
+    const overflows = chatMessagesEl.scrollHeight > chatMessagesEl.clientHeight + 24;
+    if (!hadEmptyState && overflows) {
+      unreadBelowCount += 1;
+      updateNewPillVisibility();
+    } else {
+      unreadBelowCount = 0;
+      updateNewPillVisibility();
+    }
+  }
+
   function renderChatMessages() {
     if (!chatMessagesEl) return;
+    unreadBelowCount = 0;
+    updateNewPillVisibility();
     cancelActiveTypingAnimation();
     chatThinkingCycler.stop();
     if (chatGrokLoader) {
@@ -10865,8 +10999,19 @@ function initAiTranslatorPanel() {
         revealTargets.push(qCard);
       }
 
-      row.appendChild(actions);
-      revealTargets.push(actions);
+      if (isModel && msg.coachAdvice) {
+        const coachCard = buildCoachAdviceCard(msg.coachAdvice, {
+          animate: false,
+          timestamp: msg.createdAt || null
+        });
+        row.appendChild(coachCard);
+        revealTargets.push(coachCard);
+      }
+
+      if (!msg.coachAdvice) {
+        row.appendChild(actions);
+        revealTargets.push(actions);
+      }
       chatMessagesEl.appendChild(row);
 
       if (shouldAnimateTyping && bubbleEl) {
@@ -11067,6 +11212,59 @@ function initAiTranslatorPanel() {
       }
     }
   }
+
+  const liveCoach = new LiveEnglishCoachController({
+    invoke,
+    getApiKey: () => localStorage.getItem(GEMINI_API_KEY_STORAGE) || null,
+    onStatusChange: ({ active, label }) => {
+      if (liveCoachBtn) {
+        liveCoachBtn.classList.toggle("is-live", active);
+        liveCoachBtn.setAttribute("aria-pressed", String(active));
+      }
+      if (liveCoachBar) {
+        liveCoachBar.hidden = !active;
+      }
+      if (liveCoachStatusEl && label) {
+        liveCoachStatusEl.textContent = label;
+      }
+    },
+    onAdvice: advice => {
+      const session = getActiveSession();
+      if (session.messages.length === 0) {
+        session.title = "Live English Coach";
+      }
+      const nowIso = new Date().toISOString();
+      session.messages.push({
+        role: "model",
+        text: "",
+        attachments: [],
+        coachAdvice: advice,
+        createdAt: nowIso
+      });
+      session.updatedAt = nowIso;
+      chatSessions = [session, ...chatSessions.filter(s => s.id !== session.id)];
+      saveChatSessions();
+      renderSessionsList();
+      appendCoachAdviceWithoutFlicker(advice, nowIso);
+    },
+    onError: errMsg => {
+      if (liveCoachStatusEl) {
+        liveCoachStatusEl.textContent = `Error: ${errMsg.slice(0, 80)}`;
+      }
+    }
+  });
+
+  liveCoachBtn?.addEventListener("click", () => {
+    liveCoach.toggle();
+  });
+
+  liveCoachNowBtn?.addEventListener("click", () => {
+    liveCoach.flushNow();
+  });
+
+  liveCoachStopBtn?.addEventListener("click", () => {
+    liveCoach.stop();
+  });
 
   chatSendBtn?.addEventListener("click", event => {
     if (chatBusy) {

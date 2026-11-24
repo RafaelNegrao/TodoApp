@@ -3184,6 +3184,34 @@ fn ai_audio_capture_start(state: State<'_, AiAudioCaptureState>) -> Result<(), S
     Ok(())
 }
 
+fn drain_ai_audio_capture(
+    state: &State<'_, AiAudioCaptureState>,
+    stop: bool,
+) -> Result<(Vec<f32>, Vec<f32>), String> {
+    let mut guard = state.0.lock().map_err(|_| "Audio capture lock poisoned".to_string())?;
+    if stop {
+        if let Some(mut active) = guard.take() {
+            active.running.store(false, Ordering::Relaxed);
+            if let Some(handle) = active.join_handle.take() {
+                let _ = handle.join();
+            }
+            let m = active.mic_samples.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+            let s = active.sys_samples.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+            return Ok((m, s));
+        }
+        return Ok((Vec::new(), Vec::new()));
+    }
+    if let Some(active) = guard.as_ref() {
+        let m = active.mic_samples.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+        let s = active.sys_samples.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+        if let Ok(mut clock) = active.chunk_start.lock() {
+            *clock = Instant::now();
+        }
+        return Ok((m, s));
+    }
+    Ok((Vec::new(), Vec::new()))
+}
+
 #[tauri::command]
 async fn ai_audio_capture_flush_and_transcribe(
     state: State<'_, AiAudioCaptureState>,
@@ -3191,31 +3219,7 @@ async fn ai_audio_capture_flush_and_transcribe(
     fallback_mime_type: Option<String>,
     fallback_audio_base64: Option<String>,
 ) -> Result<String, String> {
-    let (mic_vec, sys_vec) = {
-        let mut guard = state.0.lock().map_err(|_| "Audio capture lock poisoned".to_string())?;
-        if stop {
-            if let Some(mut active) = guard.take() {
-                active.running.store(false, Ordering::Relaxed);
-                if let Some(handle) = active.join_handle.take() {
-                    let _ = handle.join();
-                }
-                let m = active.mic_samples.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
-                let s = active.sys_samples.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
-                (m, s)
-            } else {
-                (Vec::new(), Vec::new())
-            }
-        } else if let Some(active) = guard.as_ref() {
-            let m = active.mic_samples.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
-            let s = active.sys_samples.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
-            if let Ok(mut clock) = active.chunk_start.lock() {
-                *clock = Instant::now();
-            }
-            (m, s)
-        } else {
-            (Vec::new(), Vec::new())
-        }
-    };
+    let (mic_vec, sys_vec) = drain_ai_audio_capture(&state, stop)?;
 
     let mic_peak = mic_vec.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()));
     let sys_peak = sys_vec.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()));
@@ -3246,6 +3250,123 @@ async fn ai_audio_capture_stop_and_transcribe(
     fallback_audio_base64: Option<String>,
 ) -> Result<String, String> {
     ai_audio_capture_flush_and_transcribe(state, true, fallback_mime_type, fallback_audio_base64).await
+}
+
+#[tauri::command]
+async fn ai_live_coach_flush_and_advise(
+    state: State<'_, AiAudioCaptureState>,
+    api_key: Option<String>,
+    recent_context: Option<String>,
+    stop: bool,
+) -> Result<Option<String>, String> {
+    let (mic_vec, sys_vec) = drain_ai_audio_capture(&state, stop)?;
+    if stop {
+        return Ok(None);
+    }
+
+    let mic_peak = mic_vec.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()));
+    let sys_peak = sys_vec.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()));
+    let min_samples = (TARGET_SAMPLE_RATE as usize * 2) / 5; // >= 0.4s
+
+    let has_other = sys_vec.len() >= min_samples && sys_peak >= 0.003;
+    let raw_has_user = mic_vec.len() >= min_samples && mic_peak >= 0.010;
+    // Evita eco fraco de alto-falante vazando no microfone quando a outra pessoa fala alto
+    let has_user = raw_has_user && (!has_other || mic_peak >= sys_peak * 0.28);
+
+    if !has_other && !has_user {
+        return Ok(None);
+    }
+
+    let (key, all_models) = resolve_gemini_key_and_models(api_key)?;
+    let audio_models: Vec<String> = all_models
+        .into_iter()
+        .filter(|m| !m.starts_with("gemma-"))
+        .collect();
+    if audio_models.is_empty() {
+        return Err("Nenhum modelo Gemini com suporte a áudio disponível.".to_string());
+    }
+
+    let sys_b64 = if has_other {
+        Some(encode_base64(&encode_wav_16khz_mono(Vec::new(), sys_vec)))
+    } else {
+        None
+    };
+    let mic_b64 = if has_user {
+        Some(encode_base64(&encode_wav_16khz_mono(mic_vec, Vec::new())))
+    } else {
+        None
+    };
+    let context_str = recent_context.unwrap_or_default().trim().to_string();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut parts: Vec<serde_json::Value> = Vec::new();
+
+        if let Some(other_audio) = sys_b64 {
+            let prompt = format!(
+                "You are a real-time English conversation teacher & meeting coach helping a Brazilian Portuguese speaker during a live call.\n\
+                 You will receive SEPARATE labeled audio channels:\n\
+                 - AUDIO_OTHER_PERSON: the other person speaking on the PC/call. ONLY help the user respond to AUDIO_OTHER_PERSON.\n\
+                 - AUDIO_USER (optional): the user speaking into their own microphone. NEVER suggest replying to AUDIO_USER; use it strictly as conversation memory/context.\n\
+                 DO NOT output a verbatim transcript.\n\
+                 Recent conversation memory:\n{context_str}\n\n\
+                 Rules:\n\
+                 1. If AUDIO_OTHER_PERSON has only silence, noise, or nothing actionable to respond to, return EXACTLY: {{\"skip\":true,\"userContext\":\"optional 1-sentence PT-BR summary if AUDIO_USER spoke, else empty\"}}\n\
+                 2. Otherwise, return ONLY valid JSON (no markdown fences) with this exact schema:\n\
+                 {{\"skip\":false,\"heardSummary\":\"Resumo objetivo em PT-BR (1 frase) do que a OUTRA PESSOA acabou de explicar ou perguntar\",\"userContext\":\"Resumo curto em PT-BR do que o usuário disse se AUDIO_USER estiver presente, senão string vazia\",\"suggestions\":[{{\"tone\":\"Natural\",\"en\":\"A complete, specific, natural 1-2 sentence English response (15-28 words) that directly references what they just said and keeps the conversation flowing (e.g. with a reaction + follow-up thought or question)\",\"pt\":\"Tradução fiel em PT-BR\"}},{{\"tone\":\"Detailed\",\"en\":\"A thoughtful, articulate 1-2 sentence English response (18-32 words) suitable for a deeper or more professional exchange on the exact topic being discussed\",\"pt\":\"Tradução fiel em PT-BR\"}}],\"tip\":\"Dica rápida de professor em PT-BR (opcional, 1 frase curta explicando uma expressão útil usada acima)\"}}\n\
+                 3. NEVER give generic 2-5 word clichés like 'Sounds good!', 'That's interesting!', or 'I agree.'. Every suggestion MUST be a full, specific, ready-to-speak response tailored to the exact details heard in AUDIO_OTHER_PERSON and the conversation memory."
+            );
+            parts.push(serde_json::json!({ "text": prompt }));
+            parts.push(serde_json::json!({ "text": "AUDIO_OTHER_PERSON:" }));
+            parts.push(serde_json::json!({
+                "inlineData": {
+                    "mimeType": "audio/wav",
+                    "data": other_audio
+                }
+            }));
+            if let Some(user_audio) = mic_b64 {
+                parts.push(serde_json::json!({ "text": "AUDIO_USER (context only, do NOT reply to this):" }));
+                parts.push(serde_json::json!({
+                    "inlineData": {
+                        "mimeType": "audio/wav",
+                        "data": user_audio
+                    }
+                }));
+            }
+        } else if let Some(user_audio) = mic_b64 {
+            let prompt = format!(
+                "You are silently tracking conversation memory for a live English coach.\n\
+                 This audio is ONLY the USER speaking into their own microphone (NOT the other person).\n\
+                 Recent conversation memory:\n{context_str}\n\n\
+                 Return ONLY valid JSON (no markdown fences):\n\
+                 {{\"skip\":true,\"userContext\":\"1 short sentence in PT-BR summarizing what the user just said (or empty string if only noise/breathing)\"}}\n\
+                 NEVER set skip to false here."
+            );
+            parts.push(serde_json::json!({ "text": prompt }));
+            parts.push(serde_json::json!({
+                "inlineData": {
+                    "mimeType": "audio/wav",
+                    "data": user_audio
+                }
+            }));
+        } else {
+            return Ok(None);
+        }
+
+        let payload = serde_json::json!({
+            "contents": [{
+                "role": "user",
+                "parts": parts
+            }],
+            "generationConfig": {
+                "temperature": 0.3
+            }
+        });
+
+        let (text, _model) = execute_gemini_fast_payload_with_model(&key, &audio_models, payload, false)?;
+        Ok(Some(text))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -4928,6 +5049,7 @@ fn main() {
             ai_audio_capture_start,
             ai_audio_capture_flush_and_transcribe,
             ai_audio_capture_stop_and_transcribe,
+            ai_live_coach_flush_and_advise,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TODOCompanion");
