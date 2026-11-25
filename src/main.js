@@ -15,6 +15,7 @@ import {
   describeAiAction,
   shouldAutoCaptureScreen,
   buildAppContextSnapshot,
+  collectRelevantAppAttachments,
   executeAiActionPlan
 } from "./aiAppAgent.js";
 import {
@@ -3693,6 +3694,7 @@ function centerCanvasOnTasks() {
   const board = activeBoard();
   if (!board?.nodes.length) {
     const view = activeView();
+    if (!view) return;
     view.zoom = 1;
     view.panX = boardShell.clientWidth / 2;
     view.panY = boardShell.clientHeight / 2;
@@ -9727,16 +9729,24 @@ function initAiTranslatorPanel() {
   });
   let activeChatThinkingSteps = AI_CHAT_THINKING_PHRASES;
 
-  function buildChatThinkingSteps({ text = "", attachments = [], willCaptureScreen = false } = {}) {
+  function buildChatThinkingSteps({ text = "", attachments = [], appAttachments = [], willCaptureScreen = false } = {}) {
     const steps = [];
     const hasAudioOrVideo = attachments.some(a => /^(audio|video)\//i.test(String(a?.mime_type || "")));
     const hasImage = attachments.some(a => /^image\//i.test(String(a?.mime_type || "")));
     const hasFile = attachments.length > 0;
+    const hasAppFiles = appAttachments.length > 0;
+    const wantsWebSearch = /https?:\/\/|\b(pesquis|busc|google|internet|notícia|noticia|hoje|atual|cotação|cotacao|preço|preco|tempo|clima|latest|search|web|online|news|price)\b/i.test(text);
     const isBoardAction = /\b(cria|crie|adicion|organiz|tabela|card|mover|mova|edit|atualiz|apag|delet|remov|conclu|link|conect|create|add|edit|move|table|organize|delete|update)\b/i.test(text);
 
     if (willCaptureScreen) {
       steps.push("Capturing screen...");
       steps.push("Analyzing screen & context...");
+    } else if (wantsWebSearch) {
+      steps.push("Searching the web...");
+      steps.push("Analyzing sources...");
+    } else if (hasAppFiles) {
+      steps.push("Reading app attachments...");
+      steps.push("Analyzing file contents...");
     } else if (hasAudioOrVideo) {
       steps.push("Processing media attachment...");
       steps.push("Extracting key details...");
@@ -11702,9 +11712,11 @@ function initAiTranslatorPanel() {
       currentMode === "chat" &&
       shouldAutoCaptureScreen(text)
     );
+    const relevantAppAttachments = collectRelevantAppAttachments(state, text, selectedNodeId, 4);
     activeChatThinkingSteps = buildChatThinkingSteps({
       text,
       attachments: currentAttachments,
+      appAttachments: relevantAppAttachments,
       willCaptureScreen
     });
     const reqId = ++activeChatRequestId;
@@ -11810,7 +11822,8 @@ function initAiTranslatorPanel() {
           messages: payloadMessages,
           formality,
           apiKey: localStorage.getItem(GEMINI_API_KEY_STORAGE) || null,
-          appContext
+          appContext,
+          appAttachments: relevantAppAttachments
         });
         if (res && typeof res === "object") {
           reply = String(res.text || "");
@@ -12175,13 +12188,32 @@ function findTaskByAction(action, ctx) {
   return curUser && curBoard ? { user: curUser, task: curBoard } : null;
 }
 
+let lastAiTouchedCardId = null;
+
 function resolveCardIdRef(rawId, ctx) {
-  if (rawId === "$LAST_CARD") return ctx?.lastCreatedCardId || selectedNodeId;
-  return rawId || selectedNodeId;
+  const board = activeBoard();
+  const fallbackBoardCardId = () => {
+    if (lastAiTouchedCardId && board?.nodes?.some(n => n.id === lastAiTouchedCardId)) {
+      return lastAiTouchedCardId;
+    }
+    if (selectedNodeId && board?.nodes?.some(n => n.id === selectedNodeId)) {
+      return selectedNodeId;
+    }
+    if (board?.nodes?.length > 1) {
+      return board.nodes[board.nodes.length - 1].id;
+    }
+    return board?.nodes?.[0]?.id || selectedNodeId || lastAiTouchedCardId;
+  };
+  if (!rawId || rawId === "$LAST_CARD") {
+    return ctx?.lastCreatedCardId || fallbackBoardCardId();
+  }
+  return rawId;
 }
 
 function findNodeLocationAcrossApp(cardId, hintAction = null, ctx = null) {
-  if (!state?.users?.length || !cardId) return null;
+  if (!state?.users?.length) return null;
+  const effectiveId = cardId || resolveCardIdRef(null, ctx);
+  if (!effectiveId) return null;
   if (hintAction && (hintAction.taskId || hintAction.taskTitle || hintAction.sourceTaskId || hintAction.sourceTaskTitle)) {
     const hinted = findTaskByAction(
       {
@@ -12193,15 +12225,26 @@ function findNodeLocationAcrossApp(cardId, hintAction = null, ctx = null) {
       ctx
     );
     if (hinted) {
-      const node = (hinted.task.nodes || []).find(n => n.id === cardId);
+      const node = (hinted.task.nodes || []).find(n => n.id === effectiveId)
+        || (hinted.task.nodes || []).slice(1).reverse().find(n => String(n.body || "").toLowerCase().includes(String(effectiveId).toLowerCase()))
+        || (effectiveId === "$LAST_CARD" ? hinted.task.nodes[hinted.task.nodes.length - 1] : null);
       if (node) return { user: hinted.user, task: hinted.task, node };
     }
   }
   for (const u of state.users) {
     for (const t of u.tasks || []) {
-      const node = (t.nodes || []).find(n => n.id === cardId);
+      const node = (t.nodes || []).find(n => n.id === effectiveId);
       if (node) return { user: u, task: t, node };
     }
+  }
+  // Fallback por texto ou ultimo card da task ativa
+  const curUser = activeUser();
+  const curBoard = activeBoard();
+  if (curUser && curBoard && curBoard.nodes?.length) {
+    const byText = curBoard.nodes.slice(1).reverse().find(n => String(n.body || "").toLowerCase().includes(String(effectiveId).toLowerCase()));
+    if (byText) return { user: curUser, task: curBoard, node: byText };
+    const lastNode = curBoard.nodes[curBoard.nodes.length - 1];
+    if (lastNode) return { user: curUser, task: curBoard, node: lastNode };
   }
   return null;
 }
@@ -12236,8 +12279,36 @@ function findFreeCardPosition(board, startX, startY, w = MIN_CARD_WIDTH, h = 144
   return { x, y };
 }
 
+const BOARD_DEPENDENT_AI_ACTIONS = new Set([
+  "create_card",
+  "create_table_card",
+  "update_card",
+  "delete_card",
+  "duplicate_card",
+  "focus_card",
+  "connect_cards",
+  "disconnect_cards",
+  "organize_canvas",
+  "center_canvas"
+]);
+
+function ensureActiveBoardForAiAction() {
+  if (activeBoard()) return true;
+  const user = activeUser() || state.users.find(u => (u.tasks || []).length) || null;
+  const task = user?.tasks?.[0] || null;
+  if (!user || !task) return false;
+  state.activeUserId = user.id;
+  user.activeTaskId = task.id;
+  saveState();
+  render();
+  return true;
+}
+
 async function runSingleAiAppAction(action, ctx) {
   const GRID = 24;
+  if (BOARD_DEPENDENT_AI_ACTIONS.has(action.type) && !ensureActiveBoardForAiAction()) {
+    throw new Error("Nenhuma task disponível. Crie uma task primeiro.");
+  }
   switch (action.type) {
     case "create_user": {
       const name = String(action.name || "").trim() || "Novo usuário";
@@ -12457,6 +12528,7 @@ async function runSingleAiAppAction(action, ctx) {
         pendingCardPop.add(id);
         selectedNodeId = id;
       }
+      lastAiTouchedCardId = id;
       saveState();
       render();
       const cardEl = nodesLayer.querySelector(`[data-id="${id}"]`);
@@ -12531,6 +12603,7 @@ async function runSingleAiAppAction(action, ctx) {
         pendingCardPop.add(id);
         selectedNodeId = id;
       }
+      lastAiTouchedCardId = id;
       saveState();
       render();
       const cardEl = nodesLayer.querySelector(`[data-id="${id}"]`);
@@ -12544,6 +12617,7 @@ async function runSingleAiAppAction(action, ctx) {
       const loc = findNodeLocationAcrossApp(targetId, action, ctx);
       if (!loc) throw new Error("Card não encontrado");
       const { node, task } = loc;
+      lastAiTouchedCardId = node.id;
       if (action.body !== undefined) {
         setNodeContent(node, sanitizeAiCardBody(action.body));
       } else if (action.appendBody) {
@@ -12660,9 +12734,12 @@ async function runSingleAiAppAction(action, ctx) {
       if (!loc) throw new Error("Card não encontrado");
       state.activeUserId = loc.user.id;
       loc.user.activeTaskId = loc.task.id;
+      selectedNodeId = loc.node.id;
+      lastAiTouchedCardId = loc.node.id;
       saveState();
       render();
-      focusCardOnNode(loc.node.id);
+      focusNodesChainAnimated([loc.node.id], { maxZoom: 1.18, padding: 96, durationMs: 420 });
+      triggerAiCardBirthHighlight(loc.node.id);
       return { message: `Card exibido em "${loc.task.title}"` };
     }
 

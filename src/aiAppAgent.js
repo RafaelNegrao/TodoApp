@@ -10,55 +10,128 @@ export const AI_ACTIONS_CLOSE_TAG = "[[/APP_ACTIONS]]";
 export const AI_QUESTIONS_OPEN_TAG = "[[APP_QUESTIONS]]";
 export const AI_QUESTIONS_CLOSE_TAG = "[[/APP_QUESTIONS]]";
 
+function tryParseBalancedJson(rawJson) {
+  const cleaned = String(rawJson || "")
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  if (!cleaned) return null;
+  try {
+    return JSON.parse(cleaned);
+  } catch (_) {
+    // Caso o modelo tenha truncado os colchetes/chaves finais do JSON, tenta balancear
+    const firstBrace = cleaned.indexOf("{");
+    if (firstBrace === -1) return null;
+    let candidate = cleaned.slice(firstBrace).replace(/,\s*$/, "");
+    let braces = 0;
+    let brackets = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = 0; i < candidate.length; i++) {
+      const ch = candidate[i];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === "{") braces++;
+      else if (ch === "}") braces = Math.max(0, braces - 1);
+      else if (ch === "[") brackets++;
+      else if (ch === "]") brackets = Math.max(0, brackets - 1);
+    }
+    if (inString) candidate += '"';
+    candidate = candidate.replace(/,\s*$/, "");
+    while (brackets > 0) {
+      candidate += "]";
+      brackets--;
+    }
+    while (braces > 0) {
+      candidate += "}";
+      braces--;
+    }
+    try {
+      return JSON.parse(candidate);
+    } catch (__) {
+      return null;
+    }
+  }
+}
+
 export function extractAiActionProposal(rawText) {
   const source = String(rawText || "");
-  const startIdx = source.indexOf(AI_ACTIONS_OPEN_TAG);
-  const endIdx = source.indexOf(AI_ACTIONS_CLOSE_TAG);
-
-  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
+  const openMatch = source.match(/\[\[?\s*APP_ACTIONS\s*\]\]?/i);
+  if (!openMatch || openMatch.index === undefined) {
     return { cleanText: source.trim(), proposal: null };
   }
 
-  const jsonStr = source.slice(startIdx + AI_ACTIONS_OPEN_TAG.length, endIdx).trim();
-  const cleanText = `${source.slice(0, startIdx)}\n${source.slice(endIdx + AI_ACTIONS_CLOSE_TAG.length)}`
+  const startIdx = openMatch.index;
+  const contentStart = startIdx + openMatch[0].length;
+  const afterOpen = source.slice(contentStart);
+  const closeMatch = afterOpen.match(/\[\[?\s*\/\s*APP_ACTIONS\s*\]\]?/i);
+
+  const jsonStr = closeMatch && closeMatch.index !== undefined
+    ? afterOpen.slice(0, closeMatch.index)
+    : afterOpen;
+  const afterClose = closeMatch && closeMatch.index !== undefined
+    ? afterOpen.slice(closeMatch.index + closeMatch[0].length)
+    : "";
+
+  const cleanText = `${source.slice(0, startIdx)}\n${afterClose}`
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  try {
-    const parsed = JSON.parse(jsonStr);
-    const actions = Array.isArray(parsed?.actions) ? parsed.actions.filter(a => a && typeof a.type === "string") : [];
-    if (!actions.length) {
-      return { cleanText, proposal: null };
-    }
-    return {
-      cleanText,
-      proposal: {
-        summary: String(parsed.summary || "Executar ações no aplicativo"),
-        actions,
-        status: "pending" // "pending" | "approved" | "rejected"
-      }
-    };
-  } catch (_) {
-    return { cleanText: source.trim(), proposal: null };
+  const parsed = tryParseBalancedJson(jsonStr);
+  const actions = Array.isArray(parsed?.actions)
+    ? parsed.actions.filter(a => a && typeof a.type === "string")
+    : [];
+  if (!actions.length) {
+    return { cleanText: cleanText || source.trim(), proposal: null };
   }
+  return {
+    cleanText,
+    proposal: {
+      summary: String(parsed.summary || "Executar ações no aplicativo"),
+      actions,
+      status: "pending"
+    }
+  };
 }
 
 export function extractAiQuestions(rawText) {
   const source = String(rawText || "");
-  const startIdx = source.indexOf(AI_QUESTIONS_OPEN_TAG);
-  const endIdx = source.indexOf(AI_QUESTIONS_CLOSE_TAG);
-
-  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
+  const openMatch = source.match(/\[\[?\s*APP_QUESTIONS\s*\]\]?/i);
+  if (!openMatch || openMatch.index === undefined) {
     return { cleanText: source.trim(), questionSet: null };
   }
 
-  const jsonStr = source.slice(startIdx + AI_QUESTIONS_OPEN_TAG.length, endIdx).trim();
-  const cleanText = `${source.slice(0, startIdx)}\n${source.slice(endIdx + AI_QUESTIONS_CLOSE_TAG.length)}`
+  const startIdx = openMatch.index;
+  const contentStart = startIdx + openMatch[0].length;
+  const afterOpen = source.slice(contentStart);
+  const closeMatch = afterOpen.match(/\[\[?\s*\/\s*APP_QUESTIONS\s*\]\]?/i);
+
+  const jsonStr = closeMatch && closeMatch.index !== undefined
+    ? afterOpen.slice(0, closeMatch.index)
+    : afterOpen;
+  const afterClose = closeMatch && closeMatch.index !== undefined
+    ? afterOpen.slice(closeMatch.index + closeMatch[0].length)
+    : "";
+
+  const cleanText = `${source.slice(0, startIdx)}\n${afterClose}`
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
   try {
-    const parsed = JSON.parse(jsonStr);
+    const parsed = tryParseBalancedJson(jsonStr);
+    if (!parsed) return { cleanText: cleanText || source.trim(), questionSet: null };
     const rawList = Array.isArray(parsed?.questions)
       ? parsed.questions
       : parsed?.prompt && Array.isArray(parsed?.options)
@@ -250,6 +323,78 @@ export function shouldAutoCaptureScreen(promptText) {
   );
 }
 
+export function collectRelevantAppAttachments(state, userPrompt = "", selectedNodeId = null, maxItems = 4) {
+  if (!state || !Array.isArray(state.users)) return [];
+  const promptLower = String(userPrompt || "").trim().toLowerCase();
+  const result = [];
+  const seen = new Set();
+
+  const pushRef = (userId, att) => {
+    if (!userId || !att?.file || result.length >= maxItems) return;
+    const key = `${userId}/${att.file}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push({
+      user_id: userId,
+      file: att.file,
+      name: att.name || att.file.split("/").pop() || "anexo",
+      mime_type: att.type || att.mime || ""
+    });
+  };
+
+  // 1. Anexos mencionados explicitamente pelo nome em qualquer user/task
+  if (promptLower.length >= 2) {
+    for (const u of state.users) {
+      for (const t of u.tasks || []) {
+        for (const a of t.attachments || []) {
+          const nameLower = String(a?.name || "").toLowerCase().trim();
+          const stemLower = nameLower.replace(/\.[^.]+$/, "");
+          if (
+            (nameLower.length >= 3 && promptLower.includes(nameLower)) ||
+            (stemLower.length >= 4 && promptLower.includes(stemLower))
+          ) {
+            pushRef(u.id, a);
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Anexos referenciados no card selecionado atualmente
+  const activeUser = state.users.find(u => u.id === state.activeUserId);
+  const activeTask = activeUser?.tasks?.find(t => t.id === activeUser.activeTaskId);
+  if (activeUser && activeTask && selectedNodeId) {
+    const node = (activeTask.nodes || []).find(n => n.id === selectedNodeId);
+    const body = String(node?.body ?? node?.title ?? "");
+    for (const m of body.matchAll(/!\[(video|audio)\]\(([^)\n]+)\)/g)) {
+      const ref = m[2].trim();
+      const slash = ref.indexOf("/");
+      if (slash > 0) {
+        const refUser = ref.slice(0, slash);
+        const refFile = ref.slice(slash + 1);
+        const matched = (activeTask.attachments || []).find(a => a.file === refFile);
+        pushRef(refUser, matched || { file: refFile, name: refFile.split("/").pop(), type: m[1] === "audio" ? "audio/mp4" : "video/mp4" });
+      }
+    }
+    for (const m of body.matchAll(/@\[[^\]\r\n]+\]\(attachment:([^)]+)\)/g)) {
+      const attId = m[1].trim();
+      const matched = (activeTask.attachments || []).find(a => a.id === attId);
+      if (matched) pushRef(activeUser.id, matched);
+    }
+  }
+
+  // 3. Se o usuario perguntar de forma geral sobre anexos/arquivos/midia, inclui os mais recentes da task ativa
+  const mentionsAttachmentsGenerically = /\b(anexo|anexos|arquivo|arquivos|pdf|audio|áudio|video|vídeo|gravação|gravacao|gravações|gravacoes|reunião|reuniao|imagem|imagens|foto|fotos|planilha|documento|documentos|relatório|relatorio|csv|txt|attachment|attachments|file|files|recording|meeting)\b/i.test(promptLower);
+  if (activeUser && activeTask && mentionsAttachmentsGenerically && result.length < maxItems) {
+    const sorted = [...(activeTask.attachments || [])].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+    for (const a of sorted) {
+      pushRef(activeUser.id, a);
+    }
+  }
+
+  return result;
+}
+
 export function buildAppContextSnapshot(state, extras = {}) {
   const operatorProfile = String(extras.operatorProfile || "").trim().slice(0, 100);
   if (!state || !Array.isArray(state.users)) {
@@ -289,7 +434,14 @@ export function buildAppContextSnapshot(state, extras = {}) {
             endDate: t.endDate || "",
             isActive: false,
             cardsCount: (t.nodes || []).length,
-            attachmentsCount: (t.attachments || []).length
+            attachmentsCount: (t.attachments || []).length,
+            attachments: (t.attachments || []).length
+              ? (t.attachments || []).map(a => ({
+                  name: a.name,
+                  file: a.file,
+                  type: a.type || ""
+                }))
+              : undefined
           };
         }
 

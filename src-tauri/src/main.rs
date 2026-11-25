@@ -310,6 +310,15 @@ struct AiChatMessage {
     attachments: Vec<AiChatAttachment>,
 }
 
+#[derive(Clone, Deserialize)]
+struct AiAppAttachmentRef {
+    user_id: String,
+    file: String,
+    name: String,
+    #[serde(default)]
+    mime_type: String,
+}
+
 fn build_schannel_agent(connect_timeout: Duration, total_timeout: Duration) -> ureq::Agent {
     let mut builder = ureq::AgentBuilder::new()
         .timeout_connect(connect_timeout)
@@ -357,7 +366,13 @@ const GEMINI_MODEL_CASCADE: &[&str] = &[
 const SIDE_CHAT_MODEL_CASCADE: &[&str] = &[
     "gemini-flash-latest",
     "gemini-3.8-flash",
+    "gemini-4-hydrogen",
+    "gemini-3.6-flash",
+    "gemini-2.5-flash",
     "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
+    "gemma-4-31b-it",
 ];
 
 fn is_deprecated_gemini_model(model: &str) -> bool {
@@ -465,15 +480,14 @@ fn mark_model_cooldown(model: &str, duration: Duration) {
 }
 
 fn is_token_limit_error(status: u16, err_lower: &str) -> bool {
-    let mentions_tokens = err_lower.contains("token")
-        || err_lower.contains("payload size")
+    let mentions_payload_or_context = err_lower.contains("payload size")
         || err_lower.contains("request payload")
         || err_lower.contains("too large")
-        || err_lower.contains("context length");
-    if status == 429 && mentions_tokens {
-        return true;
-    }
-    if matches!(status, 400 | 413) && mentions_tokens {
+        || err_lower.contains("context length")
+        || err_lower.contains("exceeds the maximum")
+        || err_lower.contains("input token count exceeds")
+        || err_lower.contains("token_limit");
+    if matches!(status, 400 | 413) && (mentions_payload_or_context || err_lower.contains("token")) {
         return true;
     }
     false
@@ -519,6 +533,9 @@ fn is_gemma_supported_inline_mime(mime: &str) -> bool {
 }
 
 fn sanitize_payload_for_gemma(mut payload: serde_json::Value) -> serde_json::Value {
+    if let Some(obj) = payload.as_object_mut() {
+        obj.remove("tools");
+    }
     if let Some(contents) = payload.get_mut("contents").and_then(|c| c.as_array_mut()) {
         for entry in contents.iter_mut() {
             if let Some(parts) = entry.get_mut("parts").and_then(|p| p.as_array_mut()) {
@@ -825,22 +842,39 @@ fn execute_gemini_fast_payload_with_model(
     };
     let mut last_err = String::from("Falha ao contatar a API do Gemini");
 
+    let has_tools = payload.get("tools").is_some();
+    let mut payload_no_tools = payload.clone();
+    if let Some(obj) = payload_no_tools.as_object_mut() {
+        obj.remove("tools");
+    }
+
     let mut payload_fast_think = payload.clone();
     payload_fast_think["generationConfig"]["thinkingConfig"] = serde_json::json!({
         "thinkingLevel": "MINIMAL"
     });
-    let payload_compat = fold_system_instruction_into_user(payload.clone());
-    let payload_compact = compact_payload_for_token_budget(&payload, 14000, true);
+    let mut payload_fast_think_no_tools = payload_no_tools.clone();
+    payload_fast_think_no_tools["generationConfig"]["thinkingConfig"] = serde_json::json!({
+        "thinkingLevel": "MINIMAL"
+    });
+    let mut payload_compat = fold_system_instruction_into_user(payload_no_tools.clone());
+    if let Some(obj) = payload_compat.as_object_mut() {
+        obj.remove("tools");
+    }
+    let mut payload_compact = compact_payload_for_token_budget(&payload_no_tools, 14000, true);
+    if let Some(obj) = payload_compact.as_object_mut() {
+        obj.remove("tools");
+    }
     let payload_gemma = sanitize_payload_for_gemma(payload_compat.clone());
     let payload_gemma_compact = sanitize_payload_for_gemma(fold_system_instruction_into_user(
-        compact_payload_for_token_budget(&payload, 10000, true),
+        compact_payload_for_token_budget(&payload_no_tools, 5000, true),
     ));
 
     let has_av_media = payload_contains_audio_or_video(&payload);
     let mut tried = std::collections::HashSet::<String>::new();
     let filtered_models: Vec<String> = models
         .iter()
-        .filter(|m| !is_deprecated_gemini_model(m) && !is_model_marked_unavailable(m))
+        .filter(|m| !is_deprecated_gemini_model(m))
+        .filter(|m| strict_side_chat_models || !is_model_marked_unavailable(m))
         .filter(|m| !has_av_media || !m.starts_with("gemma-"))
         .cloned()
         .collect();
@@ -850,6 +884,7 @@ fn execute_gemini_fast_payload_with_model(
     let mut saw_rate_limit = false;
     let mut saw_token_limit = false;
     let mut saw_auth_error = false;
+    let mut attempt_log: Vec<String> = Vec::new();
 
     loop {
         if ready_queue.is_empty() {
@@ -875,6 +910,10 @@ fn execute_gemini_fast_payload_with_model(
             }
             if !tried_cooling_fallback && !cooling_queue.is_empty() {
                 tried_cooling_fallback = true;
+                if saw_rate_limit {
+                    thread::sleep(Duration::from_millis(900));
+                }
+                tried.clear();
                 ready_queue.extend(cooling_queue.drain(..));
                 continue;
             }
@@ -891,15 +930,28 @@ fn execute_gemini_fast_payload_with_model(
             model, key
         );
 
-        let candidates = if model.starts_with("gemma-") {
-            vec![&payload_gemma, &payload_gemma_compact]
+        let candidates: Vec<&serde_json::Value> = if model.starts_with("gemma-") {
+            vec![&payload_gemma_compact, &payload_gemma]
         } else if model_prefers_minimal_thinking(&model) {
-            vec![&payload_fast_think, &payload, &payload_compat, &payload_compact]
+            if has_tools {
+                vec![
+                    &payload_fast_think,
+                    &payload_fast_think_no_tools,
+                    &payload_no_tools,
+                    &payload_compat,
+                    &payload_compact,
+                ]
+            } else {
+                vec![&payload_fast_think, &payload, &payload_compat, &payload_compact]
+            }
+        } else if has_tools {
+            vec![&payload, &payload_no_tools, &payload_compat, &payload_compact]
         } else {
             vec![&payload, &payload_compat, &payload_compact]
         };
 
         for (cand_idx, candidate_payload) in candidates.iter().enumerate() {
+            let candidate_has_tools = candidate_payload.get("tools").is_some();
             match agent
                 .post(&url)
                 .set("Content-Type", "application/json")
@@ -953,10 +1005,19 @@ fn execute_gemini_fast_payload_with_model(
                         break;
                     }
                     if is_quota_exhausted_error(code, &err_lower) {
+                        // Se a requisicao usou `tools` (google_search), tenta SEMPRE o proximo
+                        // candidato sem `tools` no mesmo modelo antes de marcar cooldown, pois
+                        // a cota de Search Grounding e separada da cota normal de geracao.
+                        if candidate_has_tools && cand_idx + 1 < candidates.len() {
+                            attempt_log.push(format!("{model}(tools): {code}"));
+                            continue;
+                        }
+                        attempt_log.push(format!("{model}: {code}"));
                         saw_rate_limit = true;
                         mark_model_cooldown(&model, quota_cooldown_duration(&err_lower));
                         break;
                     }
+                    attempt_log.push(format!("{model}: {code}"));
                     if code == 401 || code == 403 {
                         if err_lower.contains("api key") || err_lower.contains("invalid") {
                             saw_auth_error = true;
@@ -964,7 +1025,7 @@ fn execute_gemini_fast_payload_with_model(
                         }
                     }
                     if code == 503 || code == 502 || code == 500 || code == 504 {
-                        mark_model_cooldown(&model, Duration::from_secs(45));
+                        mark_model_cooldown(&model, Duration::from_secs(30));
                         break;
                     }
                     if code == 404
@@ -973,13 +1034,21 @@ fn execute_gemini_fast_payload_with_model(
                         || err_lower.contains("not found")
                         || err_lower.contains("deprecated")
                     {
-                        mark_model_unavailable(&model);
+                        if strict_side_chat_models {
+                            mark_model_cooldown(&model, Duration::from_secs(120));
+                        } else {
+                            mark_model_unavailable(&model);
+                        }
                         break;
                     }
                     if code == 400
-                        && (err_body.contains("thinkingConfig")
+                        && (candidate_has_tools
+                            || err_body.contains("thinkingConfig")
                             || err_body.contains("systemInstruction")
-                            || err_body.contains("Developer instruction"))
+                            || err_body.contains("Developer instruction")
+                            || err_lower.contains("tool")
+                            || err_lower.contains("google_search")
+                            || err_lower.contains("grounding"))
                     {
                         continue;
                     }
@@ -1001,7 +1070,14 @@ fn execute_gemini_fast_payload_with_model(
         return Err("Os arquivos anexados excederam o limite de tokens/tamanho da API Gemini. Tente enviar arquivos menores ou menos arquivos por vez.".to_string());
     }
     if saw_rate_limit {
-        return Err("Limite temporário de requisições da API Gemini atingido. Aguarde alguns segundos e tente novamente.".to_string());
+        let detail = if attempt_log.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", attempt_log.join(", "))
+        };
+        return Err(format!(
+            "Limite temporário de requisições da API Gemini atingido. Aguarde alguns segundos e tente novamente.{detail}"
+        ));
     }
     Err(last_err)
 }
@@ -1324,12 +1400,488 @@ async fn capture_current_monitor_png(app: tauri::AppHandle) -> Result<String, St
     }
 }
 
+fn is_text_like_extension(ext: &str) -> bool {
+    matches!(
+        ext,
+        "txt"
+            | "md"
+            | "markdown"
+            | "csv"
+            | "tsv"
+            | "json"
+            | "xml"
+            | "yaml"
+            | "yml"
+            | "toml"
+            | "ini"
+            | "log"
+            | "sql"
+            | "js"
+            | "ts"
+            | "jsx"
+            | "tsx"
+            | "py"
+            | "rs"
+            | "java"
+            | "cs"
+            | "cpp"
+            | "c"
+            | "h"
+            | "go"
+            | "rb"
+            | "php"
+            | "html"
+            | "htm"
+            | "css"
+            | "sh"
+            | "ps1"
+            | "bat"
+    )
+}
+
+fn infer_chat_attachment_mime(path: &Path, provided_mime: &str) -> String {
+    let clean = provided_mime
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    if !clean.is_empty() && clean != "application/octet-stream" {
+        return clean;
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "pdf" => "application/pdf".to_string(),
+        "png" => "image/png".to_string(),
+        "jpg" | "jpeg" => "image/jpeg".to_string(),
+        "gif" => "image/gif".to_string(),
+        "webp" => "image/webp".to_string(),
+        "bmp" => "image/bmp".to_string(),
+        _ => infer_media_mime(path).to_string(),
+    }
+}
+
+fn load_app_attachment_part(
+    key: &str,
+    app_root_dir: &Path,
+    att: &AiAppAttachmentRef,
+    uploaded_files: &mut Vec<String>,
+) -> Option<serde_json::Value> {
+    if att.user_id.trim().is_empty() || att.file.trim().is_empty() {
+        return None;
+    }
+    if att.user_id.contains("..") || att.file.contains("..") {
+        return None;
+    }
+    let path = app_root_dir.join(&att.user_id).join(&att.file);
+    if !path.is_file() {
+        return None;
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+
+    if is_text_like_extension(&ext) {
+        if let Ok(raw_text) = fs::read_to_string(&path) {
+            let trimmed = truncate_utf8_chars(raw_text.trim(), 28000);
+            if !trimmed.is_empty() {
+                return Some(serde_json::json!({
+                    "text": format!("--- Anexo do app: {} ---\n{}\n--- Fim de {} ---", att.name, trimmed, att.name)
+                }));
+            }
+        }
+        return None;
+    }
+
+    let mime = infer_chat_attachment_mime(&path, &att.mime_type);
+    if !is_gemini_supported_inline_mime(&mime) {
+        return Some(serde_json::json!({
+            "text": format!("[Anexo do app: {} (tipo {} não suportado diretamente como binário)]", att.name, mime)
+        }));
+    }
+
+    let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    if size == 0 {
+        return None;
+    }
+
+    if size <= 15 * 1024 * 1024 {
+        let bytes = fs::read(&path).ok()?;
+        return Some(serde_json::json!({
+            "inlineData": {
+                "mimeType": mime,
+                "data": encode_base64(&bytes)
+            }
+        }));
+    }
+
+    if let Ok((fname, furi)) = upload_gemini_media_file(key, &path, &mime) {
+        uploaded_files.push(fname);
+        return Some(serde_json::json!({
+            "fileData": {
+                "mimeType": mime,
+                "fileUri": furi
+            }
+        }));
+    }
+    None
+}
+
+fn extract_http_urls(text: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    for token in text.split_whitespace() {
+        let trimmed = token.trim_matches(|c: char| {
+            matches!(c, '(' | ')' | '[' | ']' | '<' | '>' | '"' | '\'' | ',' | ';' | '.')
+        });
+        if (trimmed.starts_with("https://") || trimmed.starts_with("http://"))
+            && trimmed.len() > 10
+            && !urls.iter().any(|u| u == trimmed)
+        {
+            urls.push(trimmed.to_string());
+            if urls.len() >= 2 {
+                break;
+            }
+        }
+    }
+    urls
+}
+
+fn strip_html_to_plain_text(html: &str) -> String {
+    let mut out = String::with_capacity(html.len().min(16384));
+    let mut in_tag = false;
+    let mut in_skip_block = false;
+    let mut tag_buf = String::new();
+
+    for ch in html.chars() {
+        if ch == '<' {
+            in_tag = true;
+            tag_buf.clear();
+            continue;
+        }
+        if ch == '>' && in_tag {
+            in_tag = false;
+            let tag_lower = tag_buf.trim().to_lowercase();
+            if tag_lower.starts_with("script") || tag_lower.starts_with("style") || tag_lower.starts_with("noscript") {
+                in_skip_block = true;
+            } else if tag_lower.starts_with("/script") || tag_lower.starts_with("/style") || tag_lower.starts_with("/noscript") {
+                in_skip_block = false;
+            }
+            if !in_skip_block {
+                out.push(' ');
+            }
+            continue;
+        }
+        if in_tag {
+            if tag_buf.len() < 24 {
+                tag_buf.push(ch);
+            }
+            continue;
+        }
+        if !in_skip_block {
+            out.push(ch);
+        }
+    }
+
+    let mut collapsed = String::with_capacity(out.len().min(12000));
+    let mut last_ws = true;
+    for ch in out.chars() {
+        if ch.is_whitespace() {
+            if !last_ws {
+                collapsed.push(' ');
+                last_ws = true;
+            }
+        } else {
+            collapsed.push(ch);
+            last_ws = false;
+        }
+        if collapsed.len() >= 10000 {
+            break;
+        }
+    }
+    collapsed.trim().to_string()
+}
+
+fn normalize_ascii_lower(input: &str) -> String {
+    input
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'á' | 'à' | 'ã' | 'â' | 'ä' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ò' | 'õ' | 'ô' | 'ö' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            _ => c,
+        })
+        .collect()
+}
+
+fn prompt_needs_currency_rates(text: &str) -> bool {
+    let norm = normalize_ascii_lower(text);
+    let currency_keywords = [
+        "cota",
+        "dolar",
+        "usd",
+        "euro",
+        "eur",
+        "bitcoin",
+        "btc",
+        "cambio",
+        "moeda",
+        "iene",
+        "libra",
+    ];
+    currency_keywords.iter().any(|kw| norm.contains(kw))
+}
+
+fn prompt_needs_web_search(text: &str) -> bool {
+    let norm = normalize_ascii_lower(text);
+    if norm.contains("http://") || norm.contains("https://") || norm.contains("www.") {
+        return true;
+    }
+    if prompt_needs_currency_rates(text) {
+        return true;
+    }
+    let web_keywords = [
+        "pesquis",
+        "busc",
+        "procur",
+        "google",
+        "internet",
+        "web",
+        "online",
+        "noticia",
+        "hoje",
+        "agora",
+        "atual",
+        "recente",
+        "ultim",
+        "preco",
+        "valor",
+        "clima",
+        "tempo em",
+        "previsao",
+        "quem e",
+        "quem foi",
+        "quando foi",
+        "quando e",
+        "onde fica",
+        "o que aconteceu",
+        "resultado",
+        "placar",
+        "2025",
+        "2026",
+        "2027",
+        "search",
+        "latest",
+        "current",
+        "news",
+        "weather",
+        "price",
+        "stock",
+    ];
+    web_keywords.iter().any(|kw| norm.contains(kw))
+}
+
+fn fetch_live_currency_context() -> Option<String> {
+    let agent = build_schannel_agent(Duration::from_secs(3), Duration::from_secs(5));
+    let url = "https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL,BTC-BRL,GBP-BRL";
+    let resp = agent
+        .get(url)
+        .set("User-Agent", "TODOCompanion/1.0")
+        .call()
+        .ok()?;
+    let json: serde_json::Value = resp.into_json().ok()?;
+    let mut lines = Vec::new();
+    for key in ["USDBRL", "EURBRL", "BTCBRL", "GBPBRL"] {
+        let item = &json[key];
+        if let (Some(name), Some(bid), Some(high), Some(low), Some(pct)) = (
+            item["name"].as_str(),
+            item["bid"].as_str(),
+            item["high"].as_str(),
+            item["low"].as_str(),
+            item["pctChange"].as_str(),
+        ) {
+            let date = item["create_date"].as_str().unwrap_or("");
+            lines.push(format!(
+                "- {name}: R$ {bid} (variação: {pct}%, máx: R$ {high}, mín: R$ {low}, atualizado em: {date})"
+            ));
+        }
+    }
+    if lines.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "--- COTAÇÕES EM TEMPO REAL (AwesomeAPI) ---\n{}\n--- FIM DAS COTAÇÕES ---",
+            lines.join("\n")
+        ))
+    }
+}
+
+fn url_encode_query(q: &str) -> String {
+    let mut out = String::new();
+    for b in q.trim().bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => {
+                out.push(b as char);
+            }
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
+fn extract_xml_tag_values(xml: &str, tag: &str) -> Vec<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let mut values = Vec::new();
+    let mut rest = xml;
+    while let Some(start) = rest.find(&open) {
+        let after_open = &rest[start + open.len()..];
+        if let Some(end) = after_open.find(&close) {
+            let raw = after_open[..end]
+                .replace("<![CDATA[", "")
+                .replace("]]>", "");
+            let cleaned = strip_html_to_plain_text(&raw)
+                .replace("&amp;", "&")
+                .replace("&quot;", "\"")
+                .replace("&#39;", "'")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">");
+            if !cleaned.is_empty() {
+                values.push(cleaned);
+            }
+            rest = &after_open[end + close.len()..];
+        } else {
+            break;
+        }
+    }
+    values
+}
+
+fn fetch_live_web_search_context(query: &str) -> Option<String> {
+    let clean_q = query.trim();
+    if clean_q.is_empty() {
+        return None;
+    }
+    let agent = build_schannel_agent(Duration::from_secs(3), Duration::from_secs(6));
+    let encoded = url_encode_query(clean_q);
+    let mut sections = Vec::new();
+
+    // 1. DuckDuckGo HTML snippets
+    let ddg_url = format!("https://html.duckduckgo.com/html/?q={encoded}");
+    if let Ok(resp) = agent
+        .get(&ddg_url)
+        .set(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        )
+        .call()
+    {
+        if let Ok(html) = resp.into_string() {
+            let mut snippets = Vec::new();
+            let mut rest = html.as_str();
+            while let Some(pos) = rest.find("result__snippet") {
+                let after = &rest[pos..];
+                if let Some(gt) = after.find('>') {
+                    let content_rest = &after[gt + 1..];
+                    let end_pos = content_rest
+                        .find("</a>")
+                        .or_else(|| content_rest.find("</div>"))
+                        .unwrap_or(0);
+                    if end_pos > 0 {
+                        let snippet = strip_html_to_plain_text(&content_rest[..end_pos])
+                            .replace("&amp;", "&")
+                            .replace("&quot;", "\"")
+                            .replace("&#x27;", "'")
+                            .replace("&#39;", "'");
+                        if snippet.len() > 25 && !snippets.iter().any(|s| s == &snippet) {
+                            snippets.push(format!("• {snippet}"));
+                            if snippets.len() >= 6 {
+                                break;
+                            }
+                        }
+                    }
+                    rest = &content_rest[end_pos..];
+                } else {
+                    break;
+                }
+            }
+            if !snippets.is_empty() {
+                sections.push(format!("Resultados da Web:\n{}", snippets.join("\n")));
+            }
+        }
+    }
+
+    // 2. Google News RSS (ótimo para fatos, notícias e acontecimentos recentes)
+    let rss_url = format!(
+        "https://news.google.com/rss/search?q={encoded}&hl=pt-BR&gl=BR&ceid=BR:pt-419"
+    );
+    if let Ok(resp) = agent
+        .get(&rss_url)
+        .set("User-Agent", "TODOCompanion/1.0")
+        .call()
+    {
+        if let Ok(xml) = resp.into_string() {
+            let titles = extract_xml_tag_values(&xml, "title");
+            let pub_dates = extract_xml_tag_values(&xml, "pubDate");
+            let mut news_lines = Vec::new();
+            for (idx, title) in titles.iter().skip(1).take(5).enumerate() {
+                let date_str = pub_dates.get(idx).map(|d| d.as_str()).unwrap_or("");
+                if date_str.is_empty() {
+                    news_lines.push(format!("• {title}"));
+                } else {
+                    news_lines.push(format!("• {title} ({date_str})"));
+                }
+            }
+            if !news_lines.is_empty() {
+                sections.push(format!("Notícias recentes:\n{}", news_lines.join("\n")));
+            }
+        }
+    }
+
+    if sections.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "--- DADOS DA INTERNET EM TEMPO REAL PARA \"{clean_q}\" ---\n{}\n--- FIM DOS DADOS DA INTERNET ---",
+            sections.join("\n\n")
+        ))
+    }
+}
+
+fn fetch_url_text_context(url: &str) -> Option<String> {
+    let agent = build_schannel_agent(Duration::from_secs(4), Duration::from_secs(8));
+    let resp = agent
+        .get(url)
+        .set("User-Agent", "TODOCompanion/1.0")
+        .call()
+        .ok()?;
+    let body = resp.into_string().ok()?;
+    let cleaned = strip_html_to_plain_text(&body);
+    if cleaned.len() < 40 {
+        return None;
+    }
+    Some(truncate_utf8_chars(&cleaned, 9000))
+}
+
 #[tauri::command]
 async fn ai_chat_english(
+    app: tauri::AppHandle,
     messages: Vec<AiChatMessage>,
     formality: u8,
     api_key: Option<String>,
     app_context: Option<String>,
+    app_attachments: Option<Vec<AiAppAttachmentRef>>,
 ) -> Result<AiChatReply, String> {
     if messages.is_empty() {
         return Ok(AiChatReply {
@@ -1342,24 +1894,30 @@ async fn ai_chat_english(
     }
 
     let (key, _models) = resolve_gemini_key_and_models(api_key)?;
+    let root_dir = app_root(&app).ok();
     let models: Vec<String> = SIDE_CHAT_MODEL_CASCADE
         .iter()
         .map(|model| (*model).to_string())
         .collect();
     let _ = formality;
     let ctx_json = app_context.unwrap_or_else(|| "{}".to_string());
+    let extra_app_attachments = app_attachments.unwrap_or_default();
 
     tauri::async_runtime::spawn_blocking(move || {
         let system_prompt = format!(
-            "You are the integrated AI Agent of TODOCompanion with full visibility and control over the app.\n\
+            "You are the integrated AI Agent of TODOCompanion with full visibility and control over the app, live internet search (Google Search), and direct access to app attachments.\n\
              Always reply in the same language the user writes in.\n\n\
+             INTERNET & APP ATTACHMENTS CAPABILITIES (CRITICAL SINGLE-TURN RULE):\n\
+             - NEVER reply with a placeholder like 'Vou buscar para você agora mesmo!', 'Aguarde enquanto pesquiso...', or 'Vou verificar...' and stop! You do NOT have a second turn.\n\
+             - You MUST always deliver the complete, final answer with the actual data, numbers, or facts in THIS single response.\n\
+             - Real-time internet data (live currency rates, web search results, news, and extracted URL contents) and app attachments (PDFs, images, audio, video, text/CSV files) are ALREADY injected directly into the user's message below whenever applicable — read them and answer directly.\n\n\
              OPERATOR vs. TASK USERS (CRITICAL):\n\
              - The person operating TODOCompanion and chatting with you is defined in LIVE APP STATE `operatorProfile` (if present).\n\
              - `users[]` in LIVE APP STATE are NOT the operator — they are the clients/people/contexts FOR WHOM the operator is creating or executing tasks. Never assume a `users[].name` is the person talking to you.\n\n\
              APP STRUCTURE & RULES:\n\
              1. Hierarchy: Users (assignees/clients) -> Tasks (status: ongoing|stopped|complete, priority: low|normal|high|urgent, criticality: 0|1|2, startDate, endDate, attachments) -> Canvas Cards & Links.\n\
              2. Card Types (NEVER use HTML tags like <br>, <p>, <div>; use '\\n' and plain text):\n\
-                - Action Card (type:\"action\"): text, checklists (\"[ ]\"/\"[x]\"), images, video (\"![video](userId/file)\"), attachment chips (\"@[name](attachment:id)\").\n\
+                - Action Card (type:\"action\"): text, checklists (\"[ ]\"/\"[x]\"), images, video (\"![video](userId/file)\"), audio (\"![audio](userId/file)\"), attachment chips (\"@[name](attachment:id)\").\n\
                 - Table Card (type:\"table\", hasCheckboxes:false): use `create_table_card` with Excel formulas (SUM/SOMA, AVERAGE/MEDIA, IF/SE, SUMIF/SOMASE, VLOOKUP/PROCV, etc.).\n\
                 - Todo List Table Card (type:\"table\", hasCheckboxes:true): use `create_table_card` with \"[ ]\"/\"[x]\" in col 0.\n\
                 - Per-row connections: `fromRow`/`toRow` (0-indexed) in `connect_cards`.\n\
@@ -1369,26 +1927,66 @@ async fn ai_chat_english(
              [[APP_QUESTIONS]]\n\
              {{\"questions\":[{{\"id\":\"q1\",\"type\":\"choice|checkbox|chips|toggle|slider|rating|text|date\",\"prompt\":\"...\",\"multiSelect\":false,\"allowCustom\":true,\"options\":[{{\"label\":\"...\",\"value\":\"...\",\"description\":\"...\",\"badge\":\"Recomendado\"}}]}}]}}\n\
              [[/APP_QUESTIONS]]\n\n\
-             APP ACTIONS ([[APP_ACTIONS]]):\n\
-             - When the user wants to create, edit, delete, connect, organize, focus, copy, or change settings, append ONE block:\n\
+             APP ACTIONS ([[APP_ACTIONS]] — CRITICAL RULES):\n\
+             - Whenever the user asks to create, add, edit, update, delete, connect, focus/show/indicate on canvas ('indique no canva', 'mostre no canva', 'navegue no canva', 'foque no card'), organize, copy, or change settings, you MUST include ONE [[APP_ACTIONS]] block at the end of your reply using EXACTLY `[[APP_ACTIONS]]` and `[[/APP_ACTIONS]]` (with TWO brackets on both tags!):\n\
              [[APP_ACTIONS]]\n\
              {{\"summary\":\"Short description\",\"actions\":[...]}}\n\
              [[/APP_ACTIONS]]\n\
-             - Non-destructive actions execute AUTOMATICALLY right away (do not ask the user to click 'Permitir').\n\
-             - Destructive actions (delete_user, delete_task, delete_card, disconnect_cards) show a confirmation card automatically.\n\
+             - Always write a short, friendly confirmation line BEFORE `[[APP_ACTIONS]]` (e.g. 'Pronto! Criei o card com a informação no canvas.').\n\
+             - Non-destructive actions execute AUTOMATICALLY right away; destructive actions (delete_user, delete_task, delete_card, disconnect_cards) ask confirmation automatically.\n\
+             - IMPORTANT CONTEXT RULES:\n\
+               * When the user says 'adicione um card com essa info' / 'coloque isso num card' / 'crie um card com isso', take the information from the previous message(s) in the conversation and put the full text inside `create_card` -> `body`!\n\
+               * When the user says 'indique no canva' / 'mostre no canva' / 'navegue até esse card' / 'onde está esse card', use `focus_card` with the card's real `id` from `LIVE APP STATE` (`nodes[].id`, e.g. `\"action-...\"`). Only use `\"$LAST_CARD\"` when chaining after a `create_card` in the same actions array (or to focus the most recent card).\n\
+               * If `taskId` is omitted on `create_card`, `create_table_card`, `update_card`, or `focus_card`, it automatically targets the currently active task.\n\
              - Action schemas:\n\
-               create_user{{name}} | rename_user{{userId,userName,newName}} | delete_user{{userId,userName}} | select_user{{userId,userName}}\n\
-               create_task{{userId,userName,title,status,priority,startDate,endDate}} | update_task{{taskId,taskTitle,title,status,priority,criticality,startDate,endDate}} | delete_task{{taskId,taskTitle}} | duplicate_task{{taskId,taskTitle}} | select_task{{taskId,taskTitle,userName}}\n\
-               create_table_card{{taskId,taskTitle,userName,hasCheckboxes,rows,parentCardId:\"...|$LAST_CARD\",parentRow}} | create_card{{taskId,taskTitle,userName,body,status,criticality,parentCardId:\"...|$LAST_CARD\"}} | update_card{{cardId:\"...|$LAST_CARD\",taskId,taskTitle,body,appendBody,status,criticality}} | delete_card{{cardId,taskId,taskTitle}} | duplicate_card{{cardId,taskId,taskTitle}} | copy_card_to_task{{sourceCardId,sourceTaskId,targetTaskId,targetTaskTitle,targetUserName}} | move_card_to_task{{sourceCardId,sourceTaskId,targetTaskId,targetTaskTitle,targetUserName}} | focus_card{{cardId:\"...|$LAST_CARD\",taskId,taskTitle}} | connect_cards{{taskId,fromCardId:\"...|$LAST_CARD\",toCardId:\"...|$LAST_CARD\",fromRow,toRow}} | disconnect_cards{{taskId,fromCardId,toCardId}}\n\
-               organize_canvas{{}} | center_canvas{{}} | copy_text{{text}} | set_status_filter{{filter}} | open_translator{{floating}} | open_settings{{}} | update_settings{{theme,cardFontSize,linkStyle,linkArrows,translatorMode}}\n\n\
+               * {{\"type\":\"create_card\",\"body\":\"Texto do card (use \\n para quebras de linha, [ ] para checklist)\",\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2,\"parentCardId\":\"optional_id_or_$LAST_CARD\"}}\n\
+               * {{\"type\":\"create_table_card\",\"hasCheckboxes\":false|true,\"rows\":[[\"Col1\",\"Col2\"],[\"Val1\",\"=SOMA(B2:B2)\"]],\"parentCardId\":\"optional_id_or_$LAST_CARD\"}}\n\
+               * {{\"type\":\"update_card\",\"cardId\":\"real_card_id_from_nodes\",\"body\":\"Novo texto completo\",\"appendBody\":\"Ou texto para adicionar ao final\",\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2}}\n\
+               * {{\"type\":\"focus_card\",\"cardId\":\"real_card_id_from_nodes\"}}\n\
+               * {{\"type\":\"delete_card\",\"cardId\":\"real_card_id_from_nodes\"}}\n\
+               * {{\"type\":\"duplicate_card\",\"cardId\":\"real_card_id_from_nodes\"}}\n\
+               * {{\"type\":\"connect_cards\",\"fromCardId\":\"id1\",\"toCardId\":\"id2\",\"fromRow\":0,\"toRow\":0}}\n\
+               * {{\"type\":\"disconnect_cards\",\"fromCardId\":\"id1\",\"toCardId\":\"id2\"}}\n\
+               * {{\"type\":\"copy_card_to_task\",\"sourceCardId\":\"id\",\"targetTaskTitle\":\"...\"}}\n\
+               * {{\"type\":\"move_card_to_task\",\"sourceCardId\":\"id\",\"targetTaskTitle\":\"...\"}}\n\
+               * {{\"type\":\"organize_canvas\"}} | {{\"type\":\"center_canvas\"}} | {{\"type\":\"copy_text\",\"text\":\"...\"}}\n\
+               * {{\"type\":\"create_task\",\"title\":\"...\",\"priority\":\"low|normal|high|urgent\",\"startDate\":\"YYYY-MM-DD\",\"endDate\":\"YYYY-MM-DD\"}}\n\
+               * {{\"type\":\"update_task\",\"taskId\":\"...\",\"title\":\"...\",\"status\":\"ongoing|stopped|complete\",\"priority\":\"low|normal|high|urgent\",\"criticality\":0|1|2}}\n\
+               * {{\"type\":\"select_task\",\"taskId\":\"...\",\"taskTitle\":\"...\"}}\n\
+               * {{\"type\":\"delete_task\",\"taskId\":\"...\"}} | {{\"type\":\"duplicate_task\",\"taskId\":\"...\"}}\n\
+               * {{\"type\":\"create_user\",\"name\":\"...\"}} | {{\"type\":\"rename_user\",\"userId\":\"...\",\"newName\":\"...\"}} | {{\"type\":\"select_user\",\"userName\":\"...\"}} | {{\"type\":\"delete_user\",\"userId\":\"...\"}}\n\
+               * {{\"type\":\"set_status_filter\",\"filter\":\"all|ongoing|stopped|complete\"}} | {{\"type\":\"open_translator\",\"floating\":true|false}} | {{\"type\":\"open_settings\"}} | {{\"type\":\"update_settings\",\"theme\":\"claude-dark|light-claude|dracula\",\"cardFontSize\":14,\"linkStyle\":\"orthogonal|bezier\",\"linkArrows\":true|false,\"translatorMode\":\"auto|manual\"}}\n\n\
              LIVE APP STATE (JSON):\n{ctx_json}"
         );
 
+        let mut uploaded_files: Vec<String> = Vec::new();
+        let filtered_msgs: Vec<AiChatMessage> = messages
+            .into_iter()
+            .filter(|m| !m.text.trim().is_empty() || !m.attachments.is_empty())
+            .collect();
+        let last_user_text = filtered_msgs
+            .last()
+            .map(|m| m.text.clone())
+            .unwrap_or_default();
+        let enable_web_search = prompt_needs_web_search(&last_user_text);
+        let enable_currency = prompt_needs_currency_rates(&last_user_text);
+        let live_currency_block = if enable_currency {
+            fetch_live_currency_context()
+        } else {
+            None
+        };
+        let live_web_block = if enable_web_search {
+            fetch_live_web_search_context(&last_user_text)
+        } else {
+            None
+        };
+        let last_idx = filtered_msgs.len().saturating_sub(1);
+
         let contents = normalize_gemini_contents(
-            messages
+            filtered_msgs
                 .into_iter()
-                .filter(|m| !m.text.trim().is_empty() || !m.attachments.is_empty())
-                .map(|m| {
+                .enumerate()
+                .map(|(msg_idx, m)| {
                     let role = if m.role == "model" || m.role == "assistant" {
                         "model"
                     } else {
@@ -1435,6 +2033,29 @@ async fn ai_chat_english(
                         }
                     }
 
+                    if msg_idx == last_idx && role == "user" {
+                        if let Some(ref root) = root_dir {
+                            for app_att in &extra_app_attachments {
+                                if let Some(part) = load_app_attachment_part(&key, root, app_att, &mut uploaded_files) {
+                                    parts.push(part);
+                                }
+                            }
+                        }
+                        for url in extract_http_urls(&m.text) {
+                            if let Some(page_txt) = fetch_url_text_context(&url) {
+                                parts.push(serde_json::json!({
+                                    "text": format!("--- Conteúdo da URL {} ---\n{}\n--- Fim da URL ---", url, page_txt)
+                                }));
+                            }
+                        }
+                        if let Some(ref cur_txt) = live_currency_block {
+                            parts.push(serde_json::json!({ "text": cur_txt }));
+                        }
+                        if let Some(ref web_txt) = live_web_block {
+                            parts.push(serde_json::json!({ "text": web_txt }));
+                        }
+                    }
+
                     if !m.text.trim().is_empty() {
                         parts.push(serde_json::json!({ "text": m.text }));
                     } else if parts.is_empty() {
@@ -1449,7 +2070,7 @@ async fn ai_chat_english(
                 .collect(),
         );
 
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "systemInstruction": {
                 "parts": [{ "text": system_prompt }]
             },
@@ -1458,9 +2079,26 @@ async fn ai_chat_english(
                 "temperature": 0.4
             }
         });
+        if enable_web_search {
+            payload["tools"] = serde_json::json!([
+                { "google_search": {} }
+            ]);
+        }
 
-        let (text, model, usage) =
-            execute_gemini_fast_payload_with_model(&key, &models, payload, false)?;
+        let result = execute_gemini_fast_payload_with_model(&key, &models, payload, false);
+
+        for fname in uploaded_files {
+            let del_url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/{}?key={}",
+                fname, key
+            );
+            let _ = default_http_agent()
+                .delete(&del_url)
+                .timeout(Duration::from_secs(15))
+                .call();
+        }
+
+        let (text, model, usage) = result?;
         Ok(AiChatReply {
             text,
             model,
