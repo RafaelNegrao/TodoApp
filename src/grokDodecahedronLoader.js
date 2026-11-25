@@ -3,14 +3,14 @@ const RAD = Math.PI / 180;
 const PENTAGON_STEP = (Math.PI * 2) / 5;
 
 const DEFAULT_SPHERE_CONFIG = Object.freeze({
-  slowSpeed: 0.28,
+  slowSpeed: 0.85,
   fastSpeed: 6.5,
   burstDur: 0.10,
   burstChance: 0.25,
-  slowArc: 5,
-  fastArc: 22,
+  slowArc: 16,
+  fastArc: 28,
   axisSmooth: 5,
-  ease: 0.6,
+  ease: 0.45,
   pause: 0,
   layerProb: 0.45,
   layerSpeed: 1,

@@ -192,6 +192,79 @@ fn toggle_maximize_window(app: tauri::AppHandle, state: State<'_, FloatingTransl
     }
 }
 
+#[cfg(target_os = "windows")]
+fn apply_windows_taskbar_and_capture_protection(
+    window: &tauri::WebviewWindow,
+    enabled: bool,
+) -> Result<(), String> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowDisplayAffinity, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+        GWL_EXSTYLE, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOW,
+        SW_SHOWMAXIMIZED, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    };
+
+    let raw_hwnd = window
+        .hwnd()
+        .map_err(|e| format!("Falha ao obter HWND da janela: {e}"))?;
+    let hwnd = HWND(raw_hwnd.0 as *mut core::ffi::c_void);
+    let was_visible = window.is_visible().unwrap_or(true);
+    let was_maximized = window.is_maximized().unwrap_or(false);
+
+    unsafe {
+        let affinity = if enabled {
+            WDA_EXCLUDEFROMCAPTURE
+        } else {
+            WDA_NONE
+        };
+        let _ = SetWindowDisplayAffinity(hwnd, affinity);
+
+        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let new_style = if enabled {
+            (ex_style | WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_APPWINDOW.0 as isize)
+        } else {
+            (ex_style & !(WS_EX_TOOLWINDOW.0 as isize)) | (WS_EX_APPWINDOW.0 as isize)
+        };
+
+        if new_style != ex_style {
+            if was_visible {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+            );
+            if was_visible {
+                let _ = ShowWindow(hwnd, if was_maximized { SW_SHOWMAXIMIZED } else { SW_SHOW });
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_screen_share_protection(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Err("Main window not found".to_string());
+    };
+    window
+        .set_content_protected(enabled)
+        .map_err(|e| format!("Falha ao configurar proteção de tela: {e}"))?;
+    #[cfg(target_os = "windows")]
+    apply_windows_taskbar_and_capture_protection(&window, enabled)?;
+    let _ = window.set_skip_taskbar(enabled);
+    if window.is_visible().unwrap_or(false) {
+        let _ = window.set_focus();
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn state_load(db: State<'_, DbState>) -> Result<Option<String>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -5466,6 +5539,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             minimize_window,
             toggle_maximize_window,
+            set_screen_share_protection,
             set_translator_floating_mode,
             state_load,
             state_save,

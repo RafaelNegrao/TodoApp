@@ -7,6 +7,7 @@ const closeIcon = document.querySelector("#settingsCloseIcon");
 const doneButton = document.querySelector("#settingsDoneButton");
 const versionEl = document.querySelector("#settingsVersionValue");
 const autostartInput = document.querySelector("#settingsAutostartInput");
+const screenShareProtectionInput = document.querySelector("#settingsScreenShareProtectionInput");
 const linkStyleInput = document.querySelector("#settingsLinkStyleInput");
 const linkArrowsInput = document.querySelector("#settingsLinkArrowsInput");
 const themeInput = document.querySelector("#settingsThemeInput");
@@ -26,6 +27,7 @@ const THEME_KEY = "todocompanion.settings.theme";
 const CARD_FONT_SIZE_KEY = "todocompanion.settings.cardFontSize";
 const TRANSLATOR_MODE_KEY = "todocompanion.settings.translatorMode";
 const OPERATOR_PROFILE_KEY = "todocompanion.settings.aiOperatorProfile";
+const SCREEN_SHARE_PROTECTION_KEY = "todocompanion.settings.hideFromScreenShare";
 const OPERATOR_PROFILE_MAX_LEN = 100;
 const THEMES = ["claude-dark", "light-claude", "dracula"];
 const DEFAULT_THEME = "claude-dark";
@@ -129,6 +131,9 @@ async function loadSettings() {
     operatorProfileInput.value = savedProfile;
     syncOperatorProfileCount(savedProfile.length);
   }
+  if (screenShareProtectionInput) {
+    screenShareProtectionInput.checked = currentScreenShareProtection();
+  }
 
   if (!invoke) return;
 
@@ -198,6 +203,36 @@ function persistOperatorProfile(event) {
   }
   localStorage.setItem(OPERATOR_PROFILE_KEY, raw.trim());
   syncOperatorProfileCount(raw.length);
+}
+
+function currentScreenShareProtection() {
+  return localStorage.getItem(SCREEN_SHARE_PROTECTION_KEY) === "true";
+}
+
+async function applyScreenShareProtection(enabled) {
+  if (!invoke) return;
+  try {
+    await invoke("set_screen_share_protection", { enabled: Boolean(enabled) });
+  } catch (err) {
+    console.warn("[settings] set_screen_share_protection failed", err);
+  }
+}
+
+async function persistScreenShareProtection(event) {
+  const checkbox = event.target;
+  const desired = Boolean(checkbox.checked);
+  checkbox.disabled = true;
+  try {
+    if (invoke) {
+      await invoke("set_screen_share_protection", { enabled: desired });
+    }
+    localStorage.setItem(SCREEN_SHARE_PROTECTION_KEY, desired ? "true" : "false");
+  } catch (err) {
+    console.warn("[settings] set_screen_share_protection failed", err);
+    checkbox.checked = !desired;
+  } finally {
+    checkbox.disabled = false;
+  }
 }
 
 function persistTranslatorMode(event) {
@@ -272,6 +307,7 @@ export function initSettings() {
     if (event.target === modal) close();
   });
   autostartInput?.addEventListener("change", persistAutostart);
+  screenShareProtectionInput?.addEventListener("change", persistScreenShareProtection);
   linkStyleInput?.addEventListener("change", persistLinkStyle);
   linkArrowsInput?.addEventListener("change", persistLinkArrows);
   themeInput?.addEventListener("change", persistTheme);
@@ -287,6 +323,7 @@ export function initSettings() {
   });
   applyTheme(currentTheme());
   applyCardFontSize(currentCardFontSize());
+  applyScreenShareProtection(currentScreenShareProtection());
 
   closeButton?.addEventListener("click", hideApp);
 
