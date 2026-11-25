@@ -242,67 +242,118 @@ export function describeAiAction(action) {
   }
 }
 
+export function shouldAutoCaptureScreen(promptText) {
+  const text = String(promptText || "").trim();
+  if (!text) return false;
+  return /\b(tela|screen|print|screenshot|monitor|janela|window|aparecendo|mostrando|olh[ea]|vej[aa]|aqui na tela|na minha tela|on my screen|what is this|o que [eé] isso|este erro|esse erro|this error|este campo|esse campo|este bot[aã]o|esse bot[aã]o)\b/i.test(
+    text
+  );
+}
+
 export function buildAppContextSnapshot(state, extras = {}) {
+  const operatorProfile = String(extras.operatorProfile || "").trim().slice(0, 100);
   if (!state || !Array.isArray(state.users)) {
-    return JSON.stringify({ users: [] });
+    return JSON.stringify({
+      operatorProfile: operatorProfile || undefined,
+      users: []
+    });
   }
 
-  const users = state.users.map(u => ({
-    id: u.id,
-    name: u.name,
-    isActive: u.id === state.activeUserId,
-    tasks: (u.tasks || []).map(t => ({
-      id: t.id,
-      number: t.number || null,
-      title: t.title,
-      status: t.status || "ongoing",
-      priority: t.priority || "normal",
-      criticality: t.criticality ?? 0,
-      startDate: t.startDate || "",
-      endDate: t.endDate || "",
-      isActive: u.id === state.activeUserId && t.id === u.activeTaskId,
-      nodes: (t.nodes || []).map((n, idx) => {
-        const rawBody = String(n.body ?? n.title ?? "");
-        const tableMatch = rawBody.match(/\[\[table:([A-Za-z0-9_-]+)\]\]/);
-        const nodeSnap = {
-          id: n.id,
-          isRoot: idx === 0,
-          type: n.type || "action",
-          status: n.status || "ongoing",
-          criticality: n.criticality ?? 0,
-          body: rawBody.replace(/\[\[table:[A-Za-z0-9_-]+\]\]/g, "[tabela]").slice(0, 600)
-        };
-        if (tableMatch) {
-          const decoded = decodeTableData(tableMatch[1]);
-          nodeSnap.table = {
-            hasCheckboxes: Boolean(decoded.hasCheckboxes),
-            rows: decoded.rows
+  const promptLower = String(extras.userPrompt || "").trim().toLowerCase();
+  const wantsAllTasksDetails =
+    !extras.compactOnlyActive ||
+    /\b(todas as tasks|todos os cards|all tasks|all cards|resumo geral|todas as tarefas)\b/i.test(promptLower);
+
+  const users = state.users.map(u => {
+    const isUserActive = u.id === state.activeUserId;
+    return {
+      id: u.id,
+      name: u.name,
+      isActive: isUserActive,
+      tasks: (u.tasks || []).map(t => {
+        const isTaskActive = isUserActive && t.id === u.activeTaskId;
+        const titleLower = String(t.title || "").toLowerCase();
+        const isTaskMentioned =
+          promptLower.length >= 3 && titleLower.length >= 3 && promptLower.includes(titleLower);
+        const includeFullNodes = isTaskActive || isTaskMentioned || wantsAllTasksDetails;
+
+        if (!includeFullNodes) {
+          return {
+            id: t.id,
+            number: t.number || null,
+            title: t.title,
+            status: t.status || "ongoing",
+            priority: t.priority || "normal",
+            criticality: t.criticality ?? 0,
+            startDate: t.startDate || "",
+            endDate: t.endDate || "",
+            isActive: false,
+            cardsCount: (t.nodes || []).length,
+            attachmentsCount: (t.attachments || []).length
           };
         }
-        return nodeSnap;
-      }),
-      attachments: (t.attachments || []).map(a => ({
-        id: a.id,
-        name: a.name,
-        file: a.file,
-        size: a.size || 0,
-        type: a.type || ""
-      })),
-      links: (t.links || []).map(l => {
-        const linkSnap = { from: l.from, to: l.to };
-        if (l.fromRow != null) linkSnap.fromRow = l.fromRow;
-        if (l.toRow != null) linkSnap.toRow = l.toRow;
-        return linkSnap;
-      })
-    }))
-  }));
 
-  return JSON.stringify({
+        const bodyLimit = extras.compactOnlyActive ? 240 : 600;
+        return {
+          id: t.id,
+          number: t.number || null,
+          title: t.title,
+          status: t.status || "ongoing",
+          priority: t.priority || "normal",
+          criticality: t.criticality ?? 0,
+          startDate: t.startDate || "",
+          endDate: t.endDate || "",
+          isActive: isTaskActive,
+          nodes: (t.nodes || []).map((n, idx) => {
+            const rawBody = String(n.body ?? n.title ?? "");
+            const tableMatch = rawBody.match(/\[\[table:([A-Za-z0-9_-]+)\]\]/);
+            const isSelected = extras.selectedNodeId && n.id === extras.selectedNodeId;
+            const maxChars = isSelected ? 600 : bodyLimit;
+            const nodeSnap = {
+              id: n.id,
+              isRoot: idx === 0,
+              type: n.type || "action",
+              status: n.status || "ongoing",
+              criticality: n.criticality ?? 0,
+              body: rawBody.replace(/\[\[table:[A-Za-z0-9_-]+\]\]/g, "[tabela]").slice(0, maxChars)
+            };
+            if (tableMatch) {
+              const decoded = decodeTableData(tableMatch[1]);
+              nodeSnap.table = {
+                hasCheckboxes: Boolean(decoded.hasCheckboxes),
+                rows: Array.isArray(decoded.rows) ? decoded.rows.slice(0, 30) : []
+              };
+            }
+            return nodeSnap;
+          }),
+          attachments: (t.attachments || []).map(a => ({
+            id: a.id,
+            name: a.name,
+            file: a.file,
+            size: a.size || 0,
+            type: a.type || ""
+          })),
+          links: (t.links || []).map(l => {
+            const linkSnap = { from: l.from, to: l.to };
+            if (l.fromRow != null) linkSnap.fromRow = l.fromRow;
+            if (l.toRow != null) linkSnap.toRow = l.toRow;
+            return linkSnap;
+          })
+        };
+      })
+    };
+  });
+
+  const payload = {
     activeUserId: state.activeUserId || null,
     selectedNodeId: extras.selectedNodeId || null,
     settings: extras.settings || {},
     users
-  });
+  };
+  if (operatorProfile) {
+    payload.operatorProfile = operatorProfile;
+  }
+  return JSON.stringify(payload);
 }
 
 function actionReferencesPlaceholder(action, token) {

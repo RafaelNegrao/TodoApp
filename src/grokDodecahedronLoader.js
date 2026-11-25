@@ -65,11 +65,12 @@ function isInsideActiveButton(canvas) {
 }
 
 export class GrokDodecahedronRenderer {
-  constructor(canvas, { size = 20, speed = 1, intensity = 1 } = {}) {
+  constructor(canvas, { size = 20, speed = 1, intensity = 1, colorRgb = null } = {}) {
     this.canvas = canvas;
     this.size = size;
     this.speed = speed;
     this.intensity = intensity;
+    this.colorRgb = colorRgb;
     this.ctx = canvas ? canvas.getContext("2d") : null;
     this.rafId = 0;
     this.lastFrameTime = 0;
@@ -78,12 +79,15 @@ export class GrokDodecahedronRenderer {
     this._configureCanvas();
   }
 
-  setState({ speed, intensity } = {}) {
+  setState({ speed, intensity, colorRgb } = {}) {
     if (typeof speed === "number" && Number.isFinite(speed) && speed >= 0) {
       this.speed = speed;
     }
     if (typeof intensity === "number" && Number.isFinite(intensity)) {
       this.intensity = Math.max(0.1, Math.min(1, intensity));
+    }
+    if (colorRgb !== undefined) {
+      this.colorRgb = colorRgb || null;
     }
   }
 
@@ -143,11 +147,13 @@ export class GrokDodecahedronRenderer {
     const scale = this.size * 0.39;
     const radiusScale = this.size / 22;
     const activeButton = isInsideActiveButton(this.canvas);
-    const rgb = activeButton
-      ? "0, 0, 0"
-      : isLightThemeActive()
-        ? "24, 24, 27"
-        : "244, 244, 245";
+    const rgb = this.colorRgb
+      ? this.colorRgb
+      : activeButton
+        ? "0, 0, 0"
+        : isLightThemeActive()
+          ? "24, 24, 27"
+          : "244, 244, 245";
 
     this.ctx.clearRect(0, 0, this.size, this.size);
 

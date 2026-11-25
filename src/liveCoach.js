@@ -18,9 +18,10 @@ export function parseLiveCoachAdvice(rawText) {
     const userContext = String(parsed.userContext || "").trim();
     const heardSummary = String(parsed.heardSummary || "").trim();
     const tip = String(parsed.tip || "").trim();
+    const translation = String(parsed.translation || "").trim();
 
     if (skip) {
-      return userContext ? { skip: true, userContext, heardSummary: "", suggestions: [], tip: "" } : null;
+      return userContext ? { skip: true, userContext, heardSummary: "", translation: "", suggestions: [], tip: "" } : null;
     }
 
     const suggestions = Array.isArray(parsed.suggestions)
@@ -34,27 +35,31 @@ export function parseLiveCoachAdvice(rawText) {
           }))
       : [];
 
-    if (!heardSummary && !suggestions.length && !tip) {
-      return userContext ? { skip: true, userContext, heardSummary: "", suggestions: [], tip: "" } : null;
+    if (!heardSummary && !translation && !suggestions.length && !tip) {
+      return userContext ? { skip: true, userContext, heardSummary: "", translation: "", suggestions: [], tip: "" } : null;
     }
 
-    return { skip: false, heardSummary, userContext, suggestions, tip };
+    return { skip: false, heardSummary, translation, userContext, suggestions, tip };
   } catch (_) {
     return null;
   }
 }
 
 export class LiveEnglishCoachController {
-  constructor({ invoke, getApiKey, onAdvice, onStatusChange, onError, intervalMs = 9000 }) {
+  constructor({ invoke, getApiKey, getOutputMode, onAdvice, onUsage, onStatusChange, onError, intervalMs = 9000 }) {
     this.invoke = invoke;
     this.getApiKey = getApiKey;
+    this.getOutputMode = getOutputMode;
     this.onAdvice = onAdvice;
+    this.onUsage = onUsage;
     this.onStatusChange = onStatusChange;
     this.onError = onError;
     this.intervalMs = intervalMs;
 
     this.active = false;
     this.inFlight = false;
+    this.inFlightCount = 0;
+    this.immediateInFlight = false;
     this.timerId = 0;
     this.recentSummaries = [];
   }
@@ -96,22 +101,36 @@ export class LiveEnglishCoachController {
     }, this.intervalMs);
   }
 
-  async flushNow() {
-    if (!this.active || this.inFlight || !this.invoke) return;
+  async flushNow({ immediate = false } = {}) {
+    if (!this.active || !this.invoke) return;
+    if ((!immediate && this.inFlightCount > 0) || (immediate && this.immediateInFlight)) return;
+    this.inFlightCount += 1;
     this.inFlight = true;
+    if (immediate) this.immediateInFlight = true;
     this.onStatusChange?.({ active: true, busy: true, label: "Analyzing speech..." });
 
     try {
       const raw = await this.invoke("ai_live_coach_flush_and_advise", {
         apiKey: this.getApiKey?.() || null,
         recentContext: this._buildRecentContext(),
-        stop: false
+        stop: false,
+        immediate,
+        outputMode: this.getOutputMode?.() || "reply"
       });
 
       if (!this.active) return;
 
       if (raw) {
-        const advice = parseLiveCoachAdvice(raw);
+        const usage = raw && typeof raw === "object" ? raw : null;
+        const rawText = usage && typeof usage.text === "string" ? usage.text : raw;
+        if (usage) {
+          this.onUsage?.({
+            promptTokens: Number(usage.prompt_tokens) || 0,
+            completionTokens: Number(usage.completion_tokens) || 0,
+            totalTokens: Number(usage.total_tokens) || 0
+          });
+        }
+        const advice = parseLiveCoachAdvice(rawText);
         if (advice) {
           if (advice.heardSummary) {
             this._pushMemory(`Outra pessoa: ${advice.heardSummary}`);
@@ -129,8 +148,10 @@ export class LiveEnglishCoachController {
         this.onError?.(String(err?.message || err));
       }
     } finally {
-      this.inFlight = false;
-      if (this.active) {
+      this.inFlightCount = Math.max(0, this.inFlightCount - 1);
+      this.inFlight = this.inFlightCount > 0;
+      if (immediate) this.immediateInFlight = false;
+      if (this.active && this.inFlightCount === 0) {
         this.onStatusChange?.({ active: true, busy: false, label: "Listening to conversation..." });
       }
     }
@@ -150,7 +171,9 @@ export class LiveEnglishCoachController {
         await this.invoke("ai_live_coach_flush_and_advise", {
           apiKey: null,
           recentContext: null,
-          stop: true
+          stop: true,
+          immediate: false,
+          outputMode: this.getOutputMode?.() || "reply"
         });
       } catch (_) {
         // Ignore stop cleanup errors

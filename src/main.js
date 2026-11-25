@@ -13,6 +13,7 @@ import {
   isDestructiveAction,
   proposalRequiresPermission,
   describeAiAction,
+  shouldAutoCaptureScreen,
   buildAppContextSnapshot,
   executeAiActionPlan
 } from "./aiAppAgent.js";
@@ -36,6 +37,9 @@ import {
 const STORAGE_KEY = "todocompanion.state.v4";
 const LEGACY_STORAGE_KEYS = ["todocompanion.state.v3", "todocompanion.state.v2", "todocompanion.state.v1"];
 const MIN_ZOOM = 0.15;
+const MIN_CARD_WIDTH = 336;
+const MIN_CARD_HEIGHT = 144;
+const DEFAULT_CARD_HEIGHT = 192;
 const MAX_ZOOM = 5.0;
 // Distancia (em pixels de tela) dentro da qual um card "gruda" no alinhamento
 // de um card conectado, deixando a linha reta. Convertido para coords do canvas
@@ -106,6 +110,7 @@ const icons = {
   table: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>`,
   formatClear: `<svg class="icon" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m13.3 9 5.5 5.5"/></svg>`,
   micAi: `<svg class="icon" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4M8 22h8"/></svg>`,
+  chatTranscribe: `<svg class="icon" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><path d="M9 11.5v1"/><path d="M12 9.5v5"/><path d="M15 11.5v1"/></svg>`,
   moreHorizontal: `<svg class="icon" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>`,
   menu: `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`
 };
@@ -592,7 +597,7 @@ function createMainTask(data = {}, index = 0) {
         status,
         x: 120,
         y: 144,
-        w: 288,
+        w: MIN_CARD_WIDTH,
         h: 144
       }
     ],
@@ -744,8 +749,8 @@ function normalizeNode(node) {
   const GRID = 24;
   const HEIGHT_GRID = GRID * 2;
   const isImage = node.type === "image";
-  const minW = isImage ? 72 : 288;
-  const minH = isImage ? 48 : 96;
+  const minW = isImage ? 72 : MIN_CARD_WIDTH;
+  const minH = isImage ? 48 : MIN_CARD_HEIGHT;
   const rawX = Number(node.x) || 0;
   const rawY = Number(node.y) || 0;
   const rawW = Math.max(minW, Number(node.w) || minW);
@@ -1055,12 +1060,20 @@ function renderUsersRail() {
   state.users.forEach(item => {
     const taskCount = item.tasks?.length || 0;
     const isRecordingThisUser = Boolean(recordingState && recordingState.userId === item.id);
+    const isTranscribingThisUser = Boolean(
+      (transcribeState && transcribeState.userId === item.id) ||
+      (cardAnalyzingState && cardAnalyzingState.userId === item.id)
+    );
     const tab = document.createElement("div");
-    tab.className = `user-rail-item${item.id === activeId ? " active" : ""}${item.id === tabDragId ? " dragging" : ""}${isRecordingThisUser ? " is-recording" : ""}`;
+    tab.className = `user-rail-item${item.id === activeId ? " active" : ""}${item.id === tabDragId ? " dragging" : ""}${isRecordingThisUser ? " is-recording" : ""}${isTranscribingThisUser ? " is-transcribing" : ""}`;
     tab.setAttribute("role", "tab");
     tab.setAttribute("aria-selected", String(item.id === activeId));
     tab.tabIndex = 0;
-    tab.title = isRecordingThisUser ? `${item.name} (Gravando)` : item.name;
+    tab.title = isRecordingThisUser
+      ? `${item.name} (Gravando)`
+      : isTranscribingThisUser
+        ? `${item.name} (${cardAnalyzingState?.userId === item.id ? "Analisando áudio com IA" : "Gravando áudio para análise"})`
+        : item.name;
     tab.dataset.userId = item.id;
 
     const avatar = document.createElement("span");
@@ -1077,6 +1090,17 @@ function renderUsersRail() {
       recDot.className = "user-recording-dot";
       recDot.title = "Gravando agora";
       recDot.setAttribute("aria-label", "Gravando agora");
+    }
+
+    const transcribeBadge = isTranscribingThisUser ? document.createElement("span") : null;
+    if (transcribeBadge) {
+      const isAnalyzing = cardAnalyzingState?.userId === item.id;
+      transcribeBadge.className = `user-transcribing-badge${isAnalyzing ? " is-analyzing" : ""}`;
+      transcribeBadge.innerHTML = isAnalyzing
+        ? `<span class="mini-transcribe-spinner" aria-hidden="true"></span>`
+        : `<span class="mini-wave" aria-hidden="true"><span></span><span></span><span></span></span>`;
+      transcribeBadge.title = isAnalyzing ? "Analisando e transcrevendo áudio..." : "Gravando áudio para transcrever...";
+      transcribeBadge.setAttribute("aria-label", transcribeBadge.title);
     }
 
     const count = document.createElement("span");
@@ -1122,6 +1146,8 @@ function renderUsersRail() {
     actions.appendChild(deleteBtn);
     if (recDot) {
       tab.append(avatar, label, recDot, count, actions);
+    } else if (transcribeBadge) {
+      tab.append(avatar, label, transcribeBadge, count, actions);
     } else {
       tab.append(avatar, label, count, actions);
     }
@@ -1614,14 +1640,14 @@ function renderNodes() {
     ].filter(Boolean).join(" ");
     card.dataset.id = node.id;
     card.dataset.status = status;
-    const minW = node.type === "image" ? 72 : 288;
-    const minH = node.type === "image" ? 48 : 96;
+    const minW = node.type === "image" ? 72 : MIN_CARD_WIDTH;
+    const minH = node.type === "image" ? 48 : rootCard ? 96 : MIN_CARD_HEIGHT;
     const GRID = 24;
     const HEIGHT_GRID = GRID * 2;
     node.x = Math.round((Number(node.x) || 0) / GRID) * GRID;
     node.y = Math.round((Number(node.y) || 0) / GRID) * GRID;
     node.w = Math.max(minW, Math.round((Number(node.w) || minW) / GRID) * GRID);
-    node.h = Math.max(minH, Math.round((Number(node.h) || 144) / HEIGHT_GRID) * HEIGHT_GRID);
+    node.h = Math.max(minH, Math.round((Number(node.h) || (rootCard ? 96 : DEFAULT_CARD_HEIGHT)) / HEIGHT_GRID) * HEIGHT_GRID);
 
     card.style.left = `${node.x}px`;
     card.style.top = `${node.y}px`;
@@ -1676,6 +1702,25 @@ function renderNodes() {
                 </div>
                 <input class="crit-range" type="range" min="0" max="2" step="1" value="${node.criticality ?? 0}" title="Criticality" />
               </div>
+              ${node.aiTranscribeTokens > 0 && transcribeState?.targetNodeId !== node.id && cardAnalyzingState?.targetNodeId !== node.id ? `<span class="card-ai-tokens-badge" title="Tokens usados na análise/transcrição: ${node.aiTranscribeTokens}">${node.aiTranscribeTokens >= 1000 ? `${(node.aiTranscribeTokens / 1000).toFixed(1)}k` : node.aiTranscribeTokens} tok</span>` : ""}
+              <button class="card-ai-btn card-transcribe-btn${transcribeState?.targetNodeId === node.id ? " recording" : ""}${cardAnalyzingState?.targetNodeId === node.id ? " analyzing" : ""}" type="button" aria-label="Gravar e analisar áudio com IA" title="${cardAnalyzingState?.targetNodeId === node.id ? "Analisando e transcrevendo áudio com IA..." : transcribeState?.targetNodeId === node.id ? "Finalizar gravação e analisar com IA" : "Gravar áudio (PC e microfone) para análise e transcrição com IA"}">
+                <span class="card-transcribe-icon">${icons.chatTranscribe}</span>
+                <span class="card-transcribe-live" aria-hidden="true">
+                  <span class="card-audio-meter">
+                    <span class="meter-bar b1"></span>
+                    <span class="meter-bar b2"></span>
+                    <span class="meter-bar b3"></span>
+                  </span>
+                  <span class="card-transcribe-stop">
+                    <svg class="icon" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/></svg>
+                  </span>
+                  <span class="card-transcribe-tokens">${transcribeState?.targetNodeId === node.id ? formatEstimatedAudioTokens(Date.now() - transcribeState.startedAt) : ""}</span>
+                </span>
+                <span class="card-transcribe-analyzing" aria-hidden="true">
+                  <span class="card-transcribe-spinner"></span>
+                  <span>Analisando...</span>
+                </span>
+              </button>
               <button class="card-action" type="button" aria-label="Remove" title="Remove">${icons.close}</button>
             </div>
           </div>
@@ -2221,13 +2266,13 @@ function nodeHeight(node) {
   if (node.type === "table") {
     return renderedHeights.get(node.id) || node.h || 144;
   }
-  const minH = node.type === "image" ? 48 : 96;
+  const minH = node.type === "image" ? 48 : MIN_CARD_HEIGHT;
   if (node.h > 0) return Math.max(minH, Math.round(node.h / 48) * 48);
   const measured = renderedHeights.get(node.id);
   if (measured) {
     return Math.max(minH, Math.round(measured / 48) * 48);
   }
-  return 144;
+  return DEFAULT_CARD_HEIGHT;
 }
 
 // O card cresce/encolhe com o texto digitado. Sem re-medir, os ports (e as setas
@@ -2252,7 +2297,7 @@ function estimateActionCardSize(bodyText) {
   const hasImage = /!\[image\]\([^)]+\)/.test(raw);
   const hasTable = /\[\[table:[^\]]+\]\]/.test(raw);
 
-  let w = 288;
+  let w = MIN_CARD_WIDTH;
   if (hasTable || totalChars > 260 || maxLineLen > 52) {
     w = 432;
   } else if (hasVideo || totalChars > 140 || maxLineLen > 36) {
@@ -2279,8 +2324,8 @@ function estimateActionCardSize(bodyText) {
   if (hasImage) estH += 140;
   if (hasTable) estH += 140;
 
-  w = Math.max(288, Math.min(480, Math.ceil(w / GRID) * GRID));
-  const h = Math.max(144, Math.min(576, Math.ceil(estH / HEIGHT_GRID) * HEIGHT_GRID));
+  w = Math.max(MIN_CARD_WIDTH, Math.min(480, Math.ceil(w / GRID) * GRID));
+  const h = Math.max(DEFAULT_CARD_HEIGHT, Math.min(576, Math.ceil(estH / HEIGHT_GRID) * HEIGHT_GRID));
   return { w, h };
 }
 
@@ -2516,7 +2561,7 @@ function getSvgBounds(nodes, drag) {
   const ys = [];
 
   nodes.forEach(node => {
-    xs.push(node.x, node.x + (node.w || 288));
+    xs.push(node.x, node.x + (node.w || MIN_CARD_WIDTH));
     ys.push(node.y, node.y + (node.h || 144));
   });
 
@@ -2657,7 +2702,7 @@ function createSnapGuide(orientation, coord, bounds) {
 
 function getPortPoint(node, port, rowIndex = null) {
   const GRID = 24;
-  const width = Math.max(node.type === "image" ? 72 : 288, node.w || 288);
+  const width = Math.max(node.type === "image" ? 72 : MIN_CARD_WIDTH, node.w || MIN_CARD_WIDTH);
   const height = nodeHeight(node);
   const snappedX = Math.round(node.x / GRID) * GRID;
   const snappedY = Math.round(node.y / GRID) * GRID;
@@ -2706,7 +2751,7 @@ function isShowLinkArrows() {
 function buildLinkObstacles(nodes) {
   const GRID = 24;
   return nodes.map(node => {
-    const w = Math.max(node.type === "image" ? 72 : 288, node.w || 288);
+    const w = Math.max(node.type === "image" ? 72 : MIN_CARD_WIDTH, node.w || MIN_CARD_WIDTH);
     const h = nodeHeight(node);
     const x = Math.round(node.x / GRID) * GRID;
     const y = Math.round(node.y / GRID) * GRID;
@@ -2752,14 +2797,26 @@ function renderUserTasks() {
     const isRecordingThisTask = Boolean(
       recordingState && recordingState.taskId === task.id && recordingState.userId === user.id
     );
+    const isTranscribingThisTask = Boolean(
+      (transcribeState && transcribeState.taskId === task.id && transcribeState.userId === user.id) ||
+      (cardAnalyzingState && cardAnalyzingState.taskId === task.id && cardAnalyzingState.userId === user.id)
+    );
+    const isAnalyzingThisTask = Boolean(
+      cardAnalyzingState && cardAnalyzingState.taskId === task.id && cardAnalyzingState.userId === user.id
+    );
     const card = document.createElement("article");
-    card.className = `user-task-card status-${status} priority-${priority} crit-${criticality}${task.id === activeId ? " active" : ""}${task.id === dockDragId ? " dragging" : ""}${isRecordingThisTask ? " is-recording" : ""}`;
+    card.className = `user-task-card status-${status} priority-${priority} crit-${criticality}${task.id === activeId ? " active" : ""}${task.id === dockDragId ? " dragging" : ""}${isRecordingThisTask ? " is-recording" : ""}${isTranscribingThisTask ? " is-transcribing" : ""}`;
     card.dataset.id = task.id;
     // Card enxuto: so o titulo. Numero, datas, criticidade e anexos continuam
     // acessiveis pelo popup de info (botao "i") e pelo overlay do canvas.
-    card.title = isRecordingThisTask ? `${task.title} (Gravando)` : task.title;
+    card.title = isRecordingThisTask
+      ? `${task.title} (Gravando)`
+      : isTranscribingThisTask
+        ? `${task.title} (${isAnalyzingThisTask ? "Analisando áudio com IA" : "Gravando áudio para análise"})`
+        : task.title;
     card.innerHTML = `
       ${isRecordingThisTask ? `<span class="task-recording-dot" title="Gravando agora" aria-label="Gravando agora"></span>` : ""}
+      ${!isRecordingThisTask && isTranscribingThisTask ? `<span class="task-transcribing-badge${isAnalyzingThisTask ? " is-analyzing" : ""}" title="${isAnalyzingThisTask ? "Analisando e transcrevendo áudio..." : "Gravando áudio para transcrever..."}" aria-label="Transcrevendo áudio">${isAnalyzingThisTask ? `<span class="mini-transcribe-spinner" aria-hidden="true"></span>` : `<span class="mini-wave" aria-hidden="true"><span></span><span></span><span></span></span>`}</span>` : ""}
       <span class="user-task-id">#${task.number || ""}</span>
       <span class="user-task-title">${escapeHtml(task.title)}</span>
       <div class="user-task-actions">
@@ -3364,8 +3421,8 @@ function ensureCanvasPositions() {
 
     const HEIGHT_GRID = GRID * 2;
     const isImage = node.type === "image";
-    const minW = isImage ? 72 : 288;
-    const minH = isImage ? 48 : 96;
+    const minW = isImage ? 72 : MIN_CARD_WIDTH;
+    const minH = isImage ? 48 : MIN_CARD_HEIGHT;
     const snappedX = Math.round(node.x / GRID) * GRID;
     const snappedY = Math.round(node.y / GRID) * GRID;
     const snappedW = Math.max(minW, Math.round((node.w || minW) / GRID) * GRID);
@@ -3392,11 +3449,11 @@ function isDefaultNewAction(node) {
 }
 
 function overlapsPlacedNodes(node, placed) {
-  const w = node.w || 288;
+  const w = node.w || MIN_CARD_WIDTH;
   const h = node.h || 144;
   const GAP = 48;
   return placed.some(other => {
-    const otherW = other.w || 288;
+    const otherW = other.w || MIN_CARD_WIDTH;
     const otherH = other.h || 144;
     return (
       node.x < other.x + otherW + GAP &&
@@ -3410,7 +3467,7 @@ function overlapsPlacedNodes(node, placed) {
 function getNextActionPosition(board, indexOverride = null) {
   const GRID = 24;
   const GAP = 48;
-  const width = 288;
+  const width = MIN_CARD_WIDTH;
   const height = 144;
   const nodes = indexOverride == null ? board.nodes : board.nodes.slice(0, indexOverride);
 
@@ -3484,7 +3541,7 @@ function focusNodesChainAnimated(nodeIds, { maxZoom = 1.08, padding = 96, durati
 
   const minX = Math.min(...targets.map(n => n.x));
   const minY = Math.min(...targets.map(n => n.y));
-  const maxX = Math.max(...targets.map(n => n.x + (n.w || 288)));
+  const maxX = Math.max(...targets.map(n => n.x + (n.w || MIN_CARD_WIDTH)));
   const maxY = Math.max(...targets.map(n => n.y + (n.h || 144)));
   const contentWidth = Math.max(1, maxX - minX);
   const contentHeight = Math.max(1, maxY - minY);
@@ -3526,7 +3583,7 @@ function centerCanvasOnTasks() {
 
   const minX = Math.min(...board.nodes.map(node => node.x));
   const minY = Math.min(...board.nodes.map(node => node.y));
-  const maxX = Math.max(...board.nodes.map(node => node.x + (node.w || 288)));
+  const maxX = Math.max(...board.nodes.map(node => node.x + (node.w || MIN_CARD_WIDTH)));
   const maxY = Math.max(...board.nodes.map(node => node.y + (node.h || 144)));
   const contentWidth = Math.max(1, maxX - minX);
   const contentHeight = Math.max(1, maxY - minY);
@@ -3558,7 +3615,7 @@ function focusCardOnNode(nodeId) {
   const node = board?.nodes.find(n => n.id === nodeId);
   if (!node) return;
 
-  const cardWidth = node.w || 288;
+  const cardWidth = node.w || MIN_CARD_WIDTH;
   const cardHeight = node.h || 144;
   const padding = 96;
   const zoom = clamp(
@@ -3599,7 +3656,7 @@ function organizeCanvasCards() {
   const nodesById = new Map(board.nodes.map(node => [node.id, node]));
 
   const getNodeWidth = node => {
-    const minW = node.type === "image" ? 72 : 288;
+    const minW = node.type === "image" ? 72 : MIN_CARD_WIDTH;
     return Math.max(minW, Math.round((Number(node.w) || minW) / GRID) * GRID);
   };
 
@@ -3685,7 +3742,7 @@ function organizeCanvasCards() {
   const originY = Math.max(48, Number.isFinite(minY) ? Math.round(minY / GRID) * GRID : 96);
 
   const columnWidths = columns.map(col => {
-    if (!col.length) return 288;
+    if (!col.length) return MIN_CARD_WIDTH;
     return Math.max(...col.map(id => getNodeWidth(nodesById.get(id))));
   });
 
@@ -3996,7 +4053,7 @@ function addAction(parentId = null) {
     createdAt: new Date().toISOString(),
     x: Math.round(position.x / GRID) * GRID,
     y: Math.round(position.y / GRID) * GRID,
-    w: 288,
+    w: MIN_CARD_WIDTH,
     h: 144
   };
 
@@ -4023,10 +4080,10 @@ function getReplyActionPosition(board, parentId) {
   const outgoingCount = board.links.filter(link => link.from === parentId && (link.fromPort || "out") === "out").length;
   const GRID = 24;
   const GAP = 96;
-  const newH = 144;
+  const newH = DEFAULT_CARD_HEIGHT;
   const targetY = parent.y + outgoingCount * (newH + 24);
   return {
-    x: Math.round((parent.x + (parent.w || 288) + GAP) / GRID) * GRID,
+    x: Math.round((parent.x + (parent.w || MIN_CARD_WIDTH) + GAP) / GRID) * GRID,
     y: Math.round(targetY / GRID) * GRID
   };
 }
@@ -4096,7 +4153,7 @@ function closeNewCardModal() {
   newCardPosition = null;
 }
 
-function createCanvasCardAtPopup(body = "", width = 288, height = 144, extra = {}) {
+function createCanvasCardAtPopup(body = "", width = MIN_CARD_WIDTH, height = DEFAULT_CARD_HEIGHT, extra = {}) {
   const board = activeBoard();
   if (!board) return null;
   const pos = newCardPosition ?? getViewportActionPosition();
@@ -4125,7 +4182,7 @@ function createCanvasCardAtPopup(body = "", width = 288, height = 144, extra = {
 
 function saveNewCard(event) {
   event.preventDefault();
-  createCanvasCardAtPopup("", 288, 144);
+  createCanvasCardAtPopup("", MIN_CARD_WIDTH, DEFAULT_CARD_HEIGHT);
 }
 
 function createTableCard(tableData, initialFocusCol = 0) {
@@ -4246,7 +4303,7 @@ function getViewportActionPosition() {
   const center = screenToWorld(rect.left + boardShell.clientWidth / 2, rect.top + boardShell.clientHeight / 2);
   const GRID = 24;
   const GAP = 48;
-  const width = 288;
+  const width = MIN_CARD_WIDTH;
   const height = 144;
   let x = Math.round((center.x - 144) / GRID) * GRID;
   let y = Math.round((center.y - 72) / GRID) * GRID;
@@ -4635,7 +4692,7 @@ function createCardFromConnection(drag, dropPoint, useReplySpacing = false, type
   const board = activeBoard();
   const id = makeId("action");
   const GRID = 24;
-  const width = 288;
+  const width = MIN_CARD_WIDTH;
   const height = 144;
 
   const position = useReplySpacing
@@ -4816,7 +4873,7 @@ function nodeCollidesWithOthers(board, nodeId, x, y, w, h, gap = 48) {
   if (!board || !board.nodes) return false;
   return board.nodes.some(other => {
     if (other.id === nodeId) return false;
-    const otherW = Math.max(other.type === "image" ? 72 : 288, other.w || 288);
+    const otherW = Math.max(other.type === "image" ? 72 : MIN_CARD_WIDTH, other.w || MIN_CARD_WIDTH);
     const otherH = nodeHeight(other);
     return (
       x < other.x + otherW + gap &&
@@ -4884,8 +4941,8 @@ function startResize(event, nodeId) {
   const HEIGHT_GRID = GRID * 2;
   const isImage = node.type === "image";
   const isTable = node.type === "table";
-  const minW = isImage ? 72 : 288;
-  const minH = isImage ? 48 : 96;
+  const minW = isImage ? 72 : MIN_CARD_WIDTH;
+  const minH = isImage ? 48 : MIN_CARD_HEIGHT;
 
   node.x = Math.round(node.x / GRID) * GRID;
   node.y = Math.round(node.y / GRID) * GRID;
@@ -4996,7 +5053,7 @@ function startResize(event, nodeId) {
 function computeAlignmentSnap(board, node, zoom) {
   const threshold = ALIGN_SNAP_SCREEN_PX / Math.max(zoom, 0.0001);
 
-  const halfW = (node.w || 288) / 2;
+  const halfW = (node.w || MIN_CARD_WIDTH) / 2;
   const halfH = nodeHeight(node) / 2;
   let x = node.x;
   let y = node.y;
@@ -5007,7 +5064,7 @@ function computeAlignmentSnap(board, node, zoom) {
 
   board.nodes.forEach(other => {
     if (other.id === node.id) return;
-    const otherCenterX = other.x + (other.w || 288) / 2;
+    const otherCenterX = other.x + (other.w || MIN_CARD_WIDTH) / 2;
     const otherCenterY = other.y + nodeHeight(other) / 2;
 
     const dy = Math.abs(node.y + halfH - otherCenterY);
@@ -5074,7 +5131,7 @@ function startDrag(event, nodeId) {
     const targetX = Math.round(snap.x / GRID) * GRID;
     const targetY = Math.round(snap.y / GRID) * GRID;
 
-    const w = Math.max(node.type === "image" ? 72 : 288, node.w || 288);
+    const w = Math.max(node.type === "image" ? 72 : MIN_CARD_WIDTH, node.w || MIN_CARD_WIDTH);
     const h = nodeHeight(node);
 
     const allowed = findAllowedDragPosition(
@@ -5196,7 +5253,7 @@ function insertVideoTokenIntoNode(node, mediaRef, cardEl = null) {
   const currentContent = getNodeContent(node) || "";
   const separator = currentContent && !currentContent.endsWith("\n") ? "\n" : "";
   setNodeContent(node, `${currentContent}${separator}![video](${mediaRef})\n`);
-  if ((node.w || 288) < 336) {
+  if ((node.w || MIN_CARD_WIDTH) < 336) {
     node.w = 336;
   }
   if ((node.h || 144) < 240) {
@@ -7385,11 +7442,18 @@ function hideRecordingIndicator() {
 // ------------------------------------------------------------------
 const GEMINI_API_KEY_STORAGE = "todocompanion.settings.geminiApiKey";
 const DEFAULT_ENV_GEMINI_KEY = "";
-const DEFAULT_ENV_GEMINI_MODEL = "gemini-2.5-flash";
-const LIVE_TRANSCRIBE_INTERVAL_MS = 5500;
+const DEFAULT_ENV_GEMINI_MODEL = "gemini-2.5-flash-lite";
+const LIVE_TRANSCRIBE_INTERVAL_MS = 3800;
 
 let transcribeState = null;
+let cardAnalyzingState = null;
 let isStartingTranscription = false;
+
+function formatEstimatedAudioTokens(ms) {
+  const secs = Math.max(1, Math.floor((Number(ms) || 0) / 1000));
+  const est = secs * 32 + 220;
+  return est >= 1000 ? `~${(est / 1000).toFixed(1)}k tok` : `~${est} tok`;
+}
 
 function getGeminiApiKey() {
   return (localStorage.getItem(GEMINI_API_KEY_STORAGE) || "").trim() || DEFAULT_ENV_GEMINI_KEY;
@@ -7399,17 +7463,21 @@ function handleTranscribeTriggerClick(event, targetNodeId = null) {
   event?.stopPropagation();
   if (!targetNodeId) return;
 
+  if (cardAnalyzingState?.targetNodeId === targetNodeId) {
+    return;
+  }
+
   if (transcribeState) {
     if (Date.now() - transcribeState.startedAt < 400) return;
     const wasSameCard = transcribeState.targetNodeId === targetNodeId;
     stopAudioTranscription();
-    if (!wasSameCard) {
+    if (!wasSameCard && !cardAnalyzingState) {
       startAudioTranscription(targetNodeId);
     }
     return;
   }
 
-  if (recordingState || isStartingRecording || isStartingTranscription) {
+  if (recordingState || isStartingRecording || isStartingTranscription || cardAnalyzingState) {
     return;
   }
 
@@ -7517,28 +7585,45 @@ async function startAudioTranscription(targetNodeId) {
       micStream,
       mimeType,
       activeRecorder: null,
+      recordedBlobPromise: null,
       intervalId: null,
-      flushChain: Promise.resolve(),
+      meterIntervalId: null,
       userId: user.id,
       taskId: task.id,
+      taskTitle: task.title || "Gravação de Áudio",
       targetNodeId,
       startedAt: Date.now(),
+      totalTokens: 0,
       stopped: false
     };
 
-    if (audioStream) {
-      tState.activeRecorder = createSegmentRecorder(audioStream, mimeType, (blob, cleanMime) => {
-        queueSegmentTranscription(tState, false, blob, cleanMime);
+    if (!nativeCaptureStarted && audioStream) {
+      tState.recordedBlobPromise = new Promise(resolve => {
+        tState.activeRecorder = createSegmentRecorder(audioStream, mimeType, (blob, cleanMime) => {
+          resolve({ blob, cleanMime });
+        });
       });
     }
 
     tState.intervalId = window.setInterval(() => {
       if (transcribeState !== tState || tState.stopped) return;
-      flushLiveAudioSegment(tState, false);
-    }, LIVE_TRANSCRIBE_INTERVAL_MS);
+      updateTranscribeUi(true, tState.targetNodeId, false, tState.startedAt);
+    }, 500);
+
+    if (nativeCaptureStarted && invoke) {
+      tState.meterIntervalId = window.setInterval(async () => {
+        if (transcribeState !== tState || tState.stopped) return;
+        try {
+          const level = Number(await invoke("ai_audio_capture_level")) || 0;
+          updateCardAudioMeterLevel(tState.targetNodeId, level);
+        } catch (_) {}
+      }, 85);
+    }
 
     transcribeState = tState;
-    updateTranscribeUi(true, targetNodeId);
+    updateTranscribeUi(true, targetNodeId, false, tState.startedAt);
+    renderUsersRail();
+    renderUserTasks();
   } finally {
     isStartingTranscription = false;
   }
@@ -7575,14 +7660,28 @@ function queueSegmentTranscription(tState, isFinalStop, jsBlob = null, cleanMime
       }
 
       let transcript = "";
+      let chunkTokens = 0;
       if (tState.nativeCaptureStarted && invoke) {
-        transcript = await invoke("ai_audio_capture_flush_and_transcribe", {
+        const res = await invoke("ai_audio_capture_flush_and_transcribe", {
           stop: isFinalStop,
           fallbackMimeType: cleanMime,
           fallbackAudioBase64: base64Audio || null
         });
+        if (res && typeof res === "object") {
+          transcript = String(res.text || "");
+          chunkTokens = Number(res.total_tokens) || 0;
+        } else {
+          transcript = String(res || "");
+        }
       } else if (base64Audio) {
         transcript = await requestGeminiTranscription(getGeminiApiKey(), cleanMime, base64Audio);
+      }
+
+      if (chunkTokens > 0) {
+        tState.totalTokens = (tState.totalTokens || 0) + chunkTokens;
+        if (transcribeState === tState) {
+          updateTranscribeUi(true, tState.targetNodeId, tState.totalTokens);
+        }
       }
 
       const cleaned = String(transcript || "").trim();
@@ -7595,7 +7694,7 @@ function queueSegmentTranscription(tState, isFinalStop, jsBlob = null, cleanMime
   });
 }
 
-function stopAudioTranscription() {
+async function stopAudioTranscription() {
   const tState = transcribeState;
   if (!tState || tState.stopped) return;
   tState.stopped = true;
@@ -7605,13 +7704,72 @@ function stopAudioTranscription() {
     window.clearInterval(tState.intervalId);
     tState.intervalId = null;
   }
+  if (tState.meterIntervalId) {
+    window.clearInterval(tState.meterIntervalId);
+    tState.meterIntervalId = null;
+  }
 
-  updateTranscribeUi(false, tState.targetNodeId);
-  flushLiveAudioSegment(tState, true);
+  updateCardAudioMeterLevel(tState.targetNodeId, 0);
+  cardAnalyzingState = {
+    userId: tState.userId,
+    taskId: tState.taskId,
+    targetNodeId: tState.targetNodeId
+  };
+  updateTranscribeUi(false, tState.targetNodeId, true);
+  renderUsersRail();
+  renderUserTasks();
 
-  tState.flushChain.finally(() => {
+  try {
+    let fallbackMime = "audio/webm";
+    let fallbackBase64 = null;
+
+    if (!tState.nativeCaptureStarted && tState.activeRecorder) {
+      if (tState.activeRecorder.state !== "inactive") {
+        try {
+          tState.activeRecorder.stop();
+        } catch (_) {}
+      }
+      const recorded = tState.recordedBlobPromise ? await tState.recordedBlobPromise : null;
+      if (recorded?.blob && recorded.blob.size >= 512) {
+        fallbackMime = recorded.cleanMime || "audio/webm";
+        fallbackBase64 = await blobToBase64(recorded.blob);
+      }
+    }
+
+    let analysisText = "";
+    let usedTokens = 0;
+    if (invoke) {
+      const res = await invoke("ai_audio_capture_stop_and_analyze", {
+        apiKey: getGeminiApiKey() || null,
+        title: tState.taskTitle || "Gravação de Áudio",
+        fallbackMimeType: fallbackMime,
+        fallbackAudioBase64: fallbackBase64
+      });
+      if (res && typeof res === "object") {
+        analysisText = String(res.text || "");
+        usedTokens = Number(res.total_tokens) || 0;
+      } else {
+        analysisText = String(res || "");
+      }
+    } else if (fallbackBase64) {
+      analysisText = await requestGeminiTranscription(getGeminiApiKey(), fallbackMime, fallbackBase64);
+    }
+
+    const cleaned = String(analysisText || "").trim();
+    if (cleaned) {
+      insertTranscriptionIntoBoard(tState, cleaned, usedTokens);
+    }
+  } catch (err) {
+    console.warn("Falha ao analisar e transcrever áudio do card", err);
+  } finally {
     stopAllTracks([tState.micStream]);
-  });
+    if (cardAnalyzingState?.targetNodeId === tState.targetNodeId) {
+      cardAnalyzingState = null;
+    }
+    updateTranscribeUi(false, tState.targetNodeId, false);
+    renderUsersRail();
+    renderUserTasks();
+  }
 }
 
 async function requestGeminiTranscription(apiKey, mimeType, audioBase64) {
@@ -7689,7 +7847,7 @@ async function requestGeminiTranscription(apiKey, mimeType, audioBase64) {
   throw lastError;
 }
 
-function insertTranscriptionIntoBoard(tState, transcriptText) {
+function insertTranscriptionIntoBoard(tState, transcriptText, usedTokens = 0) {
   const targetUser = state.users.find(u => u.id === tState.userId) || activeUser();
   const targetBoard = targetUser?.tasks.find(t => t.id === tState.taskId) || activeBoard();
   if (!targetBoard) return;
@@ -7708,23 +7866,63 @@ function insertTranscriptionIntoBoard(tState, transcriptText) {
   const existing = String(getNodeContent(node) || "").trim();
   const combined = existing ? `${existing}\n${transcriptText}` : transcriptText;
   setNodeContent(node, combined);
+  if (usedTokens > 0) {
+    node.aiTranscribeTokens = (Number(node.aiTranscribeTokens) || 0) + usedTokens;
+  }
 
   saveState();
   if (editor) {
     editor.innerHTML = renderBodyHtml(getNodeContent(node));
     scheduleNodeHeightSync(node.id, cardEl);
+    if (usedTokens > 0) {
+      renderNodes();
+      renderLinks();
+    }
   } else {
     renderNodes();
     renderLinks();
   }
 }
 
-function updateTranscribeUi(active, targetNodeId = null) {
+function updateCardAudioMeterLevel(targetNodeId, level) {
+  if (!targetNodeId) return;
+  const card = nodesLayer?.querySelector(`[data-id="${targetNodeId}"]`);
+  const meter = card?.querySelector(".card-transcribe-btn .card-audio-meter");
+  if (!meter) return;
+  const raw = Math.max(0, Math.min(1, Number(level) || 0));
+  const boosted = Math.pow(raw, 0.72);
+  const t = performance.now() * 0.009;
+  const wave1 = 0.5 + 0.5 * Math.sin(t);
+  const wave2 = 0.5 + 0.5 * Math.sin(t * 1.25 + 1.3);
+  const wave3 = 0.5 + 0.5 * Math.sin(t * 0.95 + 2.6);
+
+  const b1 = Math.round(3 + boosted * (4.5 + wave1 * 2.5) + (1 - boosted) * wave1 * 1.2);
+  const b2 = Math.round(4 + boosted * (5.5 + wave2 * 2.5) + (1 - boosted) * wave2 * 1.6);
+  const b3 = Math.round(3 + boosted * (4.5 + wave3 * 2.5) + (1 - boosted) * wave3 * 1.2);
+
+  const bars = meter.querySelectorAll(".meter-bar");
+  if (bars[0]) bars[0].style.height = `${Math.min(10, b1)}px`;
+  if (bars[1]) bars[1].style.height = `${Math.min(12, b2)}px`;
+  if (bars[2]) bars[2].style.height = `${Math.min(10, b3)}px`;
+}
+
+function updateTranscribeUi(active, targetNodeId = null, analyzing = false, startedAt = 0) {
   document.querySelectorAll(".card-transcribe-btn").forEach(btn => {
     const card = btn.closest(".task-card");
-    const isTarget = Boolean(active && card && card.dataset.id === targetNodeId);
-    btn.classList.toggle("recording", isTarget);
-    btn.title = isTarget ? "Stop AI transcription" : "Transcribe audio with AI";
+    const isTarget = Boolean(card && card.dataset.id === targetNodeId);
+    const isRec = Boolean(active && isTarget);
+    const isAna = Boolean(analyzing && isTarget);
+    btn.classList.toggle("recording", isRec);
+    btn.classList.toggle("analyzing", isAna);
+    const tokEl = btn.querySelector(".card-transcribe-tokens");
+    if (tokEl) {
+      tokEl.textContent = isRec && startedAt ? formatEstimatedAudioTokens(Date.now() - startedAt) : "";
+    }
+    btn.title = isAna
+      ? "Analisando e transcrevendo áudio com IA..."
+      : isRec
+        ? "Finalizar gravação e enviar para análise da IA"
+        : "Gravar áudio (PC e microfone) para análise e transcrição com IA";
   });
 }
 
@@ -9070,6 +9268,10 @@ function initAiTranslatorPanel() {
   const sessionsListEl = document.getElementById("aiChatSessionsList");
 
   const chatMessagesEl = document.getElementById("aiChatMessages");
+  const regularChatViewEl = document.getElementById("aiRegularChatView");
+  const liveCoachViewEl = document.getElementById("aiLiveCoachView");
+  const liveCoachMessagesEl = document.getElementById("aiLiveCoachMessages");
+  const liveCoachThinkingCanvas = document.getElementById("aiLiveCoachThinkingCanvas");
   const chatDropOverlay = document.getElementById("aiChatDropOverlay");
   const chatForm = document.getElementById("aiChatForm");
   const chatPendingListEl = document.getElementById("aiChatPendingList");
@@ -9078,10 +9280,23 @@ function initAiTranslatorPanel() {
   const chatAttachBtn = document.getElementById("aiChatAttachBtn");
   const chatSendBtn = document.getElementById("aiChatSendBtn");
   const liveCoachBtn = document.getElementById("aiLiveCoachBtn");
-  const liveCoachBar = document.getElementById("aiLiveCoachBar");
   const liveCoachStatusEl = document.getElementById("aiLiveCoachStatus");
   const liveCoachNowBtn = document.getElementById("aiLiveCoachNowBtn");
   const liveCoachStopBtn = document.getElementById("aiLiveCoachStopBtn");
+  const liveCoachMenuTrigger = document.getElementById("aiLiveCoachMenuTrigger");
+  const liveCoachMenu = document.getElementById("aiLiveCoachMenu");
+  const liveCoachToneSection = document.getElementById("aiLiveCoachToneSection");
+  const liveCoachModeEl = document.getElementById("aiLiveCoachMode");
+  const liveCoachOutputModeEl = document.getElementById("aiLiveCoachOutputMode");
+  const liveCoachTokenCountEl = document.getElementById("aiLiveCoachTokenCount");
+  let liveCoachTokenTotal = 0;
+  let liveCoachAdviceHistory = [];
+  let liveCoachOutputMode = localStorage.getItem("todocompanion.settings.liveCoachOutputMode") === "reply"
+    ? "reply"
+    : "translation";
+  let liveCoachMode = localStorage.getItem("todocompanion.settings.liveCoachMode") === "formal"
+    ? "formal"
+    : "natural";
   const chatNewPillBtn = document.getElementById("aiChatNewPill");
   let unreadBelowCount = 0;
 
@@ -9177,6 +9392,9 @@ function initAiTranslatorPanel() {
     : null;
   topbarGrokLoader?.start();
   let chatGrokLoader = null;
+  let liveCoachGrokLoader = null;
+  let liveCoachAudioLevelTimer = 0;
+  let liveCoachIsBusy = false;
   const chatThinkingCycler = new ThinkingPhraseCycler(AI_CHAT_THINKING_PHRASES, {
     intervalMs: 2200,
     startRandom: false
@@ -9984,9 +10202,11 @@ function initAiTranslatorPanel() {
     chatPendingListEl.innerHTML = "";
     if (!pendingAttachments.length) {
       chatPendingListEl.hidden = true;
+      updateChatTokenCounter();
       return;
     }
     chatPendingListEl.hidden = false;
+    updateChatTokenCounter();
 
     pendingAttachments.forEach((att, idx) => {
       const tile = document.createElement("div");
@@ -10262,6 +10482,27 @@ function initAiTranslatorPanel() {
   function buildCoachAdviceCard(advice, { animate = false, timestamp = null } = {}) {
     const coachCard = document.createElement("div");
     coachCard.className = "ai-coach-card";
+    if (liveCoachOutputMode === "translation") {
+      coachCard.classList.add("ai-coach-translation-card");
+      if (!animate) coachCard.style.animation = "none";
+      const label = document.createElement("span");
+      label.className = "ai-coach-translation-label";
+      label.textContent = "Translation";
+      const translation = document.createElement("div");
+      translation.className = "ai-coach-translation";
+      translation.textContent = advice.translation || "No translation was detected.";
+      coachCard.append(label, translation);
+      if (timestamp) {
+        const timeDate = new Date(timestamp);
+        if (!Number.isNaN(timeDate.getTime())) {
+          const timeEl = document.createElement("span");
+          timeEl.className = "ai-coach-time";
+          timeEl.textContent = timeDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          coachCard.appendChild(timeEl);
+        }
+      }
+      return coachCard;
+    }
     if (!animate) {
       coachCard.style.animation = "none";
     }
@@ -10291,7 +10532,14 @@ function initAiTranslatorPanel() {
     if (Array.isArray(advice.suggestions) && advice.suggestions.length > 0) {
       const sugWrap = document.createElement("div");
       sugWrap.className = "ai-coach-suggestions";
-      advice.suggestions.forEach(sug => {
+      const visibleSuggestions = advice.suggestions.filter(sug => {
+        const tone = String(sug.tone || "").trim().toLowerCase();
+        if (liveCoachMode === "formal") {
+          return tone.includes("formal") || tone.includes("detailed") || tone.includes("professional");
+        }
+        return !tone.includes("formal") && !tone.includes("detailed") && !tone.includes("professional");
+      });
+      (visibleSuggestions.length ? visibleSuggestions : advice.suggestions).forEach(sug => {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "ai-coach-suggestion-btn";
@@ -10332,30 +10580,25 @@ function initAiTranslatorPanel() {
   }
 
   function appendCoachAdviceWithoutFlicker(advice, timestamp) {
-    if (!chatMessagesEl) return;
-    const emptyEl = chatMessagesEl.querySelector(".ai-chat-empty");
-    const hadEmptyState = Boolean(emptyEl);
-    if (emptyEl) emptyEl.remove();
-
+    if (!liveCoachMessagesEl) return;
+    liveCoachAdviceHistory = [{ advice, timestamp }];
+    liveCoachMessagesEl.querySelectorAll(".ai-chat-msg").forEach(row => row.remove());
     const row = document.createElement("div");
     row.className = "ai-chat-msg ai";
     row.appendChild(buildCoachAdviceCard(advice, { animate: true, timestamp }));
+    liveCoachMessagesEl.appendChild(row);
+    liveCoachMessagesEl.scrollTop = liveCoachMessagesEl.scrollHeight;
+  }
 
-    const workingEl = chatMessagesEl.querySelector(".ai-chat-working");
-    if (workingEl) {
-      chatMessagesEl.insertBefore(row, workingEl);
-    } else {
-      chatMessagesEl.appendChild(row);
-    }
-
-    const overflows = chatMessagesEl.scrollHeight > chatMessagesEl.clientHeight + 24;
-    if (!hadEmptyState && overflows) {
-      unreadBelowCount += 1;
-      updateNewPillVisibility();
-    } else {
-      unreadBelowCount = 0;
-      updateNewPillVisibility();
-    }
+  function renderLiveCoachAdviceHistory() {
+    if (!liveCoachMessagesEl) return;
+    liveCoachMessagesEl.querySelectorAll(".ai-chat-msg").forEach(row => row.remove());
+    liveCoachAdviceHistory.forEach(({ advice, timestamp }) => {
+      const row = document.createElement("div");
+      row.className = "ai-chat-msg ai";
+      row.appendChild(buildCoachAdviceCard(advice, { animate: false, timestamp }));
+      liveCoachMessagesEl.appendChild(row);
+    });
   }
 
   function renderChatMessages() {
@@ -10370,7 +10613,7 @@ function initAiTranslatorPanel() {
     }
     chatMessagesEl.innerHTML = "";
     const session = getActiveSession();
-    const messages = session.messages || [];
+    const messages = (session.messages || []).filter(message => !message.coachAdvice);
 
     if (!messages.length) {
       const modelTagEl = document.getElementById("aiChatModelTag");
@@ -10482,6 +10725,16 @@ function initAiTranslatorPanel() {
         if (msg.model) timeSpan.title = msg.model;
 
         actions.append(copyBtn, cardBtn, timeSpan);
+        const totalTok = Number(msg.totalTokens) || 0;
+        if (totalTok > 0) {
+          const tokSpan = document.createElement("span");
+          tokSpan.className = "ai-msg-tokens";
+          tokSpan.textContent = `· ${formatTokenCountCompact(totalTok)} tok`;
+          const pTok = Number(msg.promptTokens) || 0;
+          const cTok = Number(msg.completionTokens) || 0;
+          tokSpan.title = `Prompt: ${pTok} · Saída: ${cTok} · Total: ${totalTok} tokens`;
+          actions.appendChild(tokSpan);
+        }
       } else {
         const timeSpan = document.createElement("span");
         timeSpan.className = "ai-msg-time";
@@ -11025,6 +11278,7 @@ function initAiTranslatorPanel() {
       modelTagEl.textContent = lastModelMsg ? formatAiModelName(lastModelMsg.model) : "Auto";
       modelTagEl.title = lastModelMsg ? `Última resposta: ${lastModelMsg.model}` : "Seleção automática na cascata";
     }
+    updateChatTokenCounter();
 
     if (chatBusy) {
       const working = document.createElement("div");
@@ -11045,6 +11299,14 @@ function initAiTranslatorPanel() {
 
     chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
   }
+
+  function formatTokenCountCompact(count) {
+    const n = Math.max(0, Math.round(Number(count) || 0));
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+    return String(n);
+  }
+
+  function updateChatTokenCounter() {}
 
   async function sendChatMessage(rawText) {
     const text = String(rawText || "").trim();
@@ -11086,16 +11348,25 @@ function initAiTranslatorPanel() {
     try {
       let reply = "";
       let usedModel = "";
+      let promptTokens = 0;
+      let completionTokens = 0;
+      let totalTokens = 0;
       if (invoke) {
         const filteredHistory = session.messages
-          .filter(m => !(m.role === "model" && typeof m.text === "string" && m.text.trimStart().startsWith("Error:")))
-          .slice(-18);
+          .filter(
+            m =>
+              !m.coachAdvice &&
+              !(m.role === "model" && typeof m.text === "string" && m.text.trimStart().startsWith("Error:"))
+          )
+          .slice(-8);
         const lastMsgIndex = filteredHistory.length - 1;
         const payloadMessages = filteredHistory.map((m, idx) => {
           const isCurrentTurn = idx === lastMsgIndex;
+          const isRecentTurn = idx >= lastMsgIndex - 3;
+          const rawMsgText = String(m.text || "");
           return {
             role: m.role,
-            text: m.text || "",
+            text: isRecentTurn ? rawMsgText : rawMsgText.slice(0, 1200),
             attachments: (m.attachments || []).map(a => {
               if (isCurrentTurn) {
                 return {
@@ -11110,24 +11381,40 @@ function initAiTranslatorPanel() {
                 mime_type: a.mime_type || "",
                 data_base64: "",
                 text_content: a.text_content
-                  ? String(a.text_content).slice(0, 3000)
+                  ? String(a.text_content).slice(0, 1500)
                   : `[Anexo anterior: ${a.name || "arquivo"}]`
               };
             })
           };
         });
-        if (isTranslatorFloating && currentMode === "chat" && payloadMessages.length > 0) {
+        if (
+          isTranslatorFloating &&
+          currentMode === "chat" &&
+          payloadMessages.length > 0 &&
+          shouldAutoCaptureScreen(text)
+        ) {
           try {
             const screenBase64 = await invoke("capture_current_monitor_png");
             if (screenBase64) {
+              let screenMime = "image/png";
+              let finalScreenB64 = screenBase64;
+              const compressed = await compressImageDataUrl(
+                `data:image/png;base64,${screenBase64}`,
+                "image/png",
+                1280
+              );
+              if (compressed && compressed.data_base64) {
+                screenMime = compressed.mime_type;
+                finalScreenB64 = compressed.data_base64;
+              }
               const lastMsg = payloadMessages[payloadMessages.length - 1];
               if (lastMsg && lastMsg.role === "user") {
                 lastMsg.attachments = [
                   ...(lastMsg.attachments || []),
                   {
-                    name: "current_screen.png",
-                    mime_type: "image/png",
-                    data_base64: screenBase64,
+                    name: "current_screen.jpg",
+                    mime_type: screenMime,
+                    data_base64: finalScreenB64,
                     text_content: ""
                   }
                 ];
@@ -11139,6 +11426,9 @@ function initAiTranslatorPanel() {
         }
         const appContext = buildAppContextSnapshot(state, {
           selectedNodeId,
+          compactOnlyActive: true,
+          userPrompt: text,
+          operatorProfile: localStorage.getItem("todocompanion.settings.aiOperatorProfile") || "",
           settings: {
             theme: localStorage.getItem("todocompanion.settings.theme") || "claude-dark",
             cardFontSize: Number(localStorage.getItem("todocompanion.settings.cardFontSize") || 14),
@@ -11156,6 +11446,9 @@ function initAiTranslatorPanel() {
         if (res && typeof res === "object") {
           reply = String(res.text || "");
           usedModel = String(res.model || "");
+          promptTokens = Number(res.prompt_tokens) || 0;
+          completionTokens = Number(res.completion_tokens) || 0;
+          totalTokens = Number(res.total_tokens) || promptTokens + completionTokens;
         } else {
           reply = String(res || "");
         }
@@ -11175,6 +11468,9 @@ function initAiTranslatorPanel() {
         role: "model",
         text: cleaned,
         model: usedModel,
+        promptTokens,
+        completionTokens,
+        totalTokens,
         attachments: [],
         proposal: proposal || null,
         questionSet: questionSet || null
@@ -11213,38 +11509,119 @@ function initAiTranslatorPanel() {
     }
   }
 
+  function setLiveCoachIcon(active) {
+    if (!liveCoachBtn) return;
+    liveCoachBtn.innerHTML = active
+      ? `<svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M11 3C11 7.97 15.03 12 20 12C15.03 12 11 16.03 11 21C11 16.03 6.97 12 2 12C6.97 12 11 7.97 11 3Z"/>
+          <path d="M19 2C19 4.21 20.79 6 23 6C20.79 6 19 7.79 19 10C19 7.79 17.21 6 15 6C17.21 6 19 4.21 19 2Z"/>
+        </svg><span>Live Coach</span>`
+      : `<svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <path d="M12 19v3"/>
+        </svg><span>Live Coach</span>`;
+  }
+
   const liveCoach = new LiveEnglishCoachController({
     invoke,
     getApiKey: () => localStorage.getItem(GEMINI_API_KEY_STORAGE) || null,
-    onStatusChange: ({ active, label }) => {
+    getOutputMode: () => liveCoachOutputMode,
+    onUsage: usage => {
+      liveCoachTokenTotal += Number(usage?.totalTokens) || 0;
+      if (liveCoachTokenCountEl) {
+        liveCoachTokenCountEl.textContent = `${liveCoachTokenTotal.toLocaleString()} tokens`;
+      }
+    },
+    onStatusChange: ({ active, busy, label }) => {
       if (liveCoachBtn) {
         liveCoachBtn.classList.toggle("is-live", active);
         liveCoachBtn.setAttribute("aria-pressed", String(active));
+        setLiveCoachIcon(active);
       }
-      if (liveCoachBar) {
-        liveCoachBar.hidden = !active;
+      if (liveCoachViewEl && regularChatViewEl) {
+        const entering = active && liveCoachViewEl.hidden;
+        liveCoachViewEl.hidden = !active;
+        regularChatViewEl.hidden = active;
+        if (entering) {
+          liveCoachAdviceHistory = [];
+          renderLiveCoachAdviceHistory();
+          liveCoachMessagesEl.scrollTop = 0;
+          if (liveCoachThinkingCanvas) {
+            liveCoachGrokLoader?.stop();
+            liveCoachGrokLoader = new GrokDodecahedronRenderer(liveCoachThinkingCanvas, {
+              size: 72,
+              speed: 0.45,
+              intensity: 0.65,
+              colorRgb: null
+            });
+            liveCoachGrokLoader.start();
+          }
+          if (!liveCoachAudioLevelTimer && invoke) {
+            liveCoachAudioLevelTimer = window.setInterval(async () => {
+              if (!liveCoachGrokLoader || liveCoachIsBusy) return;
+              try {
+                const level = Number(await invoke("ai_audio_capture_level")) || 0;
+                const isHearing = level >= 0.06;
+                const hearingRgb =
+                  document.documentElement?.dataset?.theme === "light-claude"
+                    ? "22, 163, 74"
+                    : "74, 222, 128";
+                if (isHearing) {
+                  liveCoachGrokLoader.setState({
+                    speed: 1.45 + Math.min(1, level) * 1.15,
+                    intensity: 1,
+                    colorRgb: hearingRgb
+                  });
+                } else {
+                  liveCoachGrokLoader.setState({
+                    speed: 0.45,
+                    intensity: 0.65,
+                    colorRgb: null
+                  });
+                }
+              } catch (_) {}
+            }, 100);
+          }
+        } else if (!active) {
+          if (liveCoachAudioLevelTimer) {
+            window.clearInterval(liveCoachAudioLevelTimer);
+            liveCoachAudioLevelTimer = 0;
+          }
+          if (liveCoachGrokLoader) {
+            liveCoachGrokLoader.stop();
+            liveCoachGrokLoader = null;
+          }
+        }
       }
+      liveCoachIsBusy = Boolean(active && busy);
       if (liveCoachStatusEl && label) {
         liveCoachStatusEl.textContent = label;
       }
+      if (!active) {
+        setLiveCoachMenuOpen(false);
+      }
+      if (active && liveCoachGrokLoader) {
+        if (busy) {
+          liveCoachGrokLoader.setState({
+            speed: 1.9,
+            intensity: 1,
+            colorRgb: null
+          });
+        } else {
+          liveCoachGrokLoader.setState({
+            speed: 0.45,
+            intensity: 0.65,
+            colorRgb: null
+          });
+        }
+        if (liveCoachThinkingCanvas) {
+          liveCoachThinkingCanvas.title = label || (busy ? "Analyzing..." : "Listening...");
+        }
+      }
     },
     onAdvice: advice => {
-      const session = getActiveSession();
-      if (session.messages.length === 0) {
-        session.title = "Live English Coach";
-      }
       const nowIso = new Date().toISOString();
-      session.messages.push({
-        role: "model",
-        text: "",
-        attachments: [],
-        coachAdvice: advice,
-        createdAt: nowIso
-      });
-      session.updatedAt = nowIso;
-      chatSessions = [session, ...chatSessions.filter(s => s.id !== session.id)];
-      saveChatSessions();
-      renderSessionsList();
       appendCoachAdviceWithoutFlicker(advice, nowIso);
     },
     onError: errMsg => {
@@ -11255,15 +11632,92 @@ function initAiTranslatorPanel() {
   });
 
   liveCoachBtn?.addEventListener("click", () => {
+    if (!liveCoach.active) {
+      liveCoachTokenTotal = 0;
+      if (liveCoachTokenCountEl) liveCoachTokenCountEl.textContent = "0 tokens";
+    }
     liveCoach.toggle();
   });
 
   liveCoachNowBtn?.addEventListener("click", () => {
-    liveCoach.flushNow();
+    liveCoach.flushNow({ immediate: true });
   });
 
   liveCoachStopBtn?.addEventListener("click", () => {
+    setLiveCoachMenuOpen(false);
     liveCoach.stop();
+  });
+
+  function syncLiveCoachModeUi() {
+    liveCoachModeEl?.querySelectorAll("[data-coach-mode]").forEach(btn => {
+      const active = btn.dataset.coachMode === liveCoachMode;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", String(active));
+    });
+  }
+
+  function syncLiveCoachOutputModeUi() {
+    liveCoachOutputModeEl?.querySelectorAll("[data-output-mode]").forEach(btn => {
+      const active = btn.dataset.outputMode === liveCoachOutputMode;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", String(active));
+    });
+    if (liveCoachToneSection) {
+      liveCoachToneSection.hidden = liveCoachOutputMode !== "reply";
+    }
+  }
+
+  function setLiveCoachMenuOpen(open) {
+    if (!liveCoachMenu || !liveCoachMenuTrigger) return;
+    liveCoachMenu.hidden = !open;
+    liveCoachMenuTrigger.setAttribute("aria-expanded", String(open));
+  }
+
+  liveCoachMenuTrigger?.addEventListener("click", () => {
+    setLiveCoachMenuOpen(Boolean(liveCoachMenu?.hidden));
+  });
+  document.addEventListener("pointerdown", event => {
+    if (
+      liveCoachMenu &&
+      !liveCoachMenu.hidden &&
+      !liveCoachMenu.contains(event.target) &&
+      !liveCoachMenuTrigger?.contains(event.target)
+    ) {
+      setLiveCoachMenuOpen(false);
+    }
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && liveCoachMenu && !liveCoachMenu.hidden) {
+      setLiveCoachMenuOpen(false);
+      liveCoachMenuTrigger?.focus();
+    }
+  });
+
+  syncLiveCoachModeUi();
+  syncLiveCoachOutputModeUi();
+  liveCoachModeEl?.querySelectorAll("[data-coach-mode]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const mode = btn.dataset.coachMode === "formal" ? "formal" : "natural";
+      if (mode === liveCoachMode) return;
+      liveCoachMode = mode;
+      localStorage.setItem("todocompanion.settings.liveCoachMode", mode);
+      syncLiveCoachModeUi();
+      renderLiveCoachAdviceHistory();
+      setLiveCoachMenuOpen(false);
+    });
+  });
+  liveCoachOutputModeEl?.querySelectorAll("[data-output-mode]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const mode = btn.dataset.outputMode === "reply" ? "reply" : "translation";
+      if (mode === liveCoachOutputMode) return;
+      liveCoachOutputMode = mode;
+      localStorage.setItem("todocompanion.settings.liveCoachOutputMode", mode);
+      syncLiveCoachOutputModeUi();
+      liveCoachAdviceHistory = [];
+      liveCoachMessagesEl?.querySelectorAll(".ai-chat-msg").forEach(row => row.remove());
+      setLiveCoachMenuOpen(false);
+      liveCoach.flushNow({ immediate: true });
+    });
   });
 
   chatSendBtn?.addEventListener("click", event => {
@@ -11383,7 +11837,7 @@ function findNodeLocationAcrossApp(cardId, hintAction = null, ctx = null) {
   return null;
 }
 
-function findFreeCardPosition(board, startX, startY, w = 288, h = 144, gap = 48) {
+function findFreeCardPosition(board, startX, startY, w = MIN_CARD_WIDTH, h = 144, gap = 48) {
   const GRID = 24;
   let x = Math.round((Number(startX) || 96) / GRID) * GRID;
   let y = Math.round((Number(startY) || 96) / GRID) * GRID;
@@ -11483,7 +11937,7 @@ async function runSingleAiAppAction(action, ctx) {
         endDate: action.endDate || "",
         attachments: [],
         view: { panX: 80, panY: 80, zoom: 1 },
-        nodes: [{ id: rootId, title, body: "", status: "ongoing", x: 96, y: 120, w: 288, h: 96 }],
+        nodes: [{ id: rootId, title, body: "", status: "ongoing", x: 96, y: 120, w: MIN_CARD_WIDTH, h: 96 }],
         links: []
       };
       user.tasks.push(task);
@@ -11732,7 +12186,7 @@ async function runSingleAiAppAction(action, ctx) {
       if (action.criticality !== undefined) node.criticality = clamp(Number(action.criticality), 0, 2);
       if (node.type !== "table" && (action.body !== undefined || action.appendBody)) {
         const est = estimateActionCardSize(getNodeContent(node));
-        node.w = Math.max(node.w || 288, est.w);
+        node.w = Math.max(node.w || MIN_CARD_WIDTH, est.w);
         node.h = Math.max(node.h || 144, est.h);
       }
       saveState();
@@ -11764,7 +12218,7 @@ async function runSingleAiAppAction(action, ctx) {
       if (!loc || isRootNode(loc.task, loc.node.id)) throw new Error("Card não encontrado");
       const { task: board, node: orig } = loc;
       const id = makeId("action");
-      const cloneW = orig.w || 288;
+      const cloneW = orig.w || MIN_CARD_WIDTH;
       const cloneH = nodeHeight(orig);
       const freePos = findFreeCardPosition(board, orig.x, orig.y + cloneH + 48, cloneW, cloneH, 48);
       const clone = {
@@ -11801,7 +12255,7 @@ async function runSingleAiAppAction(action, ctx) {
       const destBoard = targetFound.task;
       const parentId = destBoard.nodes[0]?.id || null;
       const newId = makeId("action");
-      const w = srcLoc.node.w || 288;
+      const w = srcLoc.node.w || MIN_CARD_WIDTH;
       const h = srcLoc.node.h || 144;
       const rawPos = parentId ? getReplyActionPosition(destBoard, parentId) : { x: 96, y: 120 };
       const freePos = findFreeCardPosition(destBoard, rawPos.x, rawPos.y, w, h, 48);
@@ -11964,7 +12418,7 @@ function insertAiTextIntoActiveCanvas(text) {
   const parentId = board.nodes[0]?.id || null;
   const id = makeId("action");
   const rawPos = parentId ? getReplyActionPosition(board, parentId) : getViewportActionPosition();
-  const freePos = findFreeCardPosition(board, rawPos.x, rawPos.y, 288, 144, 48);
+  const freePos = findFreeCardPosition(board, rawPos.x, rawPos.y, MIN_CARD_WIDTH, 144, 48);
   const newNode = {
     id,
     title: "",
@@ -11973,7 +12427,7 @@ function insertAiTextIntoActiveCanvas(text) {
     createdAt: new Date().toISOString(),
     x: freePos.x,
     y: freePos.y,
-    w: 288,
+    w: MIN_CARD_WIDTH,
     h: 144
   };
   if (parentId) {

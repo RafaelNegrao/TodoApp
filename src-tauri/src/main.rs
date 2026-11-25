@@ -2,7 +2,7 @@
 
 use std::env;
 use std::fs;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -232,6 +232,12 @@ const GEMINI_MODEL_CASCADE: &[&str] = &[
     "gemma-3-27b-it",
     "gemma-3-12b-it",
     "gemma-3-4b-it",
+];
+
+const SIDE_CHAT_MODEL_CASCADE: &[&str] = &[
+    "gemini-flash-latest",
+    "gemini-3.8-flash",
+    "gemini-3.5-flash-lite",
 ];
 
 fn is_deprecated_gemini_model(model: &str) -> bool {
@@ -649,6 +655,29 @@ fn fold_system_instruction_into_user(mut payload: serde_json::Value) -> serde_js
     payload
 }
 
+#[derive(Clone, Copy, Serialize, Deserialize, Default)]
+struct GeminiTokenUsage {
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
+}
+
+fn extract_token_usage(body: &serde_json::Value, fallback_text: &str) -> GeminiTokenUsage {
+    let meta = &body["usageMetadata"];
+    let prompt_tokens = meta["promptTokenCount"].as_u64().unwrap_or(0) as u32;
+    let completion_tokens = meta["candidatesTokenCount"]
+        .as_u64()
+        .unwrap_or_else(|| (fallback_text.chars().count() as u64 / 4).max(1)) as u32;
+    let total_tokens = meta["totalTokenCount"]
+        .as_u64()
+        .unwrap_or(prompt_tokens as u64 + completion_tokens as u64) as u32;
+    GeminiTokenUsage {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+    }
+}
+
 fn execute_gemini_fast_payload(
     key: &str,
     models: &[String],
@@ -656,7 +685,7 @@ fn execute_gemini_fast_payload(
     use_short_timeout: bool,
 ) -> Result<String, String> {
     execute_gemini_fast_payload_with_model(key, models, payload, use_short_timeout)
-        .map(|(text, _)| text)
+        .map(|(text, _, _)| text)
 }
 
 fn execute_gemini_fast_payload_with_model(
@@ -664,7 +693,11 @@ fn execute_gemini_fast_payload_with_model(
     models: &[String],
     payload: serde_json::Value,
     use_short_timeout: bool,
-) -> Result<(String, String), String> {
+) -> Result<(String, String, GeminiTokenUsage), String> {
+    let strict_side_chat_models = !models.is_empty()
+        && models.iter().all(|model| SIDE_CHAT_MODEL_CASCADE
+            .iter()
+            .any(|allowed| *allowed == model));
     let agent = if use_short_timeout {
         gemini_translate_agent()
     } else {
@@ -698,7 +731,7 @@ fn execute_gemini_fast_payload_with_model(
 
     loop {
         if ready_queue.is_empty() {
-            if !discovered_fallback {
+            if !strict_side_chat_models && !discovered_fallback {
                 discovered_fallback = true;
                 let fresh: Vec<String> = discover_available_gemini_models(key)
                     .into_iter()
@@ -754,19 +787,34 @@ fn execute_gemini_fast_payload_with_model(
                         .into_json()
                         .map_err(|e| format!("Resposta invalida do Gemini: {e}"))?;
                     let mut combined = String::new();
-                    if let Some(parts) = body["candidates"][0]["content"]["parts"].as_array() {
-                        for p in parts {
-                            if p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false) {
-                                continue;
-                            }
-                            if let Some(t) = p["text"].as_str() {
-                                combined.push_str(t);
+                    if let Some(candidates) = body["candidates"].as_array() {
+                        for candidate in candidates {
+                            if let Some(parts) = candidate["content"]["parts"].as_array() {
+                                for p in parts {
+                                    if p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                        continue;
+                                    }
+                                    if let Some(t) = p["text"].as_str() {
+                                        combined.push_str(t);
+                                    }
+                                }
                             }
                         }
                     }
                     let final_text = combined.trim();
                     if !final_text.is_empty() {
-                        return Ok((final_text.to_string(), model.clone()));
+                        let usage = extract_token_usage(&body, final_text);
+                        return Ok((final_text.to_string(), model.clone(), usage));
+                    }
+                    let finish_reason = body["candidates"][0]["finishReason"]
+                        .as_str()
+                        .unwrap_or("empty");
+                    last_err = format!("Gemini retornou resposta vazia ({model}; finishReason: {finish_reason})");
+                    if finish_reason.eq_ignore_ascii_case("safety")
+                        || finish_reason.eq_ignore_ascii_case("recitation")
+                    {
+                        mark_model_cooldown(&model, Duration::from_secs(20));
+                        break;
                     }
                 }
                 Err(ureq::Error::Status(code, resp)) => {
@@ -928,6 +976,17 @@ async fn ai_translate_fast(
 struct AiChatReply {
     text: String,
     model: String,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
+}
+
+#[derive(Serialize)]
+struct LiveCoachReply {
+    text: String,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
 }
 
 #[cfg(target_os = "windows")]
@@ -1153,89 +1212,52 @@ async fn ai_chat_english(
         return Ok(AiChatReply {
             text: String::new(),
             model: String::new(),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
         });
     }
 
-    let (key, models) = resolve_gemini_key_and_models(api_key)?;
+    let (key, _models) = resolve_gemini_key_and_models(api_key)?;
+    let models: Vec<String> = SIDE_CHAT_MODEL_CASCADE
+        .iter()
+        .map(|model| (*model).to_string())
+        .collect();
     let _ = formality;
     let ctx_json = app_context.unwrap_or_else(|| "{}".to_string());
 
     tauri::async_runtime::spawn_blocking(move || {
         let system_prompt = format!(
-            "You are the integrated AI Agent of TODOCompanion with full visibility and control over the entire application.\n\
-             You can hold natural multi-turn conversations, ask clarifying questions, suggest improvements, analyze attached images/PDFs/audio/files, summarize tasks/cards across the entire app, AND propose actions to control the app (users, tasks, action cards, Excel table cards, Todo List table cards, checklists, per-row connections, canvas layout, clipboard copy, navigation, and settings).\n\
+            "You are the integrated AI Agent of TODOCompanion with full visibility and control over the app.\n\
              Always reply in the same language the user writes in.\n\n\
-             APP FEATURES & CAPABILITIES (know everything the app has):\n\
-             1. Hierarchy: Users -> Main Tasks (status: ongoing|stopped|complete, priority: low|normal|high|urgent, criticality: 0|1|2, startDate, endDate, attachments) -> Canvas Cards & Links.\n\
-             2. Card Types:\n\
-                - Action Card (type: \"action\"): plain text with '\\n' for line breaks, optional inline checklists (\"[ ] item\" / \"[x] item\"), inline images, inline video player (\"![video](userId/file)\" for recorded/attached videos), attachment chips (\"@[name](attachment:id)\"). NEVER put HTML tags like <br>, <p>, <div>, <strong>, <em>, <span> in card bodies or table cells — always use '\\n' for line breaks and plain text.\n\
-                - Table Card (type: \"table\", hasCheckboxes: false): the table itself IS the card (compact minimal borders, no bottom format bar, auto-fit height, individual input & output connection ports on EVERY ROW, horizontal resize).\n\
-                - Todo List Table Card (type: \"table\", hasCheckboxes: true): same clean table-card style with interactive checkboxes (\"[ ]\" / \"[x]\") in column A + per-row input/output connection ports.\n\
-                - Image Card (type: \"image\"): standalone visual image card with fullscreen preview.\n\
-             3. Excel Formula Engine in Tables (EN & PT-BR, supports nested formulas, ';'/',' separators, '%', '&', '$A$1', ranges A1:C5, and checkbox booleans TRUE/FALSE in Todo tables):\n\
-                - Math/Aggregation: SUM/SOMA, AVERAGE/AVG/MEDIA, MIN/MINIMO, MAX/MAXIMO, MEDIAN/MED, PRODUCT/MULT, COUNT/CONT/CONT.NUM, COUNTA/CONT.VALORES, COUNTBLANK/CONTAR.VAZIO, ABS, ROUND/ARRED, ROUNDUP, ROUNDDOWN, INT, SQRT/RAIZ, POWER/POTENCIA, MOD.\n\
-                - Logic & Conditional: IF/SE, AND/E, OR/OU, NOT/NAO, IFERROR/SEERRO, SUMIF/SOMASE, COUNTIF/CONT.SE, AVERAGEIF/MEDIASE.\n\
-                - Text, Lookup & Date: CONCAT/CONCATENAR, UPPER/MAIUSCULA, LOWER/MINUSCULA, LEN/NUM.CARACT, TRIM/ARRUMAR, LEFT/ESQUERDA, RIGHT/DIREITA, MID/EXT.TEXTO, VLOOKUP/PROCV, TODAY/HOJE, NOW/AGORA.\n\
-             4. Per-row Connections: Table cards and Todo List table cards have input & output ports on every row (0-indexed: fromRow, toRow in connect_cards).\n\
-             5. Attachments & Recordings: Native screen+audio (.mp4) and audio-only (.m4a) recording saved in task's anexos folder, automatic sync with disk folder, rename/delete with confirmation, AI transcription, and inline video playback directly inside cards (use \"![video](userId/file)\" referencing an existing attachment from task.attachments).\n\
-             6. IMPORTANT CARD SELECTION RULE:\n\
-                - Whenever the user asks to create a table (\"tabela\", \"planilha\", \"orçamento\", \"cronograma em tabela\") -> ALWAYS use \"create_table_card\" with \"hasCheckboxes\": false (and use real Excel formulas like =SOMA(B2:B4) when totals/calculations make sense!).\n\
-                - Whenever the user asks to create a Todo List table (\"todo list\", \"lista de todo\", \"tabela de tarefas\", \"tabela com checkbox\") -> ALWAYS use \"create_table_card\" with \"hasCheckboxes\": true (put \"[ ]\" or \"[x]\" in column 0, followed by task columns).\n\
-                - NEVER use plain text \"create_card\" when the user asks for a table or Todo List table!\n\
-             7. Live Screen Vision (Floating Mini-Chat):\n\
-                - When the user asks a question from the floating mini-chat, a live screenshot of their current monitor (current_screen.png) is automatically attached.\n\
-                - Look directly at what is visible on the user's screen (fields, labels, forms, buttons, errors, code, processes) and answer directly, clearly, and concisely about what you see.\n\
-                - Do NOT propose [[APP_ACTIONS]] when the user is just asking about what is on their screen, unless they explicitly ask to create/edit something in TODOCompanion.\n\n\
-             INTERACTIVE QUESTIONS & CLARIFICATION RULE:\n\
-             - NEVER ask a plain-text 'Você tem certeza?' / 'Are you sure?' when the user's request is already clear (including destructive requests like deleting tasks/cards/users). Instead, go straight to [[APP_ACTIONS]] — the UI already shows an interactive confirmation card with 'Permitir e executar' and 'Recusar' buttons.\n\
-             - Whenever you DO need to ask the user a question (ambiguous request, multiple matching tasks/cards/users, choosing between options, collecting parameters/dates/priorities/quantities, or offering next steps), you MUST include ONE interactive question block at the end of your reply using EXACTLY these tags and valid JSON (and omit [[APP_ACTIONS]] until the user answers):\n\
+             OPERATOR vs. TASK USERS (CRITICAL):\n\
+             - The person operating TODOCompanion and chatting with you is defined in LIVE APP STATE `operatorProfile` (if present).\n\
+             - `users[]` in LIVE APP STATE are NOT the operator — they are the clients/people/contexts FOR WHOM the operator is creating or executing tasks. Never assume a `users[].name` is the person talking to you.\n\n\
+             APP STRUCTURE & RULES:\n\
+             1. Hierarchy: Users (assignees/clients) -> Tasks (status: ongoing|stopped|complete, priority: low|normal|high|urgent, criticality: 0|1|2, startDate, endDate, attachments) -> Canvas Cards & Links.\n\
+             2. Card Types (NEVER use HTML tags like <br>, <p>, <div>; use '\\n' and plain text):\n\
+                - Action Card (type:\"action\"): text, checklists (\"[ ]\"/\"[x]\"), images, video (\"![video](userId/file)\"), attachment chips (\"@[name](attachment:id)\").\n\
+                - Table Card (type:\"table\", hasCheckboxes:false): use `create_table_card` with Excel formulas (SUM/SOMA, AVERAGE/MEDIA, IF/SE, SUMIF/SOMASE, VLOOKUP/PROCV, etc.).\n\
+                - Todo List Table Card (type:\"table\", hasCheckboxes:true): use `create_table_card` with \"[ ]\"/\"[x]\" in col 0.\n\
+                - Per-row connections: `fromRow`/`toRow` (0-indexed) in `connect_cards`.\n\
+             3. If `current_screen.jpg` is attached, inspect the screenshot directly and answer about what is visible on screen without proposing [[APP_ACTIONS]] unless asked.\n\n\
+             INTERACTIVE QUESTIONS ([[APP_QUESTIONS]]):\n\
+             - When you need clarification or options from the user, omit [[APP_ACTIONS]] and append ONE block:\n\
              [[APP_QUESTIONS]]\n\
-             {{\"questions\":[{{\"id\":\"q1\",\"type\":\"choice|checkbox|chips|toggle|slider|rating|text|date\",\"prompt\":\"Question text\",\"multiSelect\":false,\"allowCustom\":true,\"options\":[{{\"label\":\"Option A\",\"value\":\"Option A\",\"description\":\"Short detail\",\"badge\":\"Recomendado\"}}]}}]}}\n\
-             [[/APP_QUESTIONS]]\n\
-             - Pick the richest control type for each question:\n\
-               * \"choice\": single-select radio cards (supports label, description, optional badge).\n\
-               * \"checkbox\": multi-select checkboxes (user checks several items and clicks Enviar).\n\
-               * \"chips\": compact clickable tag pills (single or multiSelect:true, ideal for status/priority/columns/tags).\n\
-               * \"toggle\": Yes/No sliding switch (optional onLabel, offLabel, defaultValue: true|false).\n\
-               * \"slider\": numeric range slider (min, max, step, defaultValue, unit — e.g. rows/columns/percentage).\n\
-               * \"rating\": 1-5 interactive star rating.\n\
-               * \"text\" or \"date\": inline text input (placeholder, defaultValue) or date picker (YYYY-MM-DD).\n\
-             - You can combine multiple different control types in the same [[APP_QUESTIONS]] card (e.g. a text title + chips for priority + toggle for checkboxes + date for deadline)!\n\n\
-             CRITICAL ACTION & PERMISSION RULE:\n\
-             Once the user's intent is clear and they want you to CREATE, EDIT, DELETE, DUPLICATE, MOVE, CONNECT, SHOW/OPEN, COPY, ORGANIZE, or CHANGE SETTINGS in the app, include ONE structured action block at the end of your reply using EXACTLY these tags and valid JSON:\n\
+             {{\"questions\":[{{\"id\":\"q1\",\"type\":\"choice|checkbox|chips|toggle|slider|rating|text|date\",\"prompt\":\"...\",\"multiSelect\":false,\"allowCustom\":true,\"options\":[{{\"label\":\"...\",\"value\":\"...\",\"description\":\"...\",\"badge\":\"Recomendado\"}}]}}]}}\n\
+             [[/APP_QUESTIONS]]\n\n\
+             APP ACTIONS ([[APP_ACTIONS]]):\n\
+             - When the user wants to create, edit, delete, connect, organize, focus, copy, or change settings, append ONE block:\n\
              [[APP_ACTIONS]]\n\
-             {{\"summary\":\"Short description of what will be executed\",\"actions\":[...]}}\n\
+             {{\"summary\":\"Short description\",\"actions\":[...]}}\n\
              [[/APP_ACTIONS]]\n\
-             - Non-destructive actions (creating users/tasks/cards/tables, editing, connecting, organizing, focusing, settings) execute AUTOMATICALLY right away — explain concisely what you are creating/doing without telling the user to click 'Permitir'.\n\
-             - Destructive actions (delete_user, delete_task, delete_card, disconnect_cards) automatically show a confirmation card so the user can click 'Permitir e executar' or 'Recusar'.\n\
-             If the user only asks a read-only question, answer directly without [[APP_ACTIONS]] (you may optionally include [[APP_QUESTIONS]] if offering clickable next steps).\n\n\
-             AVAILABLE ACTION TYPES:\n\
-             - {{\"type\":\"create_user\",\"name\":\"...\"}}\n\
-             - {{\"type\":\"rename_user\",\"userId\":\"...\",\"userName\":\"...\",\"newName\":\"...\"}}\n\
-             - {{\"type\":\"delete_user\",\"userId\":\"...\",\"userName\":\"...\"}}\n\
-             - {{\"type\":\"select_user\",\"userId\":\"...\",\"userName\":\"...\"}}\n\
-             - {{\"type\":\"create_task\",\"userId\":\"...\",\"userName\":\"...\",\"title\":\"...\",\"status\":\"ongoing|stopped|complete\",\"priority\":\"low|normal|high|urgent\",\"startDate\":\"YYYY-MM-DD\",\"endDate\":\"YYYY-MM-DD\"}}\n\
-             - {{\"type\":\"update_task\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"title\":\"...\",\"status\":\"ongoing|stopped|complete\",\"priority\":\"low|normal|high|urgent\",\"criticality\":0|1|2,\"startDate\":\"YYYY-MM-DD\",\"endDate\":\"YYYY-MM-DD\"}}\n\
-             - {{\"type\":\"delete_task\",\"taskId\":\"...\",\"taskTitle\":\"...\"}}\n\
-             - {{\"type\":\"duplicate_task\",\"taskId\":\"...\",\"taskTitle\":\"...\"}}\n\
-             - {{\"type\":\"select_task\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"userName\":\"...\"}}\n\
-             - {{\"type\":\"create_table_card\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"userName\":\"...\",\"hasCheckboxes\":false|true,\"rows\":[[\"Item\",\"Qtd\",\"Valor\"],[\"A\",\"2\",\"10\"],[\"Total\",\"=SOMA(B2:B2)\",\"=SOMA(C2:C2)\"]],\"parentCardId\":\"...|$LAST_CARD\",\"parentRow\":0}}\n\
-             - {{\"type\":\"create_card\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"userName\":\"...\",\"body\":\"...\",\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2,\"parentCardId\":\"...|$LAST_CARD\"}}\n\
-             - {{\"type\":\"update_card\",\"cardId\":\"...|$LAST_CARD\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"body\":\"...\",\"appendBody\":\"...\",\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2}}\n\
-             - {{\"type\":\"delete_card\",\"cardId\":\"...|$LAST_CARD\",\"taskId\":\"...\",\"taskTitle\":\"...\"}}\n\
-             - {{\"type\":\"duplicate_card\",\"cardId\":\"...|$LAST_CARD\",\"taskId\":\"...\",\"taskTitle\":\"...\"}}\n\
-             - {{\"type\":\"copy_card_to_task\",\"sourceCardId\":\"...\",\"sourceTaskId\":\"...\",\"sourceTaskTitle\":\"...\",\"targetTaskId\":\"...\",\"targetTaskTitle\":\"...\",\"targetUserName\":\"...\"}}\n\
-             - {{\"type\":\"move_card_to_task\",\"sourceCardId\":\"...\",\"sourceTaskId\":\"...\",\"sourceTaskTitle\":\"...\",\"targetTaskId\":\"...\",\"targetTaskTitle\":\"...\",\"targetUserName\":\"...\"}}\n\
-             - {{\"type\":\"focus_card\",\"cardId\":\"...|$LAST_CARD\",\"taskId\":\"...\",\"taskTitle\":\"...\"}}\n\
-             - {{\"type\":\"connect_cards\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"fromCardId\":\"...|$LAST_CARD\",\"toCardId\":\"...|$LAST_CARD\",\"fromRow\":0,\"toRow\":0}}\n\
-             - {{\"type\":\"disconnect_cards\",\"taskId\":\"...\",\"taskTitle\":\"...\",\"fromCardId\":\"...\",\"toCardId\":\"...\"}}\n\
-             - {{\"type\":\"organize_canvas\"}}\n\
-             - {{\"type\":\"center_canvas\"}}\n\
-             - {{\"type\":\"copy_text\",\"text\":\"...\"}}\n\
-             - {{\"type\":\"set_status_filter\",\"filter\":\"all|ongoing|stopped|complete\"}}\n\
-             - {{\"type\":\"open_translator\",\"floating\":true|false}}\n\
-             - {{\"type\":\"open_settings\"}}\n\
-             - {{\"type\":\"update_settings\",\"theme\":\"claude-dark|light-claude|dracula\",\"cardFontSize\":14,\"linkStyle\":\"orthogonal|bezier\",\"linkArrows\":true|false,\"translatorMode\":\"auto|manual\"}}\n\n\
+             - Non-destructive actions execute AUTOMATICALLY right away (do not ask the user to click 'Permitir').\n\
+             - Destructive actions (delete_user, delete_task, delete_card, disconnect_cards) show a confirmation card automatically.\n\
+             - Action schemas:\n\
+               create_user{{name}} | rename_user{{userId,userName,newName}} | delete_user{{userId,userName}} | select_user{{userId,userName}}\n\
+               create_task{{userId,userName,title,status,priority,startDate,endDate}} | update_task{{taskId,taskTitle,title,status,priority,criticality,startDate,endDate}} | delete_task{{taskId,taskTitle}} | duplicate_task{{taskId,taskTitle}} | select_task{{taskId,taskTitle,userName}}\n\
+               create_table_card{{taskId,taskTitle,userName,hasCheckboxes,rows,parentCardId:\"...|$LAST_CARD\",parentRow}} | create_card{{taskId,taskTitle,userName,body,status,criticality,parentCardId:\"...|$LAST_CARD\"}} | update_card{{cardId:\"...|$LAST_CARD\",taskId,taskTitle,body,appendBody,status,criticality}} | delete_card{{cardId,taskId,taskTitle}} | duplicate_card{{cardId,taskId,taskTitle}} | copy_card_to_task{{sourceCardId,sourceTaskId,targetTaskId,targetTaskTitle,targetUserName}} | move_card_to_task{{sourceCardId,sourceTaskId,targetTaskId,targetTaskTitle,targetUserName}} | focus_card{{cardId:\"...|$LAST_CARD\",taskId,taskTitle}} | connect_cards{{taskId,fromCardId:\"...|$LAST_CARD\",toCardId:\"...|$LAST_CARD\",fromRow,toRow}} | disconnect_cards{{taskId,fromCardId,toCardId}}\n\
+               organize_canvas{{}} | center_canvas{{}} | copy_text{{text}} | set_status_filter{{filter}} | open_translator{{floating}} | open_settings{{}} | update_settings{{theme,cardFontSize,linkStyle,linkArrows,translatorMode}}\n\n\
              LIVE APP STATE (JSON):\n{ctx_json}"
         );
 
@@ -1314,8 +1336,15 @@ async fn ai_chat_english(
             }
         });
 
-        let (text, model) = execute_gemini_fast_payload_with_model(&key, &models, payload, false)?;
-        Ok(AiChatReply { text, model })
+        let (text, model, usage) =
+            execute_gemini_fast_payload_with_model(&key, &models, payload, false)?;
+        Ok(AiChatReply {
+            text,
+            model,
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
+        })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1402,6 +1431,8 @@ struct ActiveAiAudioCapture {
     running: Arc<AtomicBool>,
     mic_samples: Arc<Mutex<Vec<f32>>>,
     sys_samples: Arc<Mutex<Vec<f32>>>,
+    recent_mic_samples: Arc<Mutex<VecDeque<f32>>>,
+    recent_sys_samples: Arc<Mutex<VecDeque<f32>>>,
     chunk_start: Arc<Mutex<Instant>>,
     join_handle: Option<thread::JoinHandle<()>>,
 }
@@ -2924,8 +2955,23 @@ async fn native_screen_recording_stop(
     .map_err(|e| e.to_string())?
 }
 
+const LIVE_COACH_CONTEXT_SECONDS: usize = 8;
+
+fn append_recent_audio_samples(queue: &Arc<Mutex<VecDeque<f32>>>, samples: &[f32]) {
+    if samples.is_empty() {
+        return;
+    }
+    if let Ok(mut recent) = queue.lock() {
+        recent.extend(samples.iter().copied());
+        let max_samples = TARGET_SAMPLE_RATE as usize * LIVE_COACH_CONTEXT_SECONDS;
+        let excess = recent.len().saturating_sub(max_samples);
+        recent.drain(..excess);
+    }
+}
+
 fn push_resampled_mono(
     dest: &Arc<Mutex<Vec<f32>>>,
+    recent_dest: &Arc<Mutex<VecDeque<f32>>>,
     mono_chunk: &[f32],
     in_rate: u32,
     chunk_start: &Arc<Mutex<Instant>>,
@@ -2946,6 +2992,8 @@ fn push_resampled_mono(
         let s1 = mono_chunk.get(idx + 1).copied().unwrap_or(s0);
         resampled.push(s0 + (s1 - s0) * frac);
     }
+
+    append_recent_audio_samples(recent_dest, &resampled);
 
     let elapsed_secs = chunk_start
         .lock()
@@ -2970,6 +3018,7 @@ fn build_cpal_capture_stream(
     device: &cpal::Device,
     config: &cpal::SupportedStreamConfig,
     dest: Arc<Mutex<Vec<f32>>>,
+    recent_dest: Arc<Mutex<VecDeque<f32>>>,
     chunk_start: Arc<Mutex<Instant>>,
 ) -> Option<cpal::Stream> {
     let channels = config.channels() as usize;
@@ -2982,15 +3031,18 @@ fn build_cpal_capture_stream(
         cpal::SampleFormat::F32 => device
             .build_input_stream(
                 &stream_config,
-                move |data: &[f32], _| {
-                    if channels == 0 {
-                        return;
+                {
+                    let recent = Arc::clone(&recent_dest);
+                    move |data: &[f32], _| {
+                        if channels == 0 {
+                            return;
+                        }
+                        let mono: Vec<f32> = data
+                            .chunks(channels)
+                            .map(|frame| frame.iter().copied().sum::<f32>() / (frame.len() as f32))
+                            .collect();
+                        push_resampled_mono(&dest, &recent, &mono, in_rate, &chunk_start);
                     }
-                    let mono: Vec<f32> = data
-                        .chunks(channels)
-                        .map(|frame| frame.iter().copied().sum::<f32>() / (frame.len() as f32))
-                        .collect();
-                    push_resampled_mono(&dest, &mono, in_rate, &chunk_start);
                 },
                 err_fn,
                 None,
@@ -2999,18 +3051,22 @@ fn build_cpal_capture_stream(
         cpal::SampleFormat::I16 => device
             .build_input_stream(
                 &stream_config,
-                move |data: &[i16], _| {
-                    if channels == 0 {
-                        return;
+                {
+                    let recent = Arc::clone(&recent_dest);
+                    move |data: &[i16], _| {
+                        if channels == 0 {
+                            return;
+                        }
+                        let mono: Vec<f32> = data
+                            .chunks(channels)
+                            .map(|frame| {
+                                let sum: f32 =
+                                    frame.iter().map(|&s| (s as f32) / 32768.0).sum();
+                                sum / (frame.len() as f32)
+                            })
+                            .collect();
+                        push_resampled_mono(&dest, &recent, &mono, in_rate, &chunk_start);
                     }
-                    let mono: Vec<f32> = data
-                        .chunks(channels)
-                        .map(|frame| {
-                            let sum: f32 = frame.iter().map(|&s| (s as f32) / 32768.0).sum();
-                            sum / (frame.len() as f32)
-                        })
-                        .collect();
-                    push_resampled_mono(&dest, &mono, in_rate, &chunk_start);
                 },
                 err_fn,
                 None,
@@ -3019,21 +3075,24 @@ fn build_cpal_capture_stream(
         cpal::SampleFormat::U16 => device
             .build_input_stream(
                 &stream_config,
-                move |data: &[u16], _| {
-                    if channels == 0 {
-                        return;
+                {
+                    let recent = Arc::clone(&recent_dest);
+                    move |data: &[u16], _| {
+                        if channels == 0 {
+                            return;
+                        }
+                        let mono: Vec<f32> = data
+                            .chunks(channels)
+                            .map(|frame| {
+                                let sum: f32 = frame
+                                    .iter()
+                                    .map(|&s| ((s as f32) - 32768.0) / 32768.0)
+                                    .sum();
+                                sum / (frame.len() as f32)
+                            })
+                            .collect();
+                        push_resampled_mono(&dest, &recent, &mono, in_rate, &chunk_start);
                     }
-                    let mono: Vec<f32> = data
-                        .chunks(channels)
-                        .map(|frame| {
-                            let sum: f32 = frame
-                                .iter()
-                                .map(|&s| ((s as f32) - 32768.0) / 32768.0)
-                                .sum();
-                            sum / (frame.len() as f32)
-                        })
-                        .collect();
-                    push_resampled_mono(&dest, &mono, in_rate, &chunk_start);
                 },
                 err_fn,
                 None,
@@ -3136,11 +3195,16 @@ fn ai_audio_capture_start(state: State<'_, AiAudioCaptureState>) -> Result<(), S
     let running = Arc::new(AtomicBool::new(true));
     let mic_samples = Arc::new(Mutex::new(Vec::with_capacity(TARGET_SAMPLE_RATE as usize * 15)));
     let sys_samples = Arc::new(Mutex::new(Vec::with_capacity(TARGET_SAMPLE_RATE as usize * 15)));
+    let recent_capacity = TARGET_SAMPLE_RATE as usize * LIVE_COACH_CONTEXT_SECONDS;
+    let recent_mic_samples = Arc::new(Mutex::new(VecDeque::with_capacity(recent_capacity)));
+    let recent_sys_samples = Arc::new(Mutex::new(VecDeque::with_capacity(recent_capacity)));
     let chunk_start = Arc::new(Mutex::new(Instant::now()));
 
     let run_flag = Arc::clone(&running);
     let mic_buf = Arc::clone(&mic_samples);
     let sys_buf = Arc::clone(&sys_samples);
+    let mic_recent = Arc::clone(&recent_mic_samples);
+    let sys_recent = Arc::clone(&recent_sys_samples);
     let mic_clock = Arc::clone(&chunk_start);
     let sys_clock = Arc::clone(&chunk_start);
 
@@ -3151,7 +3215,7 @@ fn ai_audio_capture_start(state: State<'_, AiAudioCaptureState>) -> Result<(), S
             .default_input_device()
             .and_then(|dev| {
                 let cfg = dev.default_input_config().ok()?;
-                let s = build_cpal_capture_stream(&dev, &cfg, mic_buf, mic_clock)?;
+                let s = build_cpal_capture_stream(&dev, &cfg, mic_buf, mic_recent, mic_clock)?;
                 s.play().ok()?;
                 Some(s)
             });
@@ -3163,7 +3227,7 @@ fn ai_audio_capture_start(state: State<'_, AiAudioCaptureState>) -> Result<(), S
             .default_output_device()
             .and_then(|dev| {
                 let cfg = dev.default_output_config().ok()?;
-                let s = build_cpal_capture_stream(&dev, &cfg, sys_buf, sys_clock)?;
+                let s = build_cpal_capture_stream(&dev, &cfg, sys_buf, sys_recent, sys_clock)?;
                 s.play().ok()?;
                 Some(s)
             });
@@ -3177,6 +3241,8 @@ fn ai_audio_capture_start(state: State<'_, AiAudioCaptureState>) -> Result<(), S
         running,
         mic_samples,
         sys_samples,
+        recent_mic_samples,
+        recent_sys_samples,
         chunk_start,
         join_handle: Some(join_handle),
     });
@@ -3212,13 +3278,91 @@ fn drain_ai_audio_capture(
     Ok((Vec::new(), Vec::new()))
 }
 
+fn snapshot_recent_ai_audio_capture(
+    state: &State<'_, AiAudioCaptureState>,
+) -> Result<(Vec<f32>, Vec<f32>), String> {
+    let guard = state.0.lock().map_err(|_| "Audio capture lock poisoned".to_string())?;
+    let Some(active) = guard.as_ref() else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+
+    let mic = active
+        .recent_mic_samples
+        .lock()
+        .map(|samples| samples.iter().copied().collect())
+        .unwrap_or_default();
+    let sys = active
+        .recent_sys_samples
+        .lock()
+        .map(|samples| samples.iter().copied().collect())
+        .unwrap_or_default();
+
+    if let Ok(mut samples) = active.mic_samples.lock() {
+        samples.clear();
+    }
+    if let Ok(mut samples) = active.sys_samples.lock() {
+        samples.clear();
+    }
+    if let Ok(mut clock) = active.chunk_start.lock() {
+        *clock = Instant::now();
+    }
+
+    Ok((mic, sys))
+}
+
+#[derive(Serialize)]
+struct AiTranscribeReply {
+    text: String,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
+}
+
+#[tauri::command]
+fn ai_audio_capture_level(state: State<'_, AiAudioCaptureState>) -> f32 {
+    let Ok(guard) = state.0.lock() else {
+        return 0.0;
+    };
+    let Some(active) = guard.as_ref() else {
+        return 0.0;
+    };
+
+    let sample_window = 800usize; // ~50ms a 16kHz
+    let compute_rms = |q: &Arc<Mutex<VecDeque<f32>>>| -> f32 {
+        let Ok(buf) = q.lock() else {
+            return 0.0;
+        };
+        let len = buf.len();
+        if len == 0 {
+            return 0.0;
+        }
+        let start = len.saturating_sub(sample_window);
+        let mut sum_sq = 0.0_f32;
+        let mut count = 0usize;
+        for &s in buf.iter().skip(start) {
+            sum_sq += s * s;
+            count += 1;
+        }
+        if count == 0 {
+            0.0
+        } else {
+            (sum_sq / count as f32).sqrt()
+        }
+    };
+
+    let mic_rms = compute_rms(&active.recent_mic_samples);
+    let sys_rms = compute_rms(&active.recent_sys_samples);
+    let combined = mic_rms.max(sys_rms * 1.4);
+    (combined * 7.5).clamp(0.0, 1.0)
+}
+
 #[tauri::command]
 async fn ai_audio_capture_flush_and_transcribe(
     state: State<'_, AiAudioCaptureState>,
     stop: bool,
     fallback_mime_type: Option<String>,
     fallback_audio_base64: Option<String>,
-) -> Result<String, String> {
+) -> Result<AiTranscribeReply, String> {
     let (mic_vec, sys_vec) = drain_ai_audio_capture(&state, stop)?;
 
     let mic_peak = mic_vec.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()));
@@ -3230,17 +3374,130 @@ async fn ai_audio_capture_flush_and_transcribe(
     if has_native_speech {
         let wav_bytes = encode_wav_16khz_mono(mic_vec, sys_vec);
         let b64 = encode_base64(&wav_bytes);
-        return transcribe_audio_gemini(None, "audio/wav".to_string(), b64).await;
+        return transcribe_audio_gemini_with_usage(None, "audio/wav".to_string(), b64).await;
     }
 
     if let Some(fb_b64) = fallback_audio_base64 {
         if !fb_b64.trim().is_empty() {
             let mime = fallback_mime_type.unwrap_or_else(|| "audio/webm".to_string());
-            return transcribe_audio_gemini(None, mime, fb_b64).await;
+            return transcribe_audio_gemini_with_usage(None, mime, fb_b64).await;
         }
     }
 
-    Ok(String::new())
+    Ok(AiTranscribeReply {
+        text: String::new(),
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+    })
+}
+
+fn build_meeting_summary_prompt(title: &str) -> String {
+    format!(
+        "Analise o áudio/vídeo anexado ('{title}') e gere uma transcrição e ata executiva super organizada no estilo Zoom AI Companion, no mesmo idioma falado na gravação.\n\
+         Regras de formatação (use APENAS texto limpo, tags <b>...</b> para títulos/negrito e '[ ] ' no início dos próximos passos — NÃO use markdown com # ou **):\n\n\
+         <b>Resumo — {title}</b>\n\n\
+         <b>Objetivo</b>\n\
+         (1 a 2 frases claras explicando o propósito principal da gravação/reunião)\n\n\
+         <b>Participantes / Quem falou</b>\n\
+         • Identifique cada pessoa pelo nome (se mencionado) ou como 'Locutor 1', 'Locutor 2', etc., resumindo brevemente sua participação.\n\n\
+         <b>Principais Tópicos e Decisões</b>\n\
+         • Liste os pontos mais importantes discutidos e decisões tomadas de forma objetiva.\n\n\
+         <b>Próximos Passos</b>\n\
+         [ ] Liste ações práticas e pendências mencionadas (com responsável/prazo se citados). Se não houver ações, escreva 'Nenhuma ação pendente mencionada.'\n\n\
+         <b>Transcrição Organizada</b>\n\
+         Apresente as falas principais organizadas por locutor (ex.: <b>Locutor 1:</b> ...), removendo vícios de linguagem mas preservando fielmente o conteúdo.\n\n\
+         Retorne APENAS o conteúdo pronto para o card, sem introduções fora dessa estrutura."
+    )
+}
+
+#[tauri::command]
+async fn ai_audio_capture_stop_and_analyze(
+    state: State<'_, AiAudioCaptureState>,
+    api_key: Option<String>,
+    title: Option<String>,
+    fallback_mime_type: Option<String>,
+    fallback_audio_base64: Option<String>,
+) -> Result<AiTranscribeReply, String> {
+    let (mic_vec, sys_vec) = drain_ai_audio_capture(&state, true)?;
+
+    let mic_peak = mic_vec.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()));
+    let sys_peak = sys_vec.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()));
+
+    let has_native_speech = (mic_vec.len() > (TARGET_SAMPLE_RATE as usize / 4) && mic_peak >= 0.008)
+        || (sys_vec.len() > (TARGET_SAMPLE_RATE as usize / 4) && sys_peak >= 0.003);
+
+    let (clean_mime, audio_b64) = if has_native_speech {
+        let wav_bytes = encode_wav_16khz_mono(mic_vec, sys_vec);
+        ("audio/wav".to_string(), encode_base64(&wav_bytes))
+    } else if let Some(fb_b64) = fallback_audio_base64 {
+        let trimmed = fb_b64.trim().to_string();
+        if trimmed.is_empty() {
+            return Ok(AiTranscribeReply {
+                text: String::new(),
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+            });
+        }
+        let mime = fallback_mime_type
+            .unwrap_or_else(|| "audio/webm".to_string())
+            .split(';')
+            .next()
+            .unwrap_or("audio/webm")
+            .trim()
+            .to_string();
+        (mime, trimmed)
+    } else {
+        return Ok(AiTranscribeReply {
+            text: String::new(),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+        });
+    };
+
+    let (key, all_models) = resolve_gemini_key_and_models(api_key)?;
+    let models: Vec<String> = all_models
+        .into_iter()
+        .filter(|m| !m.starts_with("gemma-"))
+        .collect();
+    let ordered = order_models_by_availability(models);
+    let summary_title = title
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "Gravação de Áudio".to_string());
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let prompt = build_meeting_summary_prompt(&summary_title);
+        let payload = serde_json::json!({
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    { "text": prompt },
+                    {
+                        "inlineData": {
+                            "mimeType": clean_mime,
+                            "data": audio_b64
+                        }
+                    }
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.2
+            }
+        });
+
+        let (text, _model, usage) =
+            execute_gemini_fast_payload_with_model(&key, &ordered, payload, false)?;
+        Ok(AiTranscribeReply {
+            text: text.trim().to_string(),
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -3248,7 +3505,7 @@ async fn ai_audio_capture_stop_and_transcribe(
     state: State<'_, AiAudioCaptureState>,
     fallback_mime_type: Option<String>,
     fallback_audio_base64: Option<String>,
-) -> Result<String, String> {
+) -> Result<AiTranscribeReply, String> {
     ai_audio_capture_flush_and_transcribe(state, true, fallback_mime_type, fallback_audio_base64).await
 }
 
@@ -3258,11 +3515,18 @@ async fn ai_live_coach_flush_and_advise(
     api_key: Option<String>,
     recent_context: Option<String>,
     stop: bool,
-) -> Result<Option<String>, String> {
-    let (mic_vec, sys_vec) = drain_ai_audio_capture(&state, stop)?;
+    immediate: bool,
+    output_mode: String,
+) -> Result<Option<LiveCoachReply>, String> {
     if stop {
+        let _ = drain_ai_audio_capture(&state, true)?;
         return Ok(None);
     }
+    let (mic_vec, sys_vec) = if immediate {
+        snapshot_recent_ai_audio_capture(&state)?
+    } else {
+        drain_ai_audio_capture(&state, false)?
+    };
 
     let mic_peak = mic_vec.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()));
     let sys_peak = sys_vec.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()));
@@ -3297,13 +3561,35 @@ async fn ai_live_coach_flush_and_advise(
         None
     };
     let context_str = recent_context.unwrap_or_default().trim().to_string();
+    let translation_only = output_mode == "translation";
 
     tauri::async_runtime::spawn_blocking(move || {
         let mut parts: Vec<serde_json::Value> = Vec::new();
 
         if let Some(other_audio) = sys_b64 {
-            let prompt = format!(
-                "You are a real-time English conversation teacher & meeting coach helping a Brazilian Portuguese speaker during a live call.\n\
+            let prompt = if translation_only {
+                let urgency = if immediate {
+                    "\nHELP NOW: translate the latest audible words immediately; do not wait for more context."
+                } else {
+                    ""
+                };
+                format!(
+                    "You are a real-time interpreter for a Brazilian Portuguese speaker.\n\
+                     Translate ONLY the OTHER PERSON's audible speech into natural Brazilian Portuguese. Preserve the meaning and relevant details; do not summarize, explain, transcribe in English, or suggest a reply. Ignore the user's microphone except as context.\n\
+                     Recent context:\n{context_str}\n\
+                     Return ONLY valid JSON (no markdown fences) using this schema:\n\
+                     {{\"skip\":false,\"heardSummary\":\"Resumo muito curto em PT-BR da fala\",\"translation\":\"Tradução fiel e natural da fala para PT-BR\",\"userContext\":\"\",\"suggestions\":[],\"tip\":\"\"}}\n\
+                     If there is no clear speech from the other person, return {{\"skip\":true,\"userContext\":\"\"}}.\n\
+                     {urgency}"
+                )
+            } else {
+                let urgency = if immediate {
+                    "\nHELP NOW: focus on the other person's most recent words in this audio and provide one concise, ready-to-say response as quickly as possible. Do not wait for more context."
+                } else {
+                    ""
+                };
+                format!(
+                    "You are a real-time English conversation teacher & meeting coach helping a Brazilian Portuguese speaker during a live call.\n\
                  You will receive SEPARATE labeled audio channels:\n\
                  - AUDIO_OTHER_PERSON: the other person speaking on the PC/call. ONLY help the user respond to AUDIO_OTHER_PERSON.\n\
                  - AUDIO_USER (optional): the user speaking into their own microphone. NEVER suggest replying to AUDIO_USER; use it strictly as conversation memory/context.\n\
@@ -3312,9 +3598,11 @@ async fn ai_live_coach_flush_and_advise(
                  Rules:\n\
                  1. If AUDIO_OTHER_PERSON has only silence, noise, or nothing actionable to respond to, return EXACTLY: {{\"skip\":true,\"userContext\":\"optional 1-sentence PT-BR summary if AUDIO_USER spoke, else empty\"}}\n\
                  2. Otherwise, return ONLY valid JSON (no markdown fences) with this exact schema:\n\
-                 {{\"skip\":false,\"heardSummary\":\"Resumo objetivo em PT-BR (1 frase) do que a OUTRA PESSOA acabou de explicar ou perguntar\",\"userContext\":\"Resumo curto em PT-BR do que o usuário disse se AUDIO_USER estiver presente, senão string vazia\",\"suggestions\":[{{\"tone\":\"Natural\",\"en\":\"A complete, specific, natural 1-2 sentence English response (15-28 words) that directly references what they just said and keeps the conversation flowing (e.g. with a reaction + follow-up thought or question)\",\"pt\":\"Tradução fiel em PT-BR\"}},{{\"tone\":\"Detailed\",\"en\":\"A thoughtful, articulate 1-2 sentence English response (18-32 words) suitable for a deeper or more professional exchange on the exact topic being discussed\",\"pt\":\"Tradução fiel em PT-BR\"}}],\"tip\":\"Dica rápida de professor em PT-BR (opcional, 1 frase curta explicando uma expressão útil usada acima)\"}}\n\
-                 3. NEVER give generic 2-5 word clichés like 'Sounds good!', 'That's interesting!', or 'I agree.'. Every suggestion MUST be a full, specific, ready-to-speak response tailored to the exact details heard in AUDIO_OTHER_PERSON and the conversation memory."
-            );
+                 {{\"skip\":false,\"heardSummary\":\"Resumo objetivo em PT-BR (1 frase) do que a OUTRA PESSOA acabou de explicar ou perguntar\",\"userContext\":\"Resumo curto em PT-BR do que o usuário disse se AUDIO_USER estiver presente, senão string vazia\",\"suggestions\":[{{\"tone\":\"Natural\",\"en\":\"A complete, specific, natural 1-2 sentence English response (15-28 words) that directly references what they just said and keeps the conversation flowing\",\"pt\":\"Tradução fiel em PT-BR\"}},{{\"tone\":\"Formal\",\"en\":\"A polished, articulate 1-2 sentence English response (18-32 words) suitable for a professional or formal exchange on the exact topic being discussed\",\"pt\":\"Tradução fiel em PT-BR\"}}],\"tip\":\"Dica rápida de professor em PT-BR (opcional, 1 frase curta explicando uma expressão útil usada acima)\"}}\n\
+                 3. NEVER give generic 2-5 word clichés like 'Sounds good!', 'That's interesting!', or 'I agree.'. Every suggestion MUST be a full, specific, ready-to-speak response tailored to the exact details heard in AUDIO_OTHER_PERSON and the conversation memory.\n\
+                 {urgency}"
+                )
+            };
             parts.push(serde_json::json!({ "text": prompt }));
             parts.push(serde_json::json!({ "text": "AUDIO_OTHER_PERSON:" }));
             parts.push(serde_json::json!({
@@ -3333,14 +3621,28 @@ async fn ai_live_coach_flush_and_advise(
                 }));
             }
         } else if let Some(user_audio) = mic_b64 {
-            let prompt = format!(
-                "You are silently tracking conversation memory for a live English coach.\n\
-                 This audio is ONLY the USER speaking into their own microphone (NOT the other person).\n\
-                 Recent conversation memory:\n{context_str}\n\n\
-                 Return ONLY valid JSON (no markdown fences):\n\
-                 {{\"skip\":true,\"userContext\":\"1 short sentence in PT-BR summarizing what the user just said (or empty string if only noise/breathing)\"}}\n\
-                 NEVER set skip to false here."
-            );
+            let prompt = if translation_only {
+                format!(
+                    "You are a real-time interpreter. The audio contains only the user's microphone and no audio from the other person, so there is nothing to translate. Return ONLY {{\"skip\":true,\"userContext\":\"\"}}."
+                )
+            } else if immediate && !context_str.is_empty() {
+                format!(
+                    "You are an instant live English response coach.\n\
+                     Recent conversation memory:\n{context_str}\n\n\
+                     HELP NOW: use the latest statement or question from the OTHER PERSON in the recent conversation memory and immediately prepare one concise, ready-to-say English response. The attached audio is only the user speaking; do not answer or quote it. Return ONLY valid JSON (no markdown fences) using this schema:\n\
+                     {{\"skip\":false,\"heardSummary\":\"Resumo em PT-BR do último ponto dito pela outra pessoa\",\"userContext\":\"Resumo curto em PT-BR do que o usuário está dizendo agora\",\"suggestions\":[{{\"tone\":\"Natural\",\"en\":\"Resposta curta, natural e pronta para falar\",\"pt\":\"Tradução em PT-BR\"}},{{\"tone\":\"Formal\",\"en\":\"Resposta curta e profissional pronta para falar\",\"pt\":\"Tradução em PT-BR\"}}],\"tip\":\"\"}}\n\
+                     If there is no statement from the other person in the recent conversation memory, return {{\"skip\":true,\"userContext\":\"Resumo curto em PT-BR do que o usuário está dizendo agora\"}}."
+                )
+            } else {
+                format!(
+                    "You are silently tracking conversation memory for a live English coach.\n\
+                     This audio is ONLY the USER speaking into their own microphone (NOT the other person).\n\
+                     Recent conversation memory:\n{context_str}\n\n\
+                     Return ONLY valid JSON (no markdown fences):\n\
+                     {{\"skip\":true,\"userContext\":\"1 short sentence in PT-BR summarizing what the user just said (or empty string if only noise/breathing)\"}}\n\
+                     NEVER set skip to false here."
+                )
+            };
             parts.push(serde_json::json!({ "text": prompt }));
             parts.push(serde_json::json!({
                 "inlineData": {
@@ -3362,66 +3664,53 @@ async fn ai_live_coach_flush_and_advise(
             }
         });
 
-        let (text, _model) = execute_gemini_fast_payload_with_model(&key, &audio_models, payload, false)?;
-        Ok(Some(text))
+        let (text, _model, usage) =
+            execute_gemini_fast_payload_with_model(&key, &audio_models, payload, false)?;
+        Ok(Some(LiveCoachReply {
+            text,
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
+        }))
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-async fn transcribe_audio_gemini(
+async fn transcribe_audio_gemini_with_usage(
     api_key: Option<String>,
     mime_type: String,
     audio_base64: String,
-) -> Result<String, String> {
-    let env_vars = load_dotenv_vars();
-    let provided_key = api_key.unwrap_or_default().trim().to_string();
-    let key = if !provided_key.is_empty() {
-        provided_key
-    } else {
-        env_vars.get("GEMINI_API_KEY").cloned().unwrap_or_default()
-    };
-
-    if key.is_empty() {
-        return Err("GEMINI_API_KEY nao encontrada no arquivo .env".to_string());
-    }
-
-    let env_model = env_vars
-        .get("GEMINI_MODEL")
-        .cloned()
-        .unwrap_or_else(|| "gemini-2.5-flash".to_string());
-
+) -> Result<AiTranscribeReply, String> {
+    let (key, all_models) = resolve_gemini_key_and_models(api_key)?;
     let clean_mime = mime_type
         .split(';')
         .next()
-        .unwrap_or("audio/webm")
+        .unwrap_or("audio/wav")
         .trim()
         .to_string();
 
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut models: Vec<String> = vec!["gemini-3.5-transcribe".to_string()];
-        if !env_model.trim().is_empty()
-            && !env_model.trim().starts_with("gemma-")
-            && !models.iter().any(|m| m == env_model.trim())
-        {
-            models.push(env_model.trim().to_string());
+    // Prioriza os modelos Flash-Lite / Flash de menor latência da Google para transcrição ao vivo rápida
+    let fast_audio_priority = [
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-flash-latest",
+    ];
+    let mut models: Vec<String> = fast_audio_priority.iter().map(|s| (*s).to_string()).collect();
+    for m in all_models {
+        if !m.starts_with("gemma-") && !models.iter().any(|existing| existing == &m) {
+            models.push(m);
         }
-        for &fallback in GEMINI_MODEL_CASCADE {
-            if fallback.starts_with("gemma-") {
-                continue;
-            }
-            if !models.iter().any(|m| m == fallback) {
-                models.push(fallback.to_string());
-            }
-        }
-        let models = order_models_by_availability(models);
+    }
+    let models = order_models_by_availability(models);
 
-        let prompt = "Transcreva fielmente todo o áudio a seguir no idioma original falado.\n\
-                      Regras obrigatórias:\n\
-                      1. Diferencie quem está falando (diarização de locutores). Sempre que houver mais de uma pessoa falando (por exemplo, diálogo entre pessoas, reunião ou vídeo com diferentes vozes), identifique cada fala em uma nova linha colocando o identificador do locutor no início, como 'Locutor 1:', 'Locutor 2:' (ou o nome real da pessoa se for mencionado no áudio).\n\
-                      2. Se houver apenas uma única pessoa falando durante todo o áudio, transcreva o texto diretamente com pontuação adequada e parágrafos claros.\n\
-                      3. Retorne APENAS a transcrição pronta, sem introduções, sem títulos e sem comentários extras. Se não houver fala audível, retorne apenas uma string vazia.";
+    tauri::async_runtime::spawn_blocking(move || {
+        let prompt = "Transcreva fielmente a fala do áudio no idioma falado.\n\
+                      Regras:\n\
+                      1. Retorne APENAS o texto transcrito com pontuação natural, sem introduções ou comentários.\n\
+                      2. Se houver diálogo entre pessoas diferentes, separe por linha.\n\
+                      3. Se houver apenas silêncio, ruído ou som sem fala inteligível, retorne uma string vazia.";
 
         let payload = serde_json::json!({
             "contents": [{
@@ -3437,64 +3726,35 @@ async fn transcribe_audio_gemini(
                 ]
             }],
             "generationConfig": {
-                "temperature": 0.1
+                "temperature": 0.0,
+                "thinkingConfig": {
+                    "thinkingBudget": 0
+                }
             }
         });
 
-        let endpoints = [
-            "https://generativelanguage.googleapis.com/v1beta/models",
-            "https://aiplatform.googleapis.com/v1/publishers/google/models",
-        ];
-
-        let mut last_err = String::from("Falha ao contatar a API do Gemini");
-
-        for base_url in &endpoints {
-            for model in &models {
-                let url = format!("{}/{}:generateContent?key={}", base_url, model, key);
-                match default_http_agent().post(&url)
-                    .set("Content-Type", "application/json")
-                    .timeout(Duration::from_secs(120))
-                    .send_json(payload.clone())
-                {
-                    Ok(resp) => {
-                        let body: serde_json::Value = resp
-                            .into_json()
-                            .map_err(|e| format!("Resposta invalida do Gemini: {e}"))?;
-                        let mut combined = String::new();
-                        if let Some(parts) = body["candidates"][0]["content"]["parts"].as_array() {
-                            for p in parts {
-                                if p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false) {
-                                    continue;
-                                }
-                                if let Some(t) = p["text"].as_str() {
-                                    combined.push_str(t);
-                                }
-                            }
-                        }
-                        return Ok(combined.trim().to_string());
-                    }
-                    Err(ureq::Error::Status(code, resp)) => {
-                        let err_body = resp.into_string().unwrap_or_default();
-                        last_err = format!("Gemini HTTP {code} ({model}): {err_body}");
-                        if code == 429 {
-                            mark_model_cooldown(model, Duration::from_secs(30));
-                        } else if code == 503 || code == 502 || code == 500 || code == 504 {
-                            mark_model_cooldown(model, Duration::from_secs(45));
-                        } else if code == 404 {
-                            mark_model_cooldown(model, Duration::from_secs(600));
-                        }
-                    }
-                    Err(e) => {
-                        last_err = format!("Erro de rede ao chamar Gemini ({model}): {e}");
-                    }
-                }
-            }
-        }
-
-        Err(last_err)
+        let (text, _model, usage) =
+            execute_gemini_fast_payload_with_model(&key, &models, payload, false)?;
+        Ok(AiTranscribeReply {
+            text: text.trim().to_string(),
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
+        })
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn transcribe_audio_gemini(
+    api_key: Option<String>,
+    mime_type: String,
+    audio_base64: String,
+) -> Result<String, String> {
+    transcribe_audio_gemini_with_usage(api_key, mime_type, audio_base64)
+        .await
+        .map(|r| r.text)
 }
 
 fn infer_media_mime(path: &Path) -> &'static str {
@@ -3624,22 +3884,7 @@ async fn transcribe_attachment_zoom_summary(
             })
         };
 
-        let prompt = format!(
-            "Analise o áudio/vídeo anexado ('{title}') e gere uma transcrição e ata executiva super organizada no estilo Zoom AI Companion, no mesmo idioma falado na gravação.\n\
-             Regras de formatação (use APENAS texto limpo, tags <b>...</b> para títulos/negrito e '[ ] ' no início dos próximos passos — NÃO use markdown com # ou **):\n\n\
-             <b>Resumo — {title}</b>\n\n\
-             <b>Objetivo</b>\n\
-             (1 a 2 frases claras explicando o propósito principal da gravação/reunião)\n\n\
-             <b>Participantes / Quem falou</b>\n\
-             • Identifique cada pessoa pelo nome (se mencionado) ou como 'Locutor 1', 'Locutor 2', etc., resumindo brevemente sua participação.\n\n\
-             <b>Principais Tópicos e Decisões</b>\n\
-             • Liste os pontos mais importantes discutidos e decisões tomadas de forma objetiva.\n\n\
-             <b>Próximos Passos</b>\n\
-             [ ] Liste ações práticas e pendências mencionadas (com responsável/prazo se citados). Se não houver ações, escreva 'Nenhuma ação pendente mencionada.'\n\n\
-             <b>Transcrição Organizada</b>\n\
-             Apresente as falas principais organizadas por locutor (ex.: <b>Locutor 1:</b> ...), removendo vícios de linguagem mas preservando fielmente o conteúdo.\n\n\
-             Retorne APENAS o conteúdo pronto para o card, sem introduções fora dessa estrutura."
-        );
+        let prompt = build_meeting_summary_prompt(&title);
 
         let payload = serde_json::json!({
             "contents": [{
@@ -5047,8 +5292,10 @@ fn main() {
             transcribe_audio_gemini,
             transcribe_attachment_zoom_summary,
             ai_audio_capture_start,
+            ai_audio_capture_level,
             ai_audio_capture_flush_and_transcribe,
             ai_audio_capture_stop_and_transcribe,
+            ai_audio_capture_stop_and_analyze,
             ai_live_coach_flush_and_advise,
         ])
         .run(tauri::generate_context!())

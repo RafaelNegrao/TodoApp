@@ -14,6 +14,8 @@ const cardFontSizeInput = document.querySelector("#settingsCardFontSizeInput");
 const cardFontSizeValue = document.querySelector("#settingsCardFontSizeValue");
 const lineageHoverInput = document.querySelector("#settingsLineageHoverInput");
 const translatorAutoInput = document.querySelector("#settingsTranslatorAutoInput");
+const operatorProfileInput = document.querySelector("#settingsOperatorProfileInput");
+const operatorProfileCount = document.querySelector("#settingsOperatorProfileCount");
 const checkUpdateButton = document.querySelector("#settingsCheckUpdateButton");
 const updateStatusEl = document.querySelector("#settingsUpdateStatus");
 
@@ -23,6 +25,8 @@ const LINEAGE_HOVER_KEY = "todocompanion.settings.lineageHover";
 const THEME_KEY = "todocompanion.settings.theme";
 const CARD_FONT_SIZE_KEY = "todocompanion.settings.cardFontSize";
 const TRANSLATOR_MODE_KEY = "todocompanion.settings.translatorMode";
+const OPERATOR_PROFILE_KEY = "todocompanion.settings.aiOperatorProfile";
+const OPERATOR_PROFILE_MAX_LEN = 100;
 const THEMES = ["claude-dark", "light-claude", "dracula"];
 const DEFAULT_THEME = "claude-dark";
 const MIN_CARD_FONT_SIZE = 1;
@@ -120,6 +124,11 @@ async function loadSettings() {
   if (translatorAutoInput) {
     translatorAutoInput.checked = localStorage.getItem(TRANSLATOR_MODE_KEY) === "auto";
   }
+  if (operatorProfileInput) {
+    const savedProfile = (localStorage.getItem(OPERATOR_PROFILE_KEY) || "").slice(0, OPERATOR_PROFILE_MAX_LEN);
+    operatorProfileInput.value = savedProfile;
+    syncOperatorProfileCount(savedProfile.length);
+  }
 
   if (!invoke) return;
 
@@ -174,6 +183,21 @@ function persistLinkArrows(event) {
 
 function persistLineageHover(event) {
   localStorage.setItem(LINEAGE_HOVER_KEY, event.target.checked ? "true" : "false");
+}
+
+function syncOperatorProfileCount(len) {
+  if (operatorProfileCount) {
+    operatorProfileCount.textContent = `${Math.min(OPERATOR_PROFILE_MAX_LEN, Math.max(0, len))}/${OPERATOR_PROFILE_MAX_LEN}`;
+  }
+}
+
+function persistOperatorProfile(event) {
+  const raw = String(event.target.value || "").slice(0, OPERATOR_PROFILE_MAX_LEN);
+  if (event.target.value !== raw) {
+    event.target.value = raw;
+  }
+  localStorage.setItem(OPERATOR_PROFILE_KEY, raw.trim());
+  syncOperatorProfileCount(raw.length);
 }
 
 function persistTranslatorMode(event) {
@@ -255,6 +279,8 @@ export function initSettings() {
   cardFontSizeInput?.addEventListener("change", persistCardFontSize);
   cardFontSizeInput?.addEventListener("input", persistCardFontSize);
   translatorAutoInput?.addEventListener("change", persistTranslatorMode);
+  operatorProfileInput?.addEventListener("input", persistOperatorProfile);
+  operatorProfileInput?.addEventListener("change", persistOperatorProfile);
   checkUpdateButton?.addEventListener("click", handleManualUpdateCheck);
   modal.querySelectorAll("[data-settings-tab]").forEach((btn) => {
     btn.addEventListener("click", () => selectSettingsTab(btn.dataset.settingsTab));

@@ -230,12 +230,15 @@
           </div>
           <div class="recorded-video-toast" id="recordedVideoToast" hidden>
             <span class="recorded-video-toast-text" id="recordedVideoToastText">Vídeo gravado salvo</span>
-            <button class="recorded-video-toast-action" id="recordedVideoToastInsert" type="button">Colocar no card</button>
-            <button class="recorded-video-toast-close" id="recordedVideoToastClose" type="button" aria-label="Fechar" title="Fechar">×</button>
+            <button class="recorded-video-toast-action" id="recordedVideoToastInsert" type="button">Colocar no
+              card</button>
+            <button class="recorded-video-toast-close" id="recordedVideoToastClose" type="button" aria-label="Fechar"
+              title="Fechar">×</button>
           </div>
           <div class="transcribe-indicator" id="transcribeIndicator" hidden>
             <span class="transcribe-mic-badge" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                stroke-linejoin="round">
                 <rect x="9" y="2" width="6" height="12" rx="3" />
                 <path d="M5 10a7 7 0 0 0 14 0" />
                 <path d="M12 17v4" />
@@ -467,56 +470,101 @@
               </div>
             </div>
 
-            <div class="ai-live-coach-bar" id="aiLiveCoachBar" hidden>
-              <span class="ai-live-coach-dot" aria-hidden="true"></span>
-              <span class="ai-live-coach-status" id="aiLiveCoachStatus">Listening to conversation...</span>
-              <button class="ai-live-coach-now-btn" id="aiLiveCoachNowBtn" type="button" title="Analyze latest audio now">
-                Help now
-              </button>
-              <button class="ai-live-coach-stop-btn" id="aiLiveCoachStopBtn" type="button" title="Stop Live Coach">
-                Stop
-              </button>
+            <div class="ai-live-coach-view" id="aiLiveCoachView" hidden>
+              <div class="ai-live-coach-bar" id="aiLiveCoachBar">
+                <div class="ai-live-coach-primary-controls">
+                  <button class="ai-live-coach-now-btn" id="aiLiveCoachNowBtn" type="button"
+                    title="Analyze latest audio now">
+                    Help now
+                  </button>
+                  <button class="ai-live-coach-menu-trigger" id="aiLiveCoachMenuTrigger" type="button"
+                    aria-label="Live Coach options" title="Live Coach options" aria-haspopup="true"
+                    aria-expanded="false">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <circle cx="5" cy="12" r="1.5" />
+                      <circle cx="12" cy="12" r="1.5" />
+                      <circle cx="19" cy="12" r="1.5" />
+                    </svg>
+                  </button>
+                </div>
+                <div class="ai-live-coach-right-controls">
+                  <span class="ai-live-coach-token-count" id="aiLiveCoachTokenCount" title="Tokens used by Live Coach">0 tokens</span>
+                  <button class="ai-live-coach-stop-btn" id="aiLiveCoachStopBtn" type="button"
+                    aria-label="Stop Live Coach" title="Stop Live Coach">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none" />
+                    </svg>
+                  </button>
+                </div>
+                <div class="ai-live-coach-menu" id="aiLiveCoachMenu" hidden>
+                  <div class="ai-live-coach-menu-section">
+                    <span class="ai-live-coach-menu-label">Show</span>
+                    <div class="ai-live-coach-mode" id="aiLiveCoachOutputMode" aria-label="Live Coach output">
+                      <button class="ai-live-coach-mode-btn is-active" type="button" data-output-mode="translation"
+                        aria-pressed="true">Translation</button>
+                      <button class="ai-live-coach-mode-btn" type="button" data-output-mode="reply"
+                        aria-pressed="false">Suggest reply</button>
+                    </div>
+                  </div>
+                  <div class="ai-live-coach-menu-section" id="aiLiveCoachToneSection">
+                    <span class="ai-live-coach-menu-label">Response style</span>
+                    <div class="ai-live-coach-mode" id="aiLiveCoachMode" aria-label="Response style">
+                      <button class="ai-live-coach-mode-btn is-active" type="button" data-coach-mode="natural"
+                        aria-pressed="true">Natural</button>
+                      <button class="ai-live-coach-mode-btn" type="button" data-coach-mode="formal"
+                        aria-pressed="false">Formal</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="ai-live-coach-messages" id="aiLiveCoachMessages">
+              </div>
+              <div class="ai-live-coach-indicator" aria-hidden="true">
+                <canvas class="grok-canvas-live-coach" id="aiLiveCoachThinkingCanvas"></canvas>
+              </div>
             </div>
 
-            <div class="ai-chat-messages" id="aiChatMessages"></div>
-            <button class="ai-chat-new-pill" id="aiChatNewPill" type="button" hidden>
-              New tip ↓
-            </button>
+            <div class="ai-regular-chat-view" id="aiRegularChatView">
+              <div class="ai-chat-messages" id="aiChatMessages"></div>
+              <button class="ai-chat-new-pill" id="aiChatNewPill" type="button" hidden>
+                New tip ↓
+              </button>
 
-            <form class="ai-chat-composer" id="aiChatForm">
-              <div class="ai-chat-pending-list" id="aiChatPendingList" hidden></div>
-              <textarea id="aiChatInput" placeholder="Ask anything, paste images or attach files..." rows="1"
-                spellcheck="false"></textarea>
-              <input type="file" id="aiChatFileInput" multiple hidden />
-              <div class="ai-chat-composer-foot">
-                <div class="ai-chat-composer-left">
-                  <button class="ai-composer-plus-btn" id="aiChatAttachBtn" type="button"
-                    title="Attach image, PDF, audio or file" aria-label="Attach file">
+              <form class="ai-chat-composer" id="aiChatForm">
+                <div class="ai-chat-pending-list" id="aiChatPendingList" hidden></div>
+                <textarea id="aiChatInput" placeholder="Ask anything, paste images or attach files..." rows="1"
+                  spellcheck="false"></textarea>
+                <input type="file" id="aiChatFileInput" multiple hidden />
+                <div class="ai-chat-composer-foot">
+                  <div class="ai-chat-composer-left">
+                    <button class="ai-composer-plus-btn" id="aiChatAttachBtn" type="button"
+                      title="Attach image, PDF, audio or file" aria-label="Attach file">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 5v14M5 12h14" />
+                      </svg>
+                    </button>
+                    <button class="ai-live-coach-btn" id="aiLiveCoachBtn" type="button"
+                      title="Live English Coach: listens to PC & mic and suggests what to say"
+                      aria-label="Toggle Live English Coach" aria-pressed="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <path d="M12 19v3" />
+                      </svg>
+                      <span>Live Coach</span>
+                    </button>
+                    <span class="ai-composer-model-tag" id="aiChatModelTag">Auto</span>
+                  </div>
+                  <button class="ai-chat-send" id="aiChatSendBtn" type="submit" title="Send message (Enter)"
+                    aria-label="Send message">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M12 5v14M5 12h14" />
+                      <path d="M5 12h14" />
+                      <path d="m13 6 6 6-6 6" />
                     </svg>
                   </button>
-                  <button class="ai-live-coach-btn" id="aiLiveCoachBtn" type="button"
-                    title="Live English Coach: listens to PC & mic and suggests what to say"
-                    aria-label="Toggle Live English Coach" aria-pressed="false">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                      <path d="M12 19v3" />
-                    </svg>
-                    <span>Live Coach</span>
-                  </button>
-                  <span class="ai-composer-model-tag" id="aiChatModelTag">Auto</span>
                 </div>
-                <button class="ai-chat-send" id="aiChatSendBtn" type="submit" title="Send message (Enter)"
-                  aria-label="Send message">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M5 12h14" />
-                    <path d="m13 6 6 6-6 6" />
-                  </svg>
-                </button>
-              </div>
-            </form>
+              </form>
+            </div>
 
             <!-- MODAL DE HISTORICO DE CHATS (ESCONDIDO POR PADRAO) -->
             <div class="ai-history-modal-backdrop" id="aiChatSessionsDrawer" hidden>
@@ -657,6 +705,18 @@
           <div class="settings-content">
             <section class="settings-pane active" data-settings-pane="general">
               <h4 class="settings-pane-title">Geral</h4>
+              <label class="settings-row settings-row-stacked">
+                <div class="settings-row-head">
+                  <div class="settings-row-copy">
+                    <span class="settings-label">Quem é você (contexto para a IA)</span>
+                    <small class="settings-desc">Os "Users" do app são para quem você faz as tasks; este campo diz à IA
+                      quem está operando o app</small>
+                  </div>
+                  <span class="settings-char-count" id="settingsOperatorProfileCount">0/100</span>
+                </div>
+                <input type="text" class="settings-text-input" id="settingsOperatorProfileInput" maxlength="100"
+                  placeholder="Ex: Rafael, Software Engineer (foco em backend e arquitetura)" autocomplete="off" />
+              </label>
               <label class="settings-row settings-toggle">
                 <div class="settings-row-copy">
                   <span class="settings-label">Iniciar com o Windows</span>
