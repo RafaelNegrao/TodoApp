@@ -6380,22 +6380,17 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
 }
 
 .ai-chat-empty-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: rgba(var(--hi-rgb), 0.05);
-  border: 1px solid rgba(var(--hi-rgb), 0.08);
+  width: 76px;
+  height: 76px;
   display: grid;
   place-items: center;
-  color: var(--text-strong);
+  margin-bottom: 4px;
 }
 
-.ai-chat-empty-icon svg {
-  width: 20px;
-  height: 20px;
-  stroke: currentColor;
-  stroke-width: 1.75;
-  fill: none;
+.ai-chat-empty-icon .grok-canvas-empty {
+  display: block;
+  width: 76px;
+  height: 76px;
 }
 
 .ai-chat-empty strong {
@@ -6634,6 +6629,13 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   background-clip: text;
   color: transparent;
   animation: grokTextShimmer 2.8s linear infinite;
+  display: inline-block;
+  transition: opacity 0.24s ease, transform 0.24s ease;
+}
+
+.grok-shimmer-text.swap {
+  opacity: 0;
+  transform: translateY(3px);
 }
 
 :root[data-theme="light-claude"] .grok-shimmer-text {
@@ -9019,6 +9021,15 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
 .settings-text-input:focus {
   border-color: rgba(var(--accent-rgb), 0.55);
   background: rgba(var(--hi-rgb), 0.07);
+}
+
+.settings-textarea {
+  height: auto;
+  min-height: 68px;
+  padding: 8px 11px;
+  line-height: 1.45;
+  font-family: inherit;
+  resize: vertical;
 }
 
 .ai-msg-tokens {

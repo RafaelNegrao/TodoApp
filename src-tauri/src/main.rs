@@ -59,6 +59,34 @@ struct SavedMainWindowBounds {
 #[derive(Default)]
 struct FloatingTranslatorState(Mutex<Option<SavedMainWindowBounds>>);
 
+const MAIN_WINDOW_MIN_WIDTH: f64 = 820.0;
+const MAIN_WINDOW_MIN_HEIGHT: f64 = 540.0;
+const MAIN_WINDOW_DEFAULT_WIDTH: f64 = 1180.0;
+const MAIN_WINDOW_DEFAULT_HEIGHT: f64 = 760.0;
+
+fn ensure_main_window_bounds(window: &tauri::WebviewWindow) {
+    let _ = window.set_min_size(Some(tauri::LogicalSize::new(
+        MAIN_WINDOW_MIN_WIDTH,
+        MAIN_WINDOW_MIN_HEIGHT,
+    )));
+    let scale = window.scale_factor().unwrap_or(1.0).max(0.5);
+    let needs_resize = match window.inner_size() {
+        Ok(sz) => {
+            let logical_w = sz.width as f64 / scale;
+            let logical_h = sz.height as f64 / scale;
+            logical_w < MAIN_WINDOW_MIN_WIDTH - 1.0 || logical_h < MAIN_WINDOW_MIN_HEIGHT - 1.0
+        }
+        Err(_) => false,
+    };
+    if needs_resize {
+        let _ = window.set_size(tauri::LogicalSize::new(
+            MAIN_WINDOW_DEFAULT_WIDTH,
+            MAIN_WINDOW_DEFAULT_HEIGHT,
+        ));
+        let _ = window.center();
+    }
+}
+
 #[tauri::command]
 fn set_translator_floating_mode(
     app: tauri::AppHandle,
@@ -103,22 +131,37 @@ fn set_translator_floating_mode(
         let _ = window.set_focus();
     } else {
         let _ = window.set_always_on_top(false);
-        let _ = window.set_min_size(Some(tauri::LogicalSize::new(820.0, 540.0)));
+        let _ = window.set_min_size(Some(tauri::LogicalSize::new(
+            MAIN_WINDOW_MIN_WIDTH,
+            MAIN_WINDOW_MIN_HEIGHT,
+        )));
         if let Some(saved) = guard.take() {
             if saved.was_maximized {
+                let _ = window.set_size(tauri::LogicalSize::new(
+                    MAIN_WINDOW_DEFAULT_WIDTH,
+                    MAIN_WINDOW_DEFAULT_HEIGHT,
+                ));
+                let _ = window.center();
                 let _ = window.maximize();
             } else {
                 if let Some(sz) = saved.size {
                     let _ = window.set_size(sz);
                 } else {
-                    let _ = window.set_size(tauri::LogicalSize::new(1180.0, 760.0));
+                    let _ = window.set_size(tauri::LogicalSize::new(
+                        MAIN_WINDOW_DEFAULT_WIDTH,
+                        MAIN_WINDOW_DEFAULT_HEIGHT,
+                    ));
                 }
                 if let Some(pos) = saved.position {
                     let _ = window.set_position(pos);
                 }
+                ensure_main_window_bounds(&window);
             }
         } else {
-            let _ = window.set_size(tauri::LogicalSize::new(1180.0, 760.0));
+            let _ = window.set_size(tauri::LogicalSize::new(
+                MAIN_WINDOW_DEFAULT_WIDTH,
+                MAIN_WINDOW_DEFAULT_HEIGHT,
+            ));
         }
         let _ = window.show();
         let _ = window.set_focus();
@@ -135,10 +178,14 @@ fn minimize_window(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
-fn toggle_maximize_window(app: tauri::AppHandle) {
+fn toggle_maximize_window(app: tauri::AppHandle, state: State<'_, FloatingTranslatorState>) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_maximized().unwrap_or(false) {
             let _ = window.unmaximize();
+            let is_floating = state.0.lock().map(|g| g.is_some()).unwrap_or(false);
+            if !is_floating {
+                ensure_main_window_bounds(&window);
+            }
         } else {
             let _ = window.maximize();
         }

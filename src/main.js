@@ -9708,7 +9708,7 @@ function initAiTranslatorPanel() {
 
   const topbarGrokCanvas = document.getElementById("topbarGrokDodecahedron");
   const topbarGrokLoader = topbarGrokCanvas
-    ? new GrokDodecahedronRenderer(topbarGrokCanvas, { size: 30, speed: 0.35, intensity: 0.65 })
+    ? new GrokDodecahedronRenderer(topbarGrokCanvas, { size: 30, speed: 1, intensity: 0.85 })
     : null;
   topbarGrokLoader?.start();
   let chatGrokLoader = null;
@@ -9716,13 +9716,50 @@ function initAiTranslatorPanel() {
   let liveCoachAudioLevelTimer = 0;
   let liveCoachIsBusy = false;
   const chatThinkingCycler = new ThinkingPhraseCycler(AI_CHAT_THINKING_PHRASES, {
-    intervalMs: 2200,
-    startRandom: false
+    intervalMs: 3800,
+    startRandom: false,
+    loop: false
   });
   const translateThinkingCycler = new ThinkingPhraseCycler(AI_TRANSLATOR_THINKING_PHRASES, {
-    intervalMs: 1600,
-    startRandom: false
+    intervalMs: 3000,
+    startRandom: false,
+    loop: false
   });
+  let activeChatThinkingSteps = AI_CHAT_THINKING_PHRASES;
+
+  function buildChatThinkingSteps({ text = "", attachments = [], willCaptureScreen = false } = {}) {
+    const steps = [];
+    const hasAudioOrVideo = attachments.some(a => /^(audio|video)\//i.test(String(a?.mime_type || "")));
+    const hasImage = attachments.some(a => /^image\//i.test(String(a?.mime_type || "")));
+    const hasFile = attachments.length > 0;
+    const isBoardAction = /\b(cria|crie|adicion|organiz|tabela|card|mover|mova|edit|atualiz|apag|delet|remov|conclu|link|conect|create|add|edit|move|table|organize|delete|update)\b/i.test(text);
+
+    if (willCaptureScreen) {
+      steps.push("Capturing screen...");
+      steps.push("Analyzing screen & context...");
+    } else if (hasAudioOrVideo) {
+      steps.push("Processing media attachment...");
+      steps.push("Extracting key details...");
+    } else if (hasImage) {
+      steps.push("Inspecting image...");
+      steps.push("Analyzing visual details...");
+    } else if (hasFile) {
+      steps.push("Reading attached files...");
+      steps.push("Reviewing context...");
+    } else {
+      steps.push("Reading board context...");
+    }
+
+    if (isBoardAction) {
+      steps.push("Planning canvas actions...");
+      steps.push("Preparing updates...");
+    } else {
+      steps.push("Reasoning through details...");
+      steps.push("Structuring response...");
+    }
+    steps.push("Finalizing answer...");
+    return steps;
+  }
 
   function updateChatTopbarIndicator() {
     if (!openChatBtn) return;
@@ -9735,11 +9772,11 @@ function initAiTranslatorPanel() {
     if (isChatVisible) {
       topbarGrokLoader?.stop();
     } else if (chatBusy) {
-      topbarGrokLoader?.setState({ speed: 1.5, intensity: 1 });
+      topbarGrokLoader?.setState({ speed: 1.8, intensity: 1 });
       topbarGrokLoader?.start();
       openChatBtn.title = "AI Chat (Thinking...)";
     } else {
-      topbarGrokLoader?.setState({ speed: 0.35, intensity: 0.65 });
+      topbarGrokLoader?.setState({ speed: 1, intensity: 0.85 });
       topbarGrokLoader?.start();
       if (chatHasUnread && !isChatVisible) {
         openChatBtn.title = "AI Chat (New reply ready)";
@@ -10945,15 +10982,17 @@ function initAiTranslatorPanel() {
       empty.className = "ai-chat-empty";
       empty.innerHTML = `
         <div class="ai-chat-empty-icon">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M11 3C11 7.97 15.03 12 20 12C15.03 12 11 16.03 11 21C11 16.03 6.97 12 2 12C6.97 12 11 7.97 11 3Z"/>
-            <path d="M19 2C19 4.21 20.79 6 23 6C20.79 6 19 7.79 19 10C19 7.79 17.21 6 15 6C17.21 6 19 4.21 19 2Z"/>
-          </svg>
+          <canvas class="grok-canvas-empty" aria-hidden="true"></canvas>
         </div>
         <strong>How can I help you today?</strong>
         <span>Ask anything, paste screenshots (Ctrl+V), or attach files for instant analysis.</span>
       `;
       chatMessagesEl.appendChild(empty);
+      const emptyCanvas = empty.querySelector(".grok-canvas-empty");
+      if (emptyCanvas) {
+        chatGrokLoader = new GrokDodecahedronRenderer(emptyCanvas, { size: 76, speed: 1, intensity: 0.92 });
+        chatGrokLoader.start();
+      }
       return;
     }
 
@@ -11608,13 +11647,13 @@ function initAiTranslatorPanel() {
       canvas.setAttribute("aria-hidden", "true");
       const label = document.createElement("span");
       label.className = "grok-shimmer-text";
-      label.textContent = AI_CHAT_THINKING_PHRASES[0];
+      label.textContent = activeChatThinkingSteps[0] || AI_CHAT_THINKING_PHRASES[0];
       working.appendChild(canvas);
       working.appendChild(label);
       chatMessagesEl.appendChild(working);
-      chatGrokLoader = new GrokDodecahedronRenderer(canvas, { size: 24 });
+      chatGrokLoader = new GrokDodecahedronRenderer(canvas, { size: 24, speed: 1.65, intensity: 1 });
       chatGrokLoader.start();
-      chatThinkingCycler.start(label);
+      chatThinkingCycler.start(label, activeChatThinkingSteps);
     }
 
     chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
@@ -11658,6 +11697,16 @@ function initAiTranslatorPanel() {
     renderSessionsList();
 
     if (chatInput) chatInput.value = "";
+    const willCaptureScreen = Boolean(
+      isTranslatorFloating &&
+      currentMode === "chat" &&
+      shouldAutoCaptureScreen(text)
+    );
+    activeChatThinkingSteps = buildChatThinkingSteps({
+      text,
+      attachments: currentAttachments,
+      willCaptureScreen
+    });
     const reqId = ++activeChatRequestId;
     chatBusy = true;
     chatHasUnread = false;
