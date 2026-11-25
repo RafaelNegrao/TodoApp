@@ -112,7 +112,7 @@ const icons = {
   table: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>`,
   formatClear: `<svg class="icon" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m13.3 9 5.5 5.5"/></svg>`,
   micAi: `<svg class="icon" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4M8 22h8"/></svg>`,
-  aiSparkle: `<svg class="icon" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/><path d="M19 3v3M17.5 4.5h3"/></svg>`,
+  aiSparkle: `<svg class="icon" viewBox="0 0 24 24"><path d="M11.5 2.5 13.9 9.6 21 12l-7.1 2.4-2.4 7.1-2.4-7.1L2 12l7.1-2.4 2.4-7.1Z"/><path d="M19.5 3v3M18 4.5h3"/></svg>`,
   chatTranscribe: `<svg class="icon" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><path d="M9 11.5v1"/><path d="M12 9.5v5"/><path d="M15 11.5v1"/></svg>`,
   moreHorizontal: `<svg class="icon" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>`,
   menu: `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`
@@ -1738,8 +1738,8 @@ function renderNodes() {
                   <span class="card-transcribe-tokens">${transcribeState?.targetNodeId === node.id ? formatEstimatedAudioTokens(Date.now() - transcribeState.startedAt) : ""}</span>
                 </span>
                 <span class="card-transcribe-analyzing" aria-hidden="true">
-                  <span class="card-transcribe-spinner"></span>
-                  <span>Analisando...</span>
+                  <canvas class="card-analyzing-sphere" aria-hidden="true"></canvas>
+                  <span class="card-analyzing-text grok-shimmer-text">${AI_CARD_ANALYZING_PHRASES[0]}</span>
                 </span>
               </button>
               <button class="card-action" type="button" aria-label="Remove" title="Remove">${icons.close}</button>
@@ -2357,6 +2357,8 @@ function renderNodes() {
   preservedVideos.forEach(({ videoEl }) => {
     try { videoEl.pause(); } catch (_) { }
   });
+
+  syncCardAnalyzingIndicator(cardAnalyzingState?.targetNodeId || null);
 
   // Segunda passada: com todos os cards no DOM, ler offsetHeight de uma vez
   // (um unico reflow) para cachear a altura real de cada um.
@@ -8217,6 +8219,63 @@ function updateCardAudioMeterLevel(targetNodeId, level) {
   if (bars[2]) bars[2].style.height = `${Math.min(10, b3)}px`;
 }
 
+const AI_CARD_ANALYZING_PHRASES = [
+  "Analyzing media...",
+  "Listening carefully...",
+  "Extracting key details...",
+  "Structuring response...",
+  "Finalizing answer..."
+];
+
+let cardAnalyzingSphereLoader = null;
+let cardAnalyzingCanvasRef = null;
+const cardAnalyzingPhraseCycler = new ThinkingPhraseCycler(AI_CARD_ANALYZING_PHRASES, {
+  intervalMs: 3600,
+  startRandom: false,
+  loop: false
+});
+
+function syncCardAnalyzingIndicator(targetNodeId = null) {
+  const activeId = targetNodeId || cardAnalyzingState?.targetNodeId || null;
+  if (!activeId) {
+    if (cardAnalyzingSphereLoader) {
+      cardAnalyzingSphereLoader.stop();
+      cardAnalyzingSphereLoader = null;
+      cardAnalyzingCanvasRef = null;
+    }
+    cardAnalyzingPhraseCycler.stop();
+    return;
+  }
+
+  const cardEl = nodesLayer.querySelector(`.task-card[data-id="${activeId}"]`);
+  const canvas = cardEl?.querySelector(".card-transcribe-btn.analyzing .card-analyzing-sphere") || null;
+  const textEl = cardEl?.querySelector(".card-transcribe-btn.analyzing .card-analyzing-text") || null;
+
+  if (!canvas) {
+    if (cardAnalyzingSphereLoader) {
+      cardAnalyzingSphereLoader.stop();
+      cardAnalyzingSphereLoader = null;
+      cardAnalyzingCanvasRef = null;
+    }
+    cardAnalyzingPhraseCycler.stop();
+    return;
+  }
+
+  if (cardAnalyzingCanvasRef !== canvas) {
+    cardAnalyzingSphereLoader?.stop();
+    cardAnalyzingCanvasRef = canvas;
+    cardAnalyzingSphereLoader = new GrokDodecahedronRenderer(canvas, {
+      size: 20,
+      speed: 1.65,
+      intensity: 1
+    });
+    cardAnalyzingSphereLoader.start();
+    if (textEl) {
+      cardAnalyzingPhraseCycler.start(textEl, AI_CARD_ANALYZING_PHRASES);
+    }
+  }
+}
+
 function updateTranscribeUi(active, targetNodeId = null, analyzing = false, startedAt = 0) {
   document.querySelectorAll(".card-transcribe-btn").forEach(btn => {
     const card = btn.closest(".task-card");
@@ -8230,11 +8289,12 @@ function updateTranscribeUi(active, targetNodeId = null, analyzing = false, star
       tokEl.textContent = isRec && startedAt ? formatEstimatedAudioTokens(Date.now() - startedAt) : "";
     }
     btn.title = isAna
-      ? "Analisando e transcrevendo áudio com IA..."
+      ? "Analyzing media with AI..."
       : isRec
         ? "Finalizar gravação e enviar para análise da IA"
         : "Gravar áudio (PC e microfone) para análise e transcrição com IA";
   });
+  syncCardAnalyzingIndicator(analyzing ? targetNodeId : null);
 }
 
 let dropOverActive = false;

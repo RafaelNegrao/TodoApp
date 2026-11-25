@@ -168,7 +168,7 @@ export class GrokDodecahedronRenderer {
 
   _configureCanvas() {
     if (!this.canvas || !this.ctx) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const dpr = Math.max(window.devicePixelRatio || 1, 3);
     this.canvas.width = Math.round(this.size * dpr);
     this.canvas.height = Math.round(this.size * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
