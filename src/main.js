@@ -92,6 +92,7 @@ const icons = {
   file: `<svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`,
   image: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>`,
   video: `<svg class="icon" viewBox="0 0 24 24"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="m16 10 6-3v10l-6-3z"/></svg>`,
+  audio: `<svg class="icon" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
   externalLink: `<svg class="icon" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>`,
   info: `<svg class="icon" viewBox="0 0 24 24"><path d="M12 18v-8"/><path d="M12 6h.01"/></svg>`,
   grip: `<svg class="card-drag-icon" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="5" cy="19" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="19" r="1.6" fill="currentColor" stroke="none"/></svg>`,
@@ -110,6 +111,7 @@ const icons = {
   table: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>`,
   formatClear: `<svg class="icon" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m13.3 9 5.5 5.5"/></svg>`,
   micAi: `<svg class="icon" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4M8 22h8"/></svg>`,
+  aiSparkle: `<svg class="icon" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/><path d="M19 3v3M17.5 4.5h3"/></svg>`,
   chatTranscribe: `<svg class="icon" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><path d="M9 11.5v1"/><path d="M12 9.5v5"/><path d="M15 11.5v1"/></svg>`,
   moreHorizontal: `<svg class="icon" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>`,
   menu: `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`
@@ -366,11 +368,13 @@ async function init() {
     const file = event.target.files[0];
     const targetNode = window.inlineVideoNodeTarget;
     const targetCard = window.inlineVideoCardTarget;
+    const targetKind = window.inlineMediaKindTarget || null;
     window.inlineVideoNodeTarget = null;
     window.inlineVideoCardTarget = null;
+    window.inlineMediaKindTarget = null;
     event.target.value = "";
     if (!file || !targetNode) return;
-    await attachVideoFileToCard(targetNode, targetCard, file);
+    await attachMediaFileToCard(targetNode, targetCard, file, targetKind);
   });
 
   userCreateForm.addEventListener("submit", saveUserCreatePopup);
@@ -1567,8 +1571,8 @@ function adjustLinksForTableRowMutation(nodeId, action, rowIndex) {
 function capturePreservedCardVideos(currentBoardId) {
   const preserved = new Map();
   if (!currentBoardId || nodesLayer.dataset.boardId !== currentBoardId) {
-    nodesLayer.querySelectorAll(".card-inline-video-wrap video").forEach(vid => {
-      try { vid.pause(); } catch (_) { }
+    nodesLayer.querySelectorAll(".card-inline-video-wrap video, .card-inline-audio-wrap audio").forEach(mediaEl => {
+      try { mediaEl.pause(); } catch (_) { }
     });
     return preserved;
   }
@@ -1576,15 +1580,17 @@ function capturePreservedCardVideos(currentBoardId) {
   nodesLayer.querySelectorAll(".task-card").forEach(cardEl => {
     const nodeId = cardEl.dataset.id;
     if (!nodeId) return;
-    cardEl.querySelectorAll(".card-inline-video-wrap").forEach((wrap, idx) => {
-      const videoEl = wrap.querySelector("video");
-      const mediaRef = wrap.dataset.videoSrc || "";
-      if (!videoEl || !mediaRef) return;
-      const key = `${nodeId}::${mediaRef}::${idx}`;
+    cardEl.querySelectorAll(".card-inline-video-wrap, .card-inline-audio-wrap").forEach((wrap, idx) => {
+      const isAudio = wrap.classList.contains("card-inline-audio-wrap");
+      const mediaEl = wrap.querySelector(isAudio ? "audio" : "video");
+      const mediaRef = isAudio ? (wrap.dataset.audioSrc || "") : (wrap.dataset.videoSrc || "");
+      if (!mediaEl || !mediaRef) return;
+      const kind = isAudio ? "audio" : "video";
+      const key = `${nodeId}::${kind}::${mediaRef}::${idx}`;
       preserved.set(key, {
-        videoEl,
-        wasPlaying: !videoEl.paused && !videoEl.ended,
-        currentTime: videoEl.currentTime
+        videoEl: mediaEl,
+        wasPlaying: !mediaEl.paused && !mediaEl.ended,
+        currentTime: mediaEl.currentTime
       });
     });
   });
@@ -1593,12 +1599,14 @@ function capturePreservedCardVideos(currentBoardId) {
 
 function restorePreservedCardVideos(card, nodeId, preservedVideos) {
   const toResume = [];
-  card.querySelectorAll(".card-inline-video-wrap").forEach((wrap, idx) => {
-    const placeholder = wrap.querySelector("video");
-    const mediaRef = wrap.dataset.videoSrc || "";
+  card.querySelectorAll(".card-inline-video-wrap, .card-inline-audio-wrap").forEach((wrap, idx) => {
+    const isAudio = wrap.classList.contains("card-inline-audio-wrap");
+    const placeholder = wrap.querySelector(isAudio ? "audio" : "video");
+    const mediaRef = isAudio ? (wrap.dataset.audioSrc || "") : (wrap.dataset.videoSrc || "");
     if (!placeholder || !mediaRef) return;
 
-    const key = `${nodeId}::${mediaRef}::${idx}`;
+    const kind = isAudio ? "audio" : "video";
+    const key = `${nodeId}::${kind}::${mediaRef}::${idx}`;
     const entry = preservedVideos.get(key);
     if (entry) {
       preservedVideos.delete(key);
@@ -1668,6 +1676,13 @@ function renderNodes() {
     }
 
     const isTableCard = node.type === "table";
+    const cardMediaInfo = !rootCard && !isTableCard && node.type !== "image"
+      ? extractCardMediaInfo(node)
+      : null;
+    const isMediaCard = Boolean(cardMediaInfo);
+    if (isMediaCard) {
+      card.classList.add("media-card", cardMediaInfo.kind === "audio" ? "audio-card" : "video-card");
+    }
     const createdAtHtml = (!rootCard && node.createdAt && node.type !== "image" && !isTableCard)
       ? `<span class="card-created-at">${formatCreatedAt(node.createdAt)}</span>`
       : "";
@@ -1708,8 +1723,8 @@ function renderNodes() {
                 <input class="crit-range" type="range" min="0" max="2" step="1" value="${node.criticality ?? 0}" title="Criticality" />
               </div>
               ${node.aiTranscribeTokens > 0 && transcribeState?.targetNodeId !== node.id && cardAnalyzingState?.targetNodeId !== node.id ? `<span class="card-ai-tokens-badge" title="Tokens usados na análise/transcrição: ${node.aiTranscribeTokens}">${node.aiTranscribeTokens >= 1000 ? `${(node.aiTranscribeTokens / 1000).toFixed(1)}k` : node.aiTranscribeTokens} tok</span>` : ""}
-              <button class="card-ai-btn card-transcribe-btn${transcribeState?.targetNodeId === node.id ? " recording" : ""}${cardAnalyzingState?.targetNodeId === node.id ? " analyzing" : ""}" type="button" aria-label="Gravar e analisar áudio com IA" title="${cardAnalyzingState?.targetNodeId === node.id ? "Analisando e transcrevendo áudio com IA..." : transcribeState?.targetNodeId === node.id ? "Finalizar gravação e analisar com IA" : "Gravar áudio (PC e microfone) para análise e transcrição com IA"}">
-                <span class="card-transcribe-icon">${icons.chatTranscribe}</span>
+              <button class="card-ai-btn card-transcribe-btn${transcribeState?.targetNodeId === node.id ? " recording" : ""}${cardAnalyzingState?.targetNodeId === node.id ? " analyzing" : ""}" type="button" aria-label="${isMediaCard ? (cardMediaInfo.kind === "audio" ? "Perguntar à IA sobre este áudio" : "Perguntar à IA sobre este vídeo/áudio") : "Gravar e analisar áudio com IA"}" title="${cardAnalyzingState?.targetNodeId === node.id ? "Analisando mídia com IA..." : isMediaCard ? (cardMediaInfo.kind === "audio" ? "Perguntar à IA sobre este áudio" : "Perguntar à IA sobre este vídeo ou áudio") : transcribeState?.targetNodeId === node.id ? "Finalizar gravação e analisar com IA" : "Gravar áudio (PC e microfone) para análise e transcrição com IA"}">
+                <span class="card-transcribe-icon">${isMediaCard ? icons.aiSparkle : icons.micAi}</span>
                 <span class="card-transcribe-live" aria-hidden="true">
                   <span class="card-audio-meter">
                     <span class="meter-bar b1"></span>
@@ -1745,7 +1760,17 @@ function renderNodes() {
             ? `<div class="card-body table-card-body" contenteditable="false" aria-label="Table card">${renderBodyHtml(getNodeContent(node))}</div>`
             : `<div class="card-body" contenteditable="true" role="textbox" aria-label="Card content">${renderBodyHtml(getNodeContent(node))}</div>`}
         </div>
-        ${rootCard || isTableCard ? "" : node.type === "image" && node.imageUrl ? `
+        ${isMediaCard ? `
+          <form class="card-media-ask-bar" contenteditable="false"${cardAnalyzingState?.targetNodeId === node.id ? "" : " hidden"}>
+            <input class="card-media-ask-input" type="text" placeholder="${cardMediaInfo.kind === "audio" ? "Pergunte à IA sobre este áudio..." : "Pergunte à IA sobre este vídeo ou áudio..."}" autocomplete="off"${cardAnalyzingState?.targetNodeId === node.id ? " disabled" : ""} />
+            <button class="card-media-ask-send${cardAnalyzingState?.targetNodeId === node.id ? " is-stop" : ""}" type="${cardAnalyzingState?.targetNodeId === node.id ? "button" : "submit"}" title="${cardAnalyzingState?.targetNodeId === node.id ? "Parar requisição" : "Enviar pergunta (Enter)"}" aria-label="${cardAnalyzingState?.targetNodeId === node.id ? "Parar requisição" : "Enviar pergunta"}"${cardAnalyzingState?.targetNodeId === node.id ? "" : " disabled"}>
+              ${cardAnalyzingState?.targetNodeId === node.id
+                ? `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none" /></svg>`
+                : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>`}
+            </button>
+          </form>
+        ` : ""}
+        ${rootCard || isTableCard || isMediaCard ? "" : node.type === "image" && node.imageUrl ? `
           <div class="image-card-bottom" contenteditable="false">
             <button class="image-card-btn" type="button" data-command="changeImage" title="Change Image">${icons.image}</button>
             <button class="image-card-btn" type="button" data-command="clearImage" title="Remove Image">${icons.close}</button>
@@ -1764,6 +1789,7 @@ function renderNodes() {
             <div class="card-format-bar-sep"></div>
             <button class="card-format-btn" type="button" data-command="insertImageInline" title="Insert Image">${icons.image}</button>
             <button class="card-format-btn" type="button" data-command="insertVideoInline" title="Inserir vídeo">${icons.video}</button>
+            <button class="card-format-btn" type="button" data-command="insertAudioInline" title="Inserir áudio">${icons.audio}</button>
             <button class="card-format-btn" type="button" data-command="removeFormat" title="Clear Formatting">${icons.formatClear}</button>
           </div>
         `}
@@ -1790,7 +1816,7 @@ function renderNodes() {
     });
 
     card.addEventListener("dblclick", event => {
-      if (event.target.closest("input, textarea, button, video, .card-inline-video-wrap, .resize-handle, .port")) {
+      if (event.target.closest("input, textarea, button, video, audio, .card-inline-video-wrap, .card-inline-audio-wrap, .resize-handle, .port")) {
         return;
       }
       focusCardOnNode(node.id);
@@ -1832,8 +1858,66 @@ function renderNodes() {
       card.querySelector(".card-ai-btn")?.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
+        if (isMediaCard) {
+          const askBar = card.querySelector(".card-media-ask-bar");
+          if (askBar) {
+            askBar.hidden = !askBar.hidden;
+            if (!askBar.hidden) {
+              const inputEl = askBar.querySelector(".card-media-ask-input");
+              inputEl?.focus();
+            }
+          }
+          return;
+        }
         handleTranscribeTriggerClick(event, node.id, event.currentTarget);
       });
+
+      const mediaAskForm = card.querySelector(".card-media-ask-bar");
+      if (mediaAskForm && cardMediaInfo) {
+        mediaAskForm.addEventListener("pointerdown", event => {
+          event.stopPropagation();
+        });
+        const mediaAskInput = mediaAskForm.querySelector(".card-media-ask-input");
+        const mediaAskSendBtn = mediaAskForm.querySelector(".card-media-ask-send");
+        const syncMediaAskSendBtn = () => {
+          if (!mediaAskSendBtn) return;
+          const busyHere = cardAnalyzingState?.targetNodeId === node.id;
+          mediaAskSendBtn.classList.toggle("is-stop", busyHere);
+          mediaAskSendBtn.type = busyHere ? "button" : "submit";
+          mediaAskSendBtn.title = busyHere ? "Parar requisição" : "Enviar pergunta (Enter)";
+          mediaAskSendBtn.setAttribute("aria-label", busyHere ? "Parar requisição" : "Enviar pergunta");
+          mediaAskSendBtn.innerHTML = busyHere
+            ? `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none" /></svg>`
+            : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>`;
+          mediaAskSendBtn.disabled = busyHere ? false : !String(mediaAskInput?.value || "").trim();
+          if (mediaAskInput) {
+            mediaAskInput.disabled = busyHere;
+          }
+        };
+        mediaAskInput?.addEventListener("input", syncMediaAskSendBtn);
+        mediaAskInput?.addEventListener("keydown", event => {
+          event.stopPropagation();
+          if (event.key === "Escape" && cardAnalyzingState?.targetNodeId !== node.id) {
+            mediaAskForm.hidden = true;
+          }
+        });
+        mediaAskSendBtn?.addEventListener("click", event => {
+          if (cardAnalyzingState?.targetNodeId === node.id) {
+            event.preventDefault();
+            event.stopPropagation();
+            stopActiveCardMediaAsk(node.id);
+          }
+        });
+        mediaAskForm.addEventListener("submit", async event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const q = String(mediaAskInput?.value || "").trim();
+          if (!q || cardAnalyzingState) return;
+          mediaAskInput.value = "";
+          await askAiAboutCardMedia(node, cardMediaInfo, q);
+        });
+        syncMediaAskSendBtn();
+      }
 
       card.querySelector(".card-check")?.addEventListener("click", event => {
         event.stopPropagation();
@@ -1886,7 +1970,7 @@ function renderNodes() {
 
     if (bodyEditor) {
       bodyEditor.addEventListener("pointerdown", event => {
-        if (event.target.closest(".card-todo-btn, .card-todo-wrap, .card-inline-img-del, .card-inline-video-wrap, .card-inline-video-del, .card-table-wrap")) {
+        if (event.target.closest(".card-todo-btn, .card-todo-wrap, .card-inline-img-del, .card-inline-video-wrap, .card-inline-video-del, .card-inline-audio-wrap, .card-inline-audio-del, .card-table-wrap")) {
           event.stopPropagation();
         }
       });
@@ -1949,6 +2033,27 @@ function renderNodes() {
               vid.load();
             }
             videoWrap.remove();
+            setNodeContent(node, serializeEditableContent(bodyEditor));
+            saveState();
+            renderLinks();
+            setTimeout(() => scheduleNodeHeightSync(node.id, card), 50);
+          }
+          return;
+        }
+
+        const audioDelBtn = event.target.closest(".card-inline-audio-del");
+        if (audioDelBtn) {
+          event.preventDefault();
+          event.stopPropagation();
+          const audioWrap = audioDelBtn.closest(".card-inline-audio-wrap");
+          if (audioWrap) {
+            const aud = audioWrap.querySelector("audio");
+            if (aud) {
+              aud.pause();
+              aud.removeAttribute("src");
+              aud.load();
+            }
+            audioWrap.remove();
             setNodeContent(node, serializeEditableContent(bodyEditor));
             saveState();
             renderLinks();
@@ -2134,7 +2239,11 @@ function renderNodes() {
             return;
           }
           if (command === "insertVideoInline") {
-            pickAndInsertVideoIntoCard(node, card);
+            pickAndInsertMediaIntoCard(node, card, "video");
+            return;
+          }
+          if (command === "insertAudioInline") {
+            pickAndInsertMediaIntoCard(node, card, "audio");
             return;
           }
           if (command === "insertTable") {
@@ -3561,6 +3670,13 @@ function focusNodesChainAnimated(nodeIds, { maxZoom = 1.08, padding = 96, durati
   animateViewportTo({ zoom, panX, panY, durationMs });
 }
 
+function focusNewlyAddedCard(nodeId) {
+  if (!nodeId) return;
+  requestAnimationFrame(() => {
+    focusNodesChainAnimated([nodeId], { maxZoom: 1.15, padding: 96, durationMs: 260 });
+  });
+}
+
 function triggerAiCardBirthHighlight(nodeId) {
   if (!nodeId || !nodesLayer) return;
   const el = nodesLayer.querySelector(`[data-id="${nodeId}"]`);
@@ -4074,6 +4190,7 @@ function addAction(parentId = null) {
   selectedLinkId = null;
   saveState();
   render();
+  focusNewlyAddedCard(id);
 }
 
 function getReplyActionPosition(board, parentId) {
@@ -4182,6 +4299,7 @@ function createCanvasCardAtPopup(body = "", width = MIN_CARD_WIDTH, height = DEF
   closeNewCardModal();
   saveState();
   render();
+  focusNewlyAddedCard(id);
   return id;
 }
 
@@ -4739,6 +4857,7 @@ function createCardFromConnection(drag, dropPoint, useReplySpacing = false, type
     addLink(drag.nodeId, id, "out", "in", drag.row ?? null, null);
   }
 
+  focusNewlyAddedCard(id);
   return id;
 }
 
@@ -5222,16 +5341,32 @@ function makeId(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-const VIDEO_FILE_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "m4v", "ogg", "ogv", "avi"]);
+const VIDEO_FILE_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "m4v", "ogv", "avi"]);
+const AUDIO_FILE_EXTENSIONS = new Set(["m4a", "mp3", "wav", "ogg", "aac", "flac", "opus", "wma"]);
 
 function isVideoFileName(nameOrPath) {
   const ext = String(nameOrPath || "").split(".").pop()?.toLowerCase() || "";
   return VIDEO_FILE_EXTENSIONS.has(ext);
 }
 
+function isAudioFileName(nameOrPath) {
+  const ext = String(nameOrPath || "").split(".").pop()?.toLowerCase() || "";
+  return AUDIO_FILE_EXTENSIONS.has(ext);
+}
+
+function isAudioAttachment(att) {
+  if (!att) return false;
+  const mime = String(att.type || att.mime || "").toLowerCase();
+  if (mime.startsWith("audio/")) return true;
+  if (mime.startsWith("video/")) return false;
+  return isAudioFileName(att.name || att.file);
+}
+
 function isVideoAttachment(att) {
   if (!att) return false;
-  if (String(att.type || "").toLowerCase().startsWith("video/")) return true;
+  const mime = String(att.type || att.mime || "").toLowerCase();
+  if (mime.startsWith("video/")) return true;
+  if (mime.startsWith("audio/")) return false;
   return isVideoFileName(att.name || att.file);
 }
 
@@ -5253,20 +5388,23 @@ function buildLocalMediaUrl(mediaRef) {
     : `todomedia://localhost/${encodedPath}`;
 }
 
-function insertVideoTokenIntoNode(node, mediaRef, cardEl = null) {
+function insertMediaTokenIntoNode(node, mediaRef, kind = "video", cardEl = null) {
   if (!node || !mediaRef) return;
+  const tokenKind = kind === "audio" ? "audio" : "video";
   const currentContent = getNodeContent(node) || "";
   const separator = currentContent && !currentContent.endsWith("\n") ? "\n" : "";
-  setNodeContent(node, `${currentContent}${separator}![video](${mediaRef})\n`);
+  setNodeContent(node, `${currentContent}${separator}![${tokenKind}](${mediaRef})\n`);
   if ((node.w || MIN_CARD_WIDTH) < 336) {
     node.w = 336;
   }
-  if ((node.h || 144) < 240) {
-    node.h = 240;
+  const minMediaH = tokenKind === "audio" ? 144 : 240;
+  if ((node.h || 144) < minMediaH) {
+    node.h = minMediaH;
   }
   saveState();
   renderNodes();
   renderLinks();
+  focusNewlyAddedCard(node.id);
   setTimeout(() => {
     const resolvedCard = cardEl?.isConnected
       ? cardEl
@@ -5277,8 +5415,11 @@ function insertVideoTokenIntoNode(node, mediaRef, cardEl = null) {
   }, 120);
 }
 
-async function attachVideoFileToCard(node, cardEl, file) {
+async function attachMediaFileToCard(node, cardEl, file, kindOverride = null) {
   if (!node || !file) return;
+  const kind = kindOverride || (String(file.type || "").startsWith("audio/") || isAudioFileName(file.name) ? "audio" : "video");
+  const defaultName = kind === "audio" ? "audio.m4a" : "video.mp4";
+  const defaultMime = kind === "audio" ? "audio/mp4" : "video/mp4";
   const user = activeUser();
   const task = activeMainTask();
   if (invoke && user && task) {
@@ -5289,25 +5430,27 @@ async function attachVideoFileToCard(node, cardEl, file) {
       const info = await invoke("attachment_save_from_bytes", {
         userId: user.id,
         subDir,
-        fileName: file.name || "video.mp4",
+        fileName: file.name || defaultName,
         bytes
       });
-      pushAttachment(task, info, file.type || "video/mp4");
-      insertVideoTokenIntoNode(node, `${user.id}/${info.file}`, cardEl);
+      pushAttachment(task, info, file.type || inferMimeFromFileName(file.name) || defaultMime);
+      insertMediaTokenIntoNode(node, `${user.id}/${info.file}`, kind, cardEl);
       return;
     } catch (error) {
-      console.warn("Falha ao salvar vídeo no card", error);
+      console.warn("Falha ao salvar mídia no card", error);
     }
   }
   const objectUrl = URL.createObjectURL(file);
-  insertVideoTokenIntoNode(node, objectUrl, cardEl);
+  insertMediaTokenIntoNode(node, objectUrl, kind, cardEl);
 }
 
-async function attachVideoPathToCard(node, cardEl, sourcePath) {
+async function attachMediaPathToCard(node, cardEl, sourcePath, kindOverride = null) {
   if (!node || !sourcePath || !invoke) return;
   const user = activeUser();
   const task = activeMainTask();
   if (!user || !task) return;
+  const kind = kindOverride || (isAudioFileName(sourcePath) ? "audio" : "video");
+  const inferredMime = inferMimeFromFileName(sourcePath) || (kind === "audio" ? "audio/mp4" : "video/mp4");
   try {
     const subDir = `task${task.number}/anexos`;
     const info = await invoke("attachment_save_from_path", {
@@ -5315,15 +5458,16 @@ async function attachVideoPathToCard(node, cardEl, sourcePath) {
       subDir,
       sourcePath
     });
-    pushAttachment(task, info, "video/mp4");
-    insertVideoTokenIntoNode(node, `${user.id}/${info.file}`, cardEl);
+    pushAttachment(task, info, inferredMime);
+    insertMediaTokenIntoNode(node, `${user.id}/${info.file}`, kind, cardEl);
   } catch (error) {
-    console.warn("Falha ao anexar vídeo no card", error);
+    console.warn("Falha ao anexar mídia no card", error);
   }
 }
 
-async function pickAndInsertVideoIntoCard(node, cardEl) {
+async function pickAndInsertMediaIntoCard(node, cardEl, kind = "video") {
   if (!node) return;
+  const mediaKind = kind === "audio" ? "audio" : "video";
   const user = activeUser();
   const task = activeMainTask();
   if (invoke && user && task) {
@@ -5332,19 +5476,24 @@ async function pickAndInsertVideoIntoCard(node, cardEl) {
       const pickedPath = await invoke("attachment_pick_file", {
         userId: user.id,
         subDir,
-        filterKind: "video"
+        filterKind: mediaKind
       });
       if (pickedPath) {
-        await attachVideoPathToCard(node, cardEl, pickedPath);
+        await attachMediaPathToCard(node, cardEl, pickedPath, mediaKind);
       }
       return;
     } catch (error) {
-      console.warn("Falha ao abrir seletor nativo de vídeo", error);
+      console.warn("Falha ao abrir seletor nativo de mídia", error);
     }
   }
   window.inlineVideoNodeTarget = node;
   window.inlineVideoCardTarget = cardEl;
-  document.getElementById("inlineVideoInput")?.click();
+  window.inlineMediaKindTarget = mediaKind;
+  const input = document.getElementById("inlineVideoInput");
+  if (input) {
+    input.accept = mediaKind === "audio" ? "audio/*" : "video/*";
+    input.click();
+  }
 }
 
 async function pickAndInsertImageIntoCard(node, editor, cardEl) {
@@ -5398,11 +5547,12 @@ async function pickAndInsertImageIntoCard(node, editor, cardEl) {
   document.getElementById("inlineImageInput")?.click();
 }
 
-function embedVideoAttachmentIntoBoard(att) {
+function embedMediaAttachmentIntoBoard(att) {
   const user = activeUser();
   const board = activeBoard();
   if (!user || !board || !att?.file) return;
   const mediaRef = `${user.id}/${att.file}`;
+  const kind = isAudioAttachment(att) ? "audio" : "video";
 
   const selected = selectedNodeId
     ? board.nodes.find(n => n.id === selectedNodeId && !n.isRoot && n.type !== "image")
@@ -5410,11 +5560,12 @@ function embedVideoAttachmentIntoBoard(att) {
 
   closeAttachmentsPopup();
   if (selected) {
-    insertVideoTokenIntoNode(selected, mediaRef);
+    insertMediaTokenIntoNode(selected, mediaRef, kind);
     return;
   }
 
-  const id = createCanvasCardAtPopup(`![video](${mediaRef})\n`, 360, 288);
+  const defaultHeight = kind === "audio" ? 144 : 288;
+  const id = createCanvasCardAtPopup(`![${kind}](${mediaRef})\n`, 360, defaultHeight);
   if (id) {
     setTimeout(() => {
       const cardEl = nodesLayer.querySelector(`.task-card[data-id="${id}"]`);
@@ -5424,7 +5575,7 @@ function embedVideoAttachmentIntoBoard(att) {
 }
 
 const URL_PATTERN = /(?:https?:\/\/|www\.)[^\s<>"]+/g;
-const BODY_TOKEN_PATTERN = /\[\[table:([A-Za-z0-9_-]+)\]\]|!\[image\]\(([^)]+)\)|@\[([^\]\r\n]+)\]\(attachment:([^)]+)\)|\[([ xX])\] |!\[video\]\(([^)]+)\)|(?:https?:\/\/|www\.)(?:(?!@\[)[^\s<>"])+/g;
+const BODY_TOKEN_PATTERN = /\[\[table:([A-Za-z0-9_-]+)\]\]|!\[image\]\(([^)]+)\)|@\[([^\]\r\n]+)\]\(attachment:([^)]+)\)|\[([ xX])\] |!\[video\]\(([^)]+)\)|!\[audio\]\(([^)]+)\)|(?:https?:\/\/|www\.)(?:(?!@\[)[^\s<>"])+/g;
 
 function extractUrl(text) {
   const match = String(text || "").match(URL_PATTERN);
@@ -5440,6 +5591,33 @@ function openExternalUrl(url) {
     invoke("open_url", { url }).catch(() => window.open(url, "_blank", "noopener,noreferrer"));
   } else {
     window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
+function resolveMediaDisplayName(mediaRef, fallback = "Mídia") {
+  const raw = String(mediaRef || "").trim();
+  if (!raw) return fallback;
+  const normalized = raw.replaceAll("\\", "/");
+  const slashIdx = normalized.indexOf("/");
+  const relFile = slashIdx > 0 ? normalized.slice(slashIdx + 1) : normalized;
+
+  const task = activeMainTask();
+  const matched = task?.attachments?.find(a => a?.file && a.file.replaceAll("\\", "/") === relFile);
+  if (matched?.name) return matched.name;
+
+  const user = activeUser();
+  if (user?.tasks?.length) {
+    for (const t of user.tasks) {
+      const hit = t?.attachments?.find(a => a?.file && a.file.replaceAll("\\", "/") === relFile);
+      if (hit?.name) return hit.name;
+    }
+  }
+
+  const base = normalized.split("/").pop() || fallback;
+  try {
+    return decodeURIComponent(base);
+  } catch (_) {
+    return base;
   }
 }
 
@@ -5464,7 +5642,13 @@ function renderBodyHtml(text) {
     } else if (match[6] !== undefined) {
       const mediaRef = match[6];
       const videoUrl = buildLocalMediaUrl(mediaRef);
-      html += `<span class="card-inline-video-wrap" contenteditable="false" data-video-src="${escapeAttr(mediaRef)}"><video controls playsinline preload="metadata" src="${escapeAttr(videoUrl)}"></video><button type="button" class="card-inline-video-del" title="Remover vídeo" aria-label="Remover vídeo">${icons.close}</button></span>`;
+      const mediaName = resolveMediaDisplayName(mediaRef, "Vídeo");
+      html += `<span class="card-inline-video-wrap" contenteditable="false" data-video-src="${escapeAttr(mediaRef)}"><span class="card-inline-media-header">${icons.video}<span class="card-inline-media-name" title="${escapeAttr(mediaName)}">${escapeHtml(mediaName)}</span><button type="button" class="card-inline-video-del" title="Remover vídeo" aria-label="Remover vídeo">${icons.close}</button></span><video controls playsinline preload="metadata" src="${escapeAttr(videoUrl)}"></video></span>`;
+    } else if (match[7] !== undefined) {
+      const mediaRef = match[7];
+      const audioUrl = buildLocalMediaUrl(mediaRef);
+      const mediaName = resolveMediaDisplayName(mediaRef, "Áudio");
+      html += `<span class="card-inline-audio-wrap" contenteditable="false" data-audio-src="${escapeAttr(mediaRef)}"><span class="card-inline-media-header">${icons.audio}<span class="card-inline-media-name" title="${escapeAttr(mediaName)}">${escapeHtml(mediaName)}</span></span><audio controls preload="metadata" src="${escapeAttr(audioUrl)}"></audio></span>`;
     } else {
       const url = match[0];
       html += `<a class="card-body-link" href="${escapeAttr(toAbsoluteUrl(url))}">${escapeHtml(url)}</a>`;
@@ -5586,6 +5770,9 @@ function serializeEditableContent(el) {
       } else if (node.matches?.(".card-inline-video-wrap")) {
         const videoRef = node.dataset.videoSrc || node.querySelector("video")?.getAttribute("src") || "";
         if (videoRef) result += `![video](${videoRef})`;
+      } else if (node.matches?.(".card-inline-audio-wrap")) {
+        const audioRef = node.dataset.audioSrc || node.querySelector("audio")?.getAttribute("src") || "";
+        if (audioRef) result += `![audio](${audioRef})`;
       } else if (node.matches?.(".card-attachment-link")) {
         result += node.dataset.attachmentToken || "";
       } else if (node.matches?.(".card-todo-wrap") || node.matches?.(".card-todo-btn")) {
@@ -7144,7 +7331,7 @@ function insertPendingRecordedVideoIntoCard() {
     saveState();
     render();
   }
-  embedVideoAttachmentIntoBoard(pending.attachment);
+  embedMediaAttachmentIntoBoard(pending.attachment);
 }
 
 async function finalizeNativeRecording(recState) {
@@ -7170,7 +7357,7 @@ async function finalizeNativeRecording(recState) {
   }
 
   const savedAttachment = pushAttachment(targetTask, info, recState.mode === "audio" ? "audio/mp4" : "video/mp4");
-  if (recState.mode !== "audio" && savedAttachment) {
+  if (savedAttachment) {
     showRecordedVideoToast(targetUser.id, targetTask.id, savedAttachment);
   }
 }
@@ -7279,7 +7466,7 @@ async function finalizeRecording(recState) {
   }
 
   const savedAttachment = pushAttachment(targetTask, info, recState.mode === "audio" ? "audio/webm" : "video/webm");
-  if (recState.mode !== "audio" && savedAttachment) {
+  if (savedAttachment) {
     showRecordedVideoToast(targetUser.id, targetTask.id, savedAttachment);
   }
 }
@@ -7453,6 +7640,123 @@ const LIVE_TRANSCRIBE_INTERVAL_MS = 3800;
 let transcribeState = null;
 let cardAnalyzingState = null;
 let isStartingTranscription = false;
+
+function extractCardMediaInfo(node) {
+  const content = String(getNodeContent(node) || "");
+  const match = content.match(/!\[(video|audio)\]\(([^)\n]+)\)/);
+  if (!match) return null;
+  const kind = match[1];
+  const mediaRef = match[2].trim();
+  const slashIdx = mediaRef.indexOf("/");
+  if (slashIdx <= 0) return null;
+  return {
+    kind,
+    mediaRef,
+    userId: mediaRef.slice(0, slashIdx),
+    file: mediaRef.slice(slashIdx + 1)
+  };
+}
+
+let cardMediaAskSeq = 0;
+
+function syncCardMediaAskBarUi(nodeId, busy) {
+  const cardEl = nodesLayer.querySelector(`.task-card[data-id="${nodeId}"]`);
+  const askForm = cardEl?.querySelector(".card-media-ask-bar");
+  if (!askForm) return;
+  const inputEl = askForm.querySelector(".card-media-ask-input");
+  const sendBtn = askForm.querySelector(".card-media-ask-send");
+  if (busy) {
+    askForm.hidden = false;
+  } else {
+    askForm.hidden = true;
+  }
+  if (inputEl) {
+    inputEl.disabled = busy;
+  }
+  if (sendBtn) {
+    sendBtn.classList.toggle("is-stop", busy);
+    sendBtn.type = busy ? "button" : "submit";
+    sendBtn.title = busy ? "Parar requisição" : "Enviar pergunta (Enter)";
+    sendBtn.setAttribute("aria-label", busy ? "Parar requisição" : "Enviar pergunta");
+    sendBtn.innerHTML = busy
+      ? `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none" /></svg>`
+      : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>`;
+    sendBtn.disabled = busy ? false : !String(inputEl?.value || "").trim();
+  }
+}
+
+function stopActiveCardMediaAsk(nodeId) {
+  if (!cardAnalyzingState || cardAnalyzingState.targetNodeId !== nodeId) return;
+  cardMediaAskSeq += 1;
+  cardAnalyzingState = null;
+  updateTranscribeUi(false, nodeId, false);
+  syncCardMediaAskBarUi(nodeId, false);
+  renderUsersRail();
+  renderUserTasks();
+}
+
+async function askAiAboutCardMedia(node, mediaInfo, question) {
+  if (!invoke || !node || !mediaInfo || !question) return;
+  const user = activeUser();
+  const task = activeMainTask();
+  if (!user || !task) return;
+
+  const requestId = ++cardMediaAskSeq;
+  cardAnalyzingState = {
+    userId: user.id,
+    taskId: task.id,
+    targetNodeId: node.id,
+    requestId
+  };
+  updateTranscribeUi(false, node.id, true);
+  syncCardMediaAskBarUi(node.id, true);
+  renderUsersRail();
+  renderUserTasks();
+
+  try {
+    const cardContext = String(getNodeContent(node) || "")
+      .replace(/!\[(video|audio|image)\]\([^)\n]+\)/g, "")
+      .replace(/<[^>]+>/g, " ")
+      .trim();
+    const res = await invoke("ask_ai_about_media", {
+      userId: mediaInfo.userId,
+      file: mediaInfo.file,
+      question,
+      mediaKind: mediaInfo.kind || null,
+      cardContext: cardContext || null,
+      apiKey: getGeminiApiKey() || null
+    });
+    if (requestId !== cardMediaAskSeq) return;
+    const answerText = String(res?.text || "").trim();
+    const usedTokens = Number(res?.total_tokens) || 0;
+    if (answerText) {
+      const formatted = `<b>Pergunta:</b> ${escapeHtml(question)}\n${answerText}`;
+      insertTranscriptionIntoBoard(
+        { userId: user.id, taskId: task.id, targetNodeId: node.id },
+        formatted,
+        usedTokens
+      );
+    }
+  } catch (err) {
+    if (requestId !== cardMediaAskSeq) return;
+    console.warn("Falha ao perguntar à IA sobre o vídeo/áudio:", err);
+    insertTranscriptionIntoBoard(
+      { userId: user.id, taskId: task.id, targetNodeId: node.id },
+      `<b>Erro IA:</b> ${escapeHtml(String(err?.message || err))}`,
+      0
+    );
+  } finally {
+    if (requestId === cardMediaAskSeq) {
+      if (cardAnalyzingState?.targetNodeId === node.id) {
+        cardAnalyzingState = null;
+      }
+      updateTranscribeUi(false, node.id, false);
+      syncCardMediaAskBarUi(node.id, false);
+      renderUsersRail();
+      renderUserTasks();
+    }
+  }
+}
 
 function formatEstimatedAudioTokens(ms) {
   const secs = Math.max(1, Math.floor((Number(ms) || 0) / 1000));
@@ -8054,8 +8358,8 @@ async function setupFileDrop() {
         const cardEl = nodesLayer.querySelector(`.task-card[data-id="${targetCardId}"]`);
         for (const path of paths) {
           try {
-            if (isVideoFileName(path) && node.type !== "image") {
-              await attachVideoPathToCard(node, cardEl, path);
+            if ((isVideoFileName(path) || isAudioFileName(path)) && node.type !== "image") {
+              await attachMediaPathToCard(node, cardEl, path);
               continue;
             }
             const bytes = await invoke("read_file_bytes", { path });
@@ -8165,7 +8469,9 @@ function updateCardReferencesForRenamedAttachment(task, userId, oldFile, newFile
     if (!content) return;
     let updated = content;
     if (oldFile && newFile && oldFile !== newFile) {
-      updated = updated.replaceAll(`![video](${oldMediaRef})`, `![video](${newMediaRef})`);
+      updated = updated
+        .replaceAll(`![video](${oldMediaRef})`, `![video](${newMediaRef})`)
+        .replaceAll(`![audio](${oldMediaRef})`, `![audio](${newMediaRef})`);
     }
     if (chipPattern) {
       updated = updated.replace(chipPattern, `@[${safeLabel}](attachment:${attId})`);
@@ -8359,15 +8665,16 @@ function openAttachmentRowMenu(anchorBtn, row, nameEl, att) {
   menu.className = "attachments-row-menu";
   menu.setAttribute("role", "menu");
 
-  if (isVideoAttachment(att)) {
+  if (isVideoAttachment(att) || isAudioAttachment(att)) {
     const embedItem = document.createElement("button");
     embedItem.type = "button";
     embedItem.className = "attachments-row-menu-item";
-    embedItem.innerHTML = `${icons.video}<span>Colocar no card</span>`;
+    const mediaIcon = isAudioAttachment(att) ? icons.audio : icons.video;
+    embedItem.innerHTML = `${mediaIcon}<span>Colocar no card</span>`;
     embedItem.addEventListener("click", event => {
       event.stopPropagation();
       closeAllAttachmentRowMenus();
-      embedVideoAttachmentIntoBoard(att);
+      embedMediaAttachmentIntoBoard(att);
     });
     menu.appendChild(embedItem);
   }

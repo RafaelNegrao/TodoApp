@@ -716,10 +716,12 @@ fn execute_gemini_fast_payload_with_model(
         compact_payload_for_token_budget(&payload, 10000, true),
     ));
 
+    let has_av_media = payload_contains_audio_or_video(&payload);
     let mut tried = std::collections::HashSet::<String>::new();
     let filtered_models: Vec<String> = models
         .iter()
         .filter(|m| !is_deprecated_gemini_model(m) && !is_model_marked_unavailable(m))
+        .filter(|m| !has_av_media || !m.starts_with("gemma-"))
         .cloned()
         .collect();
     let (mut ready_queue, mut cooling_queue) = partition_models_by_availability(filtered_models);
@@ -736,6 +738,7 @@ fn execute_gemini_fast_payload_with_model(
                 let fresh: Vec<String> = discover_available_gemini_models(key)
                     .into_iter()
                     .filter(|m| !tried.contains(m))
+                    .filter(|m| !has_av_media || !m.starts_with("gemma-"))
                     .collect();
                 if !fresh.is_empty() {
                     let (fresh_ready, fresh_cooling) = partition_models_by_availability(fresh);
@@ -3758,17 +3761,22 @@ async fn transcribe_audio_gemini(
 }
 
 fn infer_media_mime(path: &Path) -> &'static str {
+    infer_media_mime_with_kind(path, None)
+}
+
+fn infer_media_mime_with_kind(path: &Path, media_kind: Option<&str>) -> &'static str {
+    let is_audio = matches!(media_kind, Some("audio"));
     match path
         .extension()
         .and_then(|e| e.to_str())
         .map(|s| s.to_lowercase())
         .as_deref()
     {
-        Some("mp4") | Some("m4v") => "video/mp4",
+        Some("mp4") | Some("m4v") => if is_audio { "audio/mp4" } else { "video/mp4" },
         Some("m4a") => "audio/mp4",
         Some("mp3") => "audio/mpeg",
         Some("wav") => "audio/wav",
-        Some("webm") => "video/webm",
+        Some("webm") => if is_audio { "audio/webm" } else { "video/webm" },
         Some("ogg") => "audio/ogg",
         Some("ogv") => "video/ogg",
         Some("mov") => "video/quicktime",
@@ -3776,7 +3784,8 @@ fn infer_media_mime(path: &Path) -> &'static str {
         Some("avi") => "video/x-msvideo",
         Some("aac") => "audio/aac",
         Some("flac") => "audio/flac",
-        _ => "audio/mp4",
+        Some("opus") => "audio/ogg",
+        _ => if is_audio { "audio/mp4" } else { "video/mp4" },
     }
 }
 
@@ -3834,6 +3843,155 @@ fn upload_gemini_media_file(
     }
 
     Ok((file_name, file_uri))
+}
+
+fn payload_contains_audio_or_video(payload: &serde_json::Value) -> bool {
+    let Some(contents) = payload.get("contents").and_then(|c| c.as_array()) else {
+        return false;
+    };
+    for entry in contents {
+        let Some(parts) = entry.get("parts").and_then(|p| p.as_array()) else {
+            continue;
+        };
+        for part in parts {
+            let mime = part
+                .get("inlineData")
+                .or_else(|| part.get("fileData"))
+                .and_then(|d| d.get("mimeType"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("");
+            if mime.starts_with("audio/") || mime.starts_with("video/") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[tauri::command]
+async fn ask_ai_about_media(
+    app: tauri::AppHandle,
+    user_id: String,
+    file: String,
+    question: String,
+    media_kind: Option<String>,
+    card_context: Option<String>,
+    api_key: Option<String>,
+) -> Result<AiTranscribeReply, String> {
+    let trimmed_q = question.trim().to_string();
+    if trimmed_q.is_empty() {
+        return Err("Digite uma pergunta sobre o vídeo ou áudio.".to_string());
+    }
+    let path = app_root(&app)?.join(&user_id).join(&file);
+    if !path.exists() {
+        return Err("Arquivo de mídia não encontrado".to_string());
+    }
+    let (key, all_models) = resolve_gemini_key_and_models(api_key)?;
+    // Prioriza modelos com alta capacidade de compreensao multimodal de audio/video
+    let preferred_media_models = [
+        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-flash-latest",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash-lite",
+    ];
+    let mut models: Vec<String> = preferred_media_models
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+    for m in all_models {
+        if !m.starts_with("gemma-") && !models.iter().any(|existing| existing == &m) {
+            models.push(m);
+        }
+    }
+    let ordered = order_models_by_availability(models);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let kind_ref = media_kind.as_deref();
+        let mime = infer_media_mime_with_kind(&path, kind_ref);
+        let is_audio = matches!(kind_ref, Some("audio")) || mime.starts_with("audio/");
+        let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        if size == 0 {
+            return Err("Arquivo de mídia vazio".to_string());
+        }
+
+        let mut uploaded_file_name: Option<String> = None;
+        let media_part = if size <= 15 * 1024 * 1024 {
+            let bytes = fs::read(&path).map_err(|e| format!("Falha ao ler arquivo: {e}"))?;
+            serde_json::json!({
+                "inlineData": {
+                    "mimeType": mime,
+                    "data": encode_base64(&bytes)
+                }
+            })
+        } else {
+            let (fname, furi) = upload_gemini_media_file(&key, &path, mime)?;
+            uploaded_file_name = Some(fname);
+            serde_json::json!({
+                "fileData": {
+                    "mimeType": mime,
+                    "fileUri": furi
+                }
+            })
+        };
+
+        let context_block = card_context
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|ctx| {
+                let clipped = truncate_utf8_chars(ctx, 4000);
+                format!("\n\nNotas/histórico já presentes neste card (use apenas como contexto complementar se relevante):\n{clipped}")
+            })
+            .unwrap_or_default();
+
+        let media_label = if is_audio { "áudio" } else { "vídeo/áudio" };
+        let prompt = format!(
+            "Você recebeu um arquivo de {media_label} anexado acima. Ouça atentamente TODO o conteúdo falado do início ao fim, prestando atenção em nomes, números, datas, tarefas, decisões e detalhes mencionados.\n\
+             Responda diretamente à pergunta do usuário abaixo no mesmo idioma da pergunta, baseando-se fielmente no que é dito na mídia.\n\
+             Regras:\n\
+             - Responda de forma clara, precisa e objetiva, citando os fatos/trechos relevantes ouvidos.\n\
+             - Use apenas texto limpo e <b>...</b> para destaques/títulos se necessário (NÃO use markdown com # ou **).\n\
+             - Só diga que a informação não aparece se realmente não for mencionada em nenhum momento da gravação.{context_block}\n\n\
+             Pergunta do usuário: {trimmed_q}"
+        );
+
+        let payload = serde_json::json!({
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    media_part,
+                    { "text": prompt }
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.1
+            }
+        });
+
+        let result = execute_gemini_fast_payload_with_model(&key, &ordered, payload, false);
+
+        if let Some(fname) = uploaded_file_name {
+            let del_url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/{}?key={}",
+                fname, key
+            );
+            let _ = default_http_agent()
+                .delete(&del_url)
+                .timeout(Duration::from_secs(15))
+                .call();
+        }
+
+        let (text, _model, usage) = result?;
+        Ok(AiTranscribeReply {
+            text: text.trim().to_string(),
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -4163,6 +4321,7 @@ fn open_native_file_dialog(initial_dir: &Path, filter_kind: &str) -> Option<Stri
 
     let filter_str = match filter_kind {
         "video" => "Videos (*.mp4;*.webm;*.mov;*.mkv;*.m4v;*.avi;*.ogg)\0*.mp4;*.webm;*.mov;*.mkv;*.m4v;*.avi;*.ogg\0Todos os arquivos (*.*)\0*.*\0\0",
+        "audio" => "Audios (*.m4a;*.mp3;*.wav;*.ogg;*.aac;*.flac;*.webm)\0*.m4a;*.mp3;*.wav;*.ogg;*.aac;*.flac;*.webm\0Todos os arquivos (*.*)\0*.*\0\0",
         "image" => "Imagens (*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp)\0*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp\0Todos os arquivos (*.*)\0*.*\0\0",
         _ => "Todos os arquivos (*.*)\0*.*\0\0",
     };
@@ -5291,6 +5450,7 @@ fn main() {
             capture_current_monitor_png,
             transcribe_audio_gemini,
             transcribe_attachment_zoom_summary,
+            ask_ai_about_media,
             ai_audio_capture_start,
             ai_audio_capture_level,
             ai_audio_capture_flush_and_transcribe,
