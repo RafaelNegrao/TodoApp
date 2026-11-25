@@ -328,7 +328,12 @@ async function init() {
   boardShell.addEventListener("pointerdown", handleBoardPointerDown);
   boardShell.addEventListener("contextmenu", handleBoardContextMenu);
   window.onerror = function (msg, url, line, col, error) {
-    alert("ERRO: " + msg + "\nLinha: " + line + "\n" + (error ? error.stack : ""));
+    const text = String(msg || "");
+    if (text.includes("ResizeObserver loop")) {
+      return true;
+    }
+    console.error("[TODOCompanion] Runtime error:", msg, { url, line, col, error });
+    return false;
   };
 
   newCardForm.addEventListener("submit", saveNewCard);
@@ -8965,7 +8970,15 @@ function initCanvasMetaResponsive() {
   });
 
   if (typeof ResizeObserver !== "undefined") {
-    const ro = new ResizeObserver(() => updateLayout());
+    let layoutRafId = 0;
+    const scheduleLayoutUpdate = () => {
+      if (layoutRafId) return;
+      layoutRafId = requestAnimationFrame(() => {
+        layoutRafId = 0;
+        updateLayout();
+      });
+    };
+    const ro = new ResizeObserver(scheduleLayoutUpdate);
     ro.observe(overlay);
   }
   window.addEventListener("resize", updateLayout);
