@@ -2839,12 +2839,15 @@ mod win_screen_recorder {
     }
 
     struct DxgiDuplicator {
+        device: ID3D11Device,
         context: ID3D11DeviceContext,
-        dupl: IDXGIOutputDuplication,
+        output1: IDXGIOutput1,
+        dupl: Option<IDXGIOutputDuplication>,
         staging: ID3D11Texture2D,
         src_w: u32,
         src_h: u32,
         has_frame: bool,
+        last_reinit_attempt: Option<Instant>,
     }
 
     unsafe fn init_dxgi_duplicator() -> Option<DxgiDuplicator> {
@@ -2899,13 +2902,39 @@ mod win_screen_recorder {
         let staging = staging_opt?;
 
         Some(DxgiDuplicator {
+            device,
             context,
-            dupl,
+            output1,
+            dupl: Some(dupl),
             staging,
             src_w,
             src_h,
             has_frame: false,
+            last_reinit_attempt: None,
         })
+    }
+
+    unsafe fn try_recover_dxgi_duplicator(dxgi: &mut DxgiDuplicator) {
+        let now = Instant::now();
+        if let Some(last) = dxgi.last_reinit_attempt {
+            if now.duration_since(last) < Duration::from_millis(250) {
+                return;
+            }
+        }
+        dxgi.last_reinit_attempt = Some(now);
+
+        // Primeiro tenta recriar apenas o IDXGIOutputDuplication (rapido, preserva o ultimo frame no staging)
+        if let Ok(new_dupl) = dxgi.output1.DuplicateOutput(&dxgi.device) {
+            dxgi.dupl = Some(new_dupl);
+            return;
+        }
+
+        // Se o device/adapter tambem foi invalidado (ex: troca de desktop seguro/UAC ou driver reset),
+        // recria todo o pipeline D3D11/DXGI.
+        if let Some(mut fresh) = init_dxgi_duplicator() {
+            fresh.last_reinit_attempt = Some(now);
+            *dxgi = fresh;
+        }
     }
 
     // Desenha um cursor vetorial limpo (seta branca com contorno escuro) diretamente no buffer de memoria
@@ -2978,25 +3007,45 @@ mod win_screen_recorder {
         out_w: u32,
         out_h: u32,
     ) -> bool {
+        const DXGI_ERROR_WAIT_TIMEOUT_CODE: i32 = 0x887A0027u32 as i32;
+
+        if dxgi.dupl.is_none() {
+            try_recover_dxgi_duplicator(dxgi);
+        }
+
         let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
         let mut resource_opt: Option<IDXGIResource> = None;
+        let mut lost_access = false;
 
-        if dxgi
-            .dupl
-            .AcquireNextFrame(0, &mut frame_info, &mut resource_opt)
-            .is_ok()
-        {
-            if let Some(res) = resource_opt {
-                if let Ok(tex) = res.cast::<ID3D11Texture2D>() {
-                    let staging_res: Result<ID3D11Resource, _> = dxgi.staging.cast();
-                    let tex_res: Result<ID3D11Resource, _> = tex.cast();
-                    if let (Ok(dst), Ok(src)) = (staging_res, tex_res) {
-                        dxgi.context.CopyResource(&dst, &src);
-                        dxgi.has_frame = true;
+        if let Some(ref dupl) = dxgi.dupl {
+            match dupl.AcquireNextFrame(0, &mut frame_info, &mut resource_opt) {
+                Ok(()) => {
+                    if let Some(res) = resource_opt {
+                        if let Ok(tex) = res.cast::<ID3D11Texture2D>() {
+                            let staging_res: Result<ID3D11Resource, _> = dxgi.staging.cast();
+                            let tex_res: Result<ID3D11Resource, _> = tex.cast();
+                            if let (Ok(dst), Ok(src)) = (staging_res, tex_res) {
+                                dxgi.context.CopyResource(&dst, &src);
+                                dxgi.has_frame = true;
+                            }
+                        }
+                    }
+                    let _ = dupl.ReleaseFrame();
+                }
+                Err(err) => {
+                    // Qualquer erro diferente de WAIT_TIMEOUT (ex: DXGI_ERROR_ACCESS_LOST apos UAC/Desktop Seguro
+                    // ou E_ACCESSDENIED) invalida a sessao DXGI atual e exige recriar o duplicator.
+                    if err.code().0 != DXGI_ERROR_WAIT_TIMEOUT_CODE {
+                        lost_access = true;
                     }
                 }
             }
-            let _ = dxgi.dupl.ReleaseFrame();
+        }
+
+        if lost_access {
+            dxgi.dupl = None;
+            dxgi.last_reinit_attempt = None;
+            try_recover_dxgi_duplicator(dxgi);
         }
 
         if !dxgi.has_frame {

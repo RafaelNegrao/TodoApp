@@ -38,9 +38,9 @@ import {
 const STORAGE_KEY = "todocompanion.state.v4";
 const LEGACY_STORAGE_KEYS = ["todocompanion.state.v3", "todocompanion.state.v2", "todocompanion.state.v1"];
 const MIN_ZOOM = 0.15;
-const MIN_CARD_WIDTH = 336;
-const MIN_CARD_HEIGHT = 144;
-const DEFAULT_CARD_HEIGHT = 192;
+const MIN_CARD_WIDTH = 384;
+const MIN_CARD_HEIGHT = 192;
+const DEFAULT_CARD_HEIGHT = 240;
 const MAX_ZOOM = 5.0;
 // Distancia (em pixels de tela) dentro da qual um card "gruda" no alinhamento
 // de um card conectado, deixando a linha reta. Convertido para coords do canvas
@@ -298,7 +298,7 @@ async function init() {
   attachmentsOpenFolder.addEventListener("click", openAttachmentsFolder);
   attachmentReferencePopup?.addEventListener("pointerdown", event => event.preventDefault());
   addBoardButton.addEventListener("click", openUserCreatePopup);
-  addUserTaskButton.addEventListener("click", () => openTaskDialog("create-task"));
+  addUserTaskButton.addEventListener("click", createInstantTaskAndFocusRoot);
   usersRailToggle.addEventListener("click", toggleUsersRail);
   tasksSidebarToggle.addEventListener("click", toggleTasksSidebar);
   tasksSortButton.addEventListener("click", toggleSortMenu);
@@ -1788,9 +1788,7 @@ function renderNodes() {
             <button class="card-format-btn" type="button" data-command="insertCheckbox" title="Checkbox">${icons.checkbox}</button>
             <button class="card-format-btn" type="button" data-command="insertTable" title="Insert Table (Excel)">${icons.table}</button>
             <div class="card-format-bar-sep"></div>
-            <button class="card-format-btn" type="button" data-command="insertImageInline" title="Insert Image">${icons.image}</button>
-            <button class="card-format-btn" type="button" data-command="insertVideoInline" title="Inserir vídeo">${icons.video}</button>
-            <button class="card-format-btn" type="button" data-command="insertAudioInline" title="Inserir áudio">${icons.audio}</button>
+            <button class="card-format-btn" type="button" data-command="insertAttachmentInline" title="Anexar arquivo (imagem, vídeo, áudio, documento)">${icons.paperclip}</button>
             <button class="card-format-btn" type="button" data-command="removeFormat" title="Clear Formatting">${icons.formatClear}</button>
           </div>
         `}
@@ -1817,7 +1815,7 @@ function renderNodes() {
     });
 
     card.addEventListener("dblclick", event => {
-      if (event.target.closest("input, textarea, button, video, audio, .card-inline-video-wrap, .card-inline-audio-wrap, .resize-handle, .port")) {
+      if (event.target.closest("input, textarea, button, video, audio, .root-card-title, .card-inline-video-wrap, .card-inline-audio-wrap, .resize-handle, .port")) {
         return;
       }
       focusCardOnNode(node.id);
@@ -1825,11 +1823,7 @@ function renderNodes() {
 
     if (rootCard) {
       card.addEventListener("pointerdown", event => {
-        if (event.target.closest("button, input, textarea, .port, .resize-handle")) {
-          return;
-        }
-        const titleEl = card.querySelector(".root-card-title");
-        if (titleEl && document.activeElement === titleEl && event.target.closest(".root-card-title")) {
+        if (event.target.closest("button, input, textarea, .root-card-title, .port, .resize-handle")) {
           return;
         }
         startDrag(event, node.id);
@@ -2235,16 +2229,8 @@ function renderNodes() {
         }
         const editor = card.querySelector(".card-body");
         if (editor) {
-          if (command === "insertImageInline") {
-            pickAndInsertImageIntoCard(node, editor, card);
-            return;
-          }
-          if (command === "insertVideoInline") {
-            pickAndInsertMediaIntoCard(node, card, "video");
-            return;
-          }
-          if (command === "insertAudioInline") {
-            pickAndInsertMediaIntoCard(node, card, "audio");
+          if (command === "insertAttachmentInline") {
+            pickAndInsertAttachmentIntoCard(node, editor, card);
             return;
           }
           if (command === "insertTable") {
@@ -2302,23 +2288,47 @@ function renderNodes() {
     if (rootCard) {
       const titleEl = card.querySelector(".root-card-title");
       if (titleEl) {
+        let initialTitle = board.title;
+        titleEl.addEventListener("focus", () => {
+          initialTitle = board.title;
+        });
+        titleEl.addEventListener("input", () => {
+          const liveTitle = titleEl.innerText.replace(/\r?\n/g, " ").trim().slice(0, 56);
+          if (!liveTitle) return;
+          board.title = liveTitle;
+          node.title = liveTitle;
+          const t = activeUser()?.tasks.find(item => item.id === board.id);
+          if (t) t.title = liveTitle;
+          const sidebarTitle = document.querySelector(`.user-task-card[data-task-id="${board.id}"] .user-task-title`);
+          if (sidebarTitle) sidebarTitle.textContent = liveTitle;
+          saveState();
+        });
         const commitTitle = () => {
-          const newTitle = titleEl.innerText.trim();
-          if (newTitle && newTitle !== board.title) {
+          const newTitle = titleEl.innerText.replace(/\r?\n/g, " ").trim().slice(0, 56);
+          if (newTitle) {
             board.title = newTitle;
-            const t = activeUser().tasks.find(t => t.id === board.id);
+            node.title = newTitle;
+            const t = activeUser()?.tasks.find(item => item.id === board.id);
             if (t) t.title = newTitle;
             saveState();
             render();
           } else {
-            titleEl.innerText = board.title;
+            board.title = initialTitle;
+            node.title = initialTitle;
+            titleEl.innerText = initialTitle;
+            renderUserTasks();
           }
         };
 
         titleEl.addEventListener("blur", commitTitle);
         titleEl.addEventListener("keydown", event => {
+          event.stopPropagation();
           if (event.key === "Enter") {
             event.preventDefault();
+            titleEl.blur();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            titleEl.innerText = initialTitle;
             titleEl.blur();
           }
         });
@@ -4443,6 +4453,51 @@ function getViewportActionPosition() {
   return { x, y };
 }
 
+function createInstantTaskAndFocusRoot() {
+  let user = activeUser();
+  if (!user) {
+    user = state.users[0] || null;
+    if (!user) {
+      openUserCreatePopup();
+      return;
+    }
+    state.activeUserId = user.id;
+  }
+
+  const task = createMainTask(
+    {
+      title: "Nova task",
+      status: "ongoing",
+      priority: "normal"
+    },
+    user.tasks.length
+  );
+  user.tasks.push(task);
+  user.activeTaskId = task.id;
+  const rootId = task.nodes[0]?.id || null;
+  if (rootId) {
+    pendingCardPop.add(rootId);
+  }
+  selectedNodeId = rootId;
+  selectedLinkId = null;
+  saveState();
+  render();
+
+  if (rootId) {
+    focusNewlyAddedCard(rootId);
+    requestAnimationFrame(() => {
+      const titleEl = nodesLayer.querySelector(`.task-card[data-id="${rootId}"] .root-card-title`);
+      if (!titleEl) return;
+      titleEl.focus();
+      const range = document.createRange();
+      range.selectNodeContents(titleEl);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    });
+  }
+}
+
 function openTaskDialog(mode = "create-task", userId = null, taskId = null) {
   dialogMode = mode;
   dialogUserId = userId;
@@ -5496,6 +5551,115 @@ async function pickAndInsertMediaIntoCard(node, cardEl, kind = "video") {
   const input = document.getElementById("inlineVideoInput");
   if (input) {
     input.accept = mediaKind === "audio" ? "audio/*" : "video/*";
+    input.click();
+  }
+}
+
+async function insertImagePathIntoCard(node, cardEl, pickedPath) {
+  const bytes = await invoke("read_file_bytes", { path: pickedPath });
+  if (!bytes || !bytes.length) return;
+  const ext = pickedPath.split(".").pop()?.toLowerCase() || "png";
+  let mimeType = "image/png";
+  if (ext === "jpg" || ext === "jpeg") mimeType = "image/jpeg";
+  else if (ext === "gif") mimeType = "image/gif";
+  else if (ext === "webp") mimeType = "image/webp";
+  else if (ext === "svg") mimeType = "image/svg+xml";
+  else if (ext === "bmp") mimeType = "image/bmp";
+
+  let binary = "";
+  const CHUNK_SIZE = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    binary += String.fromCharCode.apply(null, bytes.slice(i, i + CHUNK_SIZE));
+  }
+  const dataUrl = `data:${mimeType};base64,${window.btoa(binary)}`;
+  const currentContent = getNodeContent(node) || "";
+  const separator = currentContent && !currentContent.endsWith("\n") ? "\n" : "";
+  setNodeContent(node, `${currentContent}${separator}![image](${dataUrl})\n`);
+  saveState();
+  renderNodes();
+  renderLinks();
+  focusNewlyAddedCard(node.id);
+  setTimeout(() => {
+    const resolvedCard = cardEl?.isConnected
+      ? cardEl
+      : nodesLayer.querySelector(`.task-card[data-id="${node.id}"]`);
+    if (resolvedCard) scheduleNodeHeightSync(node.id, resolvedCard);
+  }, 60);
+}
+
+async function attachDocumentPathToCard(node, cardEl, sourcePath) {
+  if (!node || !sourcePath || !invoke) return;
+  const user = activeUser();
+  const task = activeMainTask();
+  if (!user || !task) return;
+  try {
+    const subDir = `task${task.number}/anexos`;
+    const info = await invoke("attachment_save_from_path", {
+      userId: user.id,
+      subDir,
+      sourcePath
+    });
+    const savedAtt = pushAttachment(
+      task,
+      info,
+      inferMimeFromFileName(info.original_name) || "application/octet-stream"
+    );
+    if (!savedAtt) return;
+    const safeLabel = String(savedAtt.name || "anexo")
+      .replaceAll("]", ")")
+      .replaceAll("\r", " ")
+      .replaceAll("\n", " ")
+      .trim() || "anexo";
+    const currentContent = getNodeContent(node) || "";
+    const separator = currentContent && !currentContent.endsWith("\n") ? "\n" : "";
+    setNodeContent(node, `${currentContent}${separator}@[${safeLabel}](attachment:${savedAtt.id})\n`);
+    saveState();
+    renderNodes();
+    renderLinks();
+    setTimeout(() => {
+      const resolvedCard = cardEl?.isConnected
+        ? cardEl
+        : nodesLayer.querySelector(`.task-card[data-id="${node.id}"]`);
+      if (resolvedCard) scheduleNodeHeightSync(node.id, resolvedCard);
+    }, 60);
+  } catch (error) {
+    console.warn("Falha ao anexar documento no card", error);
+  }
+}
+
+async function pickAndInsertAttachmentIntoCard(node, editor, cardEl) {
+  if (!node) return;
+  const user = activeUser();
+  const task = activeMainTask();
+  if (invoke && user && task) {
+    try {
+      const subDir = `task${task.number}/anexos`;
+      const pickedPath = await invoke("attachment_pick_file", {
+        userId: user.id,
+        subDir,
+        filterKind: "all"
+      });
+      if (!pickedPath) return;
+      if (isVideoFileName(pickedPath)) {
+        await attachMediaPathToCard(node, cardEl, pickedPath, "video");
+      } else if (isAudioFileName(pickedPath)) {
+        await attachMediaPathToCard(node, cardEl, pickedPath, "audio");
+      } else if (/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(pickedPath)) {
+        await insertImagePathIntoCard(node, cardEl, pickedPath);
+      } else {
+        await attachDocumentPathToCard(node, cardEl, pickedPath);
+      }
+      return;
+    } catch (error) {
+      console.warn("Falha ao abrir seletor nativo de anexos", error);
+    }
+  }
+  window.inlineVideoNodeTarget = node;
+  window.inlineVideoCardTarget = cardEl;
+  window.inlineMediaKindTarget = null;
+  const input = document.getElementById("inlineVideoInput");
+  if (input) {
+    input.accept = "*/*";
     input.click();
   }
 }

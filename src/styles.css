@@ -2400,21 +2400,22 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px 2px;
+  padding: 7px 10px 4px;
   background: transparent;
   cursor: grab;
   z-index: 4;
+  box-sizing: border-box;
 }
 
 .card-top-left,
 .card-top-right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
 }
 
 .card-top-right {
-  gap: 3px;
+  gap: 5px;
 }
 
 .task-card.dragging .card-top {
@@ -2686,8 +2687,9 @@ button {
   flex-direction: column;
   flex: 1 1 0;
   margin: 0;
-  padding: 6px 12px;
+  padding: 10px 14px;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .card-body {
@@ -2738,10 +2740,12 @@ button {
 }
 
 .card-created-at {
-  font-size: var(--card-date-font-size, 11px);
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.015em;
   color: var(--card-muted);
+  opacity: 0.68;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
   user-select: none;
   white-space: nowrap;
@@ -2822,13 +2826,14 @@ button {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 1px;
-  padding: 4px 10px 6px;
+  gap: 2px;
+  padding: 4px 26px 5px 10px;
   background: transparent;
-  opacity: 0.58;
+  opacity: 0.45;
   pointer-events: auto;
   transition: opacity var(--t-fast) var(--ease-out);
   z-index: 4;
+  box-sizing: border-box;
 }
 
 .task-card:hover .card-format-bar,
@@ -2865,10 +2870,11 @@ button {
 
 .card-format-bar-sep {
   width: 1px;
-  height: 13px;
+  height: 12px;
   align-self: center;
   background: var(--card-divider);
-  margin: 0 3px;
+  opacity: 0.6;
+  margin: 0 5px;
 }
 
 .card-format-btn .icon {
