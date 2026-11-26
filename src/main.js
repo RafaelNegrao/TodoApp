@@ -11172,8 +11172,12 @@ function initAiTranslatorPanel() {
 
   function appendCoachAdviceWithoutFlicker(advice, timestamp) {
     if (!liveCoachMessagesEl) return;
-    liveCoachAdviceHistory = [{ advice, timestamp }];
-    liveCoachMessagesEl.querySelectorAll(".ai-chat-msg").forEach(row => row.remove());
+    liveCoachAdviceHistory.push({ advice, timestamp });
+    if (liveCoachAdviceHistory.length > 60) {
+      liveCoachAdviceHistory = liveCoachAdviceHistory.slice(-60);
+      const firstRow = liveCoachMessagesEl.querySelector(".ai-chat-msg");
+      if (firstRow) firstRow.remove();
+    }
     const row = document.createElement("div");
     row.className = "ai-chat-msg ai";
     row.appendChild(buildCoachAdviceCard(advice, { animate: true, timestamp }));
@@ -12157,32 +12161,37 @@ function initAiTranslatorPanel() {
             liveCoachGrokLoader?.stop();
             liveCoachGrokLoader = new GrokDodecahedronRenderer(liveCoachThinkingCanvas, {
               size: 72,
-              speed: 0.45,
-              intensity: 0.65,
+              speed: 1,
+              intensity: 0.85,
               colorRgb: null
             });
             liveCoachGrokLoader.start();
           }
           if (!liveCoachAudioLevelTimer && invoke) {
+            let liveCoachHearingUntil = 0;
             liveCoachAudioLevelTimer = window.setInterval(async () => {
               if (!liveCoachGrokLoader || liveCoachIsBusy) return;
               try {
                 const level = Number(await invoke("ai_audio_capture_level")) || 0;
-                const isHearing = level >= 0.06;
+                const now = Date.now();
+                if (level >= 0.025) {
+                  liveCoachHearingUntil = now + 500;
+                }
+                const isHearing = now < liveCoachHearingUntil;
                 const hearingRgb =
                   document.documentElement?.dataset?.theme === "light-claude"
                     ? "22, 163, 74"
                     : "74, 222, 128";
                 if (isHearing) {
                   liveCoachGrokLoader.setState({
-                    speed: 1.45 + Math.min(1, level) * 1.15,
+                    speed: 1.55 + Math.min(1, level) * 1.1,
                     intensity: 1,
                     colorRgb: hearingRgb
                   });
                 } else {
                   liveCoachGrokLoader.setState({
-                    speed: 0.45,
-                    intensity: 0.65,
+                    speed: 1,
+                    intensity: 0.85,
                     colorRgb: null
                   });
                 }
@@ -12216,8 +12225,8 @@ function initAiTranslatorPanel() {
           });
         } else {
           liveCoachGrokLoader.setState({
-            speed: 0.45,
-            intensity: 0.65,
+            speed: 1,
+            intensity: 0.85,
             colorRgb: null
           });
         }

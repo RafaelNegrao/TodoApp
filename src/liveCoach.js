@@ -46,7 +46,7 @@ export function parseLiveCoachAdvice(rawText) {
 }
 
 export class LiveEnglishCoachController {
-  constructor({ invoke, getApiKey, getOutputMode, onAdvice, onUsage, onStatusChange, onError, intervalMs = 9000 }) {
+  constructor({ invoke, getApiKey, getOutputMode, onAdvice, onUsage, onStatusChange, onError, intervalMs = 2500 }) {
     this.invoke = invoke;
     this.getApiKey = getApiKey;
     this.getOutputMode = getOutputMode;

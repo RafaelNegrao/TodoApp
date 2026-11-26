@@ -4137,7 +4137,7 @@ fn ai_audio_capture_level(state: State<'_, AiAudioCaptureState>) -> f32 {
         return 0.0;
     };
 
-    let sample_window = 800usize; // ~50ms a 16kHz
+    let sample_window = 2400usize; // ~150ms a 16kHz (sobrepoe o polling de 100ms sem perder silabas)
     let compute_rms = |q: &Arc<Mutex<VecDeque<f32>>>| -> f32 {
         let Ok(buf) = q.lock() else {
             return 0.0;

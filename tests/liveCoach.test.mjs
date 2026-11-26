@@ -52,6 +52,30 @@ test("Help now starts an immediate capture while an automatic analysis is runnin
   }
 });
 
+test("live translation polls audio every 2.5 seconds by default", async () => {
+  const previousWindow = globalThis.window;
+  let intervalMs;
+  globalThis.window = {
+    setInterval: (_callback, delay) => {
+      intervalMs = delay;
+      return 1;
+    },
+    clearInterval: () => {}
+  };
+  const controller = new LiveEnglishCoachController({
+    invoke: command => command === "ai_audio_capture_start" ? Promise.resolve() : Promise.resolve(null)
+  });
+
+  try {
+    await controller.start();
+    assert.equal(intervalMs, 2500);
+    await controller.stop();
+  } finally {
+    controller.active = false;
+    globalThis.window = previousWindow;
+  }
+});
+
 test("parseLiveCoachAdvice accepts translation-only responses", () => {
   const advice = parseLiveCoachAdvice(JSON.stringify({
     skip: false,
