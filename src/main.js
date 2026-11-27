@@ -38,6 +38,12 @@ import { PersistenceService } from "./intelligence/persistenceService.js";
 import { WorkspaceContextService } from "./intelligence/contextService.js";
 import { WorkspaceUndoStack, buildActionPreviewDiffs } from "./intelligence/actionPreviewUndo.js";
 import {
+  PromptModuleRegistry,
+  ConversationContextManager,
+  TokenBudgetManager,
+  TokenMetricsMonitor
+} from "./intelligence/tokenOptimizer.js";
+import {
   TaskReminderService,
   AlarmSoundPlayer,
   normalizeReminder,
@@ -49,6 +55,9 @@ const persistenceService = new PersistenceService(
   typeof window !== "undefined" ? (window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke || null) : null
 );
 const workspaceContextService = new WorkspaceContextService(persistenceService);
+const promptModuleRegistry = new PromptModuleRegistry();
+const conversationContextManager = new ConversationContextManager({ recentWindowSize: 6 });
+const tokenBudgetManager = new TokenBudgetManager({ maxTotalInputTokens: 5500 });
 const workspaceUndoStack = new WorkspaceUndoStack(15);
 const alarmSoundPlayer = new AlarmSoundPlayer();
 
@@ -11852,10 +11861,30 @@ function initAiTranslatorPanel() {
         if (totalTok > 0) {
           const tokSpan = document.createElement("span");
           tokSpan.className = "ai-msg-tokens";
-          tokSpan.textContent = `· ${formatTokenCountCompact(totalTok)} tok`;
           const pTok = Number(msg.promptTokens) || 0;
           const cTok = Number(msg.completionTokens) || 0;
-          tokSpan.title = `Prompt: ${pTok} · Saída: ${cTok} · Total: ${totalTok} tokens`;
+          const sessionStats = TokenMetricsMonitor.computeSessionMetrics(session?.messages || []);
+          const metrics = msg.tokenMetrics || TokenMetricsMonitor.reconcileWithActualUsage(null, pTok, cTok, msg.model);
+          const comp = metrics.components || {};
+          const costStr = metrics.estimatedCostUsd > 0
+            ? `$${metrics.estimatedCostUsd.toFixed(5)}`
+            : "<$0.00001";
+          tokSpan.textContent = `· ${formatTokenCountCompact(totalTok)} tok`;
+          const modsLabel = Array.isArray(msg.activeModules) && msg.activeModules.length
+            ? msg.activeModules.join(", ")
+            : "core";
+          tokSpan.title = [
+            `Entrada: ${pTok} tok · Saída: ${cTok} tok · Total: ${totalTok} tok`,
+            `Custo estimado: ${costStr} · Média da conversa: ${sessionStats.averageTokensPerRequest} tok/msg`,
+            `--- Consumo por Componente ---`,
+            `• System Prompt (Core): ${comp.systemPromptTokens ?? 0} tok`,
+            `• Instruções Dinâmicas (${modsLabel}): ${comp.dynamicInstructionTokens ?? 0} tok`,
+            `• LIVE APP STATE: ${comp.liveAppStateTokens ?? 0} tok`,
+            `• Histórico Recente: ${comp.conversationHistoryTokens ?? 0} tok`,
+            `• Resumo de Histórico Antigo: ${comp.summaryTokens ?? 0} tok`,
+            `• Input do Usuário / Anexos: ${comp.userInputTokens ?? 0} tok`,
+            `• Output Gerado: ${comp.outputTokens ?? cTok} tok`
+          ].join("\n");
           actions.appendChild(tokSpan);
         }
       } else {
@@ -12530,42 +12559,14 @@ function initAiTranslatorPanel() {
       let promptTokens = 0;
       let completionTokens = 0;
       let totalTokens = 0;
+      let estimatedBreakdown = null;
+      let loadedModules = ["core"];
       if (invoke) {
-        const filteredHistory = session.messages
-          .filter(
-            m =>
-              !m.coachAdvice &&
-              !(m.role === "model" && typeof m.text === "string" && m.text.trimStart().startsWith("Error:"))
-          )
-          .slice(-6);
-        const lastMsgIndex = filteredHistory.length - 1;
-        const payloadMessages = filteredHistory.map((m, idx) => {
-          const isCurrentTurn = idx === lastMsgIndex;
-          const isRecentTurn = idx >= lastMsgIndex - 1;
-          const rawMsgText = String(m.text || "");
-          return {
-            role: m.role,
-            text: isCurrentTurn ? rawMsgText : (isRecentTurn ? rawMsgText.slice(0, 900) : rawMsgText.slice(0, 400)),
-            attachments: (m.attachments || []).map(a => {
-              if (isCurrentTurn) {
-                return {
-                  name: a.name || "",
-                  mime_type: a.mime_type || "",
-                  data_base64: a.data_base64 || "",
-                  text_content: String(a.text_content || "").slice(0, 45000)
-                };
-              }
-              return {
-                name: a.name || "",
-                mime_type: a.mime_type || "",
-                data_base64: "",
-                text_content: a.text_content
-                  ? String(a.text_content).slice(0, 1500)
-                  : `[Anexo anterior: ${a.name || "arquivo"}]`
-              };
-            })
-          };
-        });
+        const convOpt = conversationContextManager.buildOptimizedConversationPayload(
+          session.messages,
+          text
+        );
+        let payloadMessages = convOpt.payloadMessages;
         if (
           willCaptureScreen &&
           payloadMessages.length > 0
@@ -12601,10 +12602,13 @@ function initAiTranslatorPanel() {
             console.warn("Falha ao capturar tela atual para o mini chat:", screenErr);
           }
         }
-        const appContext = await workspaceContextService.buildEnrichedContextJson(state, {
+        const rawAppContext = await workspaceContextService.buildEnrichedContextJson(state, {
           selectedNodeId,
           activeSessionId: session.id,
           userPrompt: text,
+          hasAttachments: currentAttachments.length > 0,
+          hasAppAttachments: relevantAppAttachments.length > 0,
+          willCaptureScreen,
           operatorProfile: localStorage.getItem("todocompanion.settings.aiOperatorProfile") || "",
           settings: {
             theme: localStorage.getItem("todocompanion.settings.theme") || "claude-dark",
@@ -12614,6 +12618,24 @@ function initAiTranslatorPanel() {
             translatorMode: localStorage.getItem("todocompanion.settings.translatorMode") || "manual"
           }
         });
+        const parsedContextObj = JSON.parse(rawAppContext || "{}");
+        loadedModules = Array.isArray(parsedContextObj.activeModules) && parsedContextObj.activeModules.length
+          ? parsedContextObj.activeModules
+          : ["core"];
+        const composedPrompt = promptModuleRegistry.composeSystemPrompt({
+          modules: loadedModules,
+          appContextJson: rawAppContext
+        });
+        const budgeted = tokenBudgetManager.enforceBudget({
+          systemCoreTokens: composedPrompt.coreTokensEstimate,
+          dynamicInstructionTokens: composedPrompt.dynamicTokensEstimate,
+          appContextObj: parsedContextObj,
+          payloadMessages,
+          summaryText: convOpt.summaryText
+        });
+        const appContext = budgeted.appContextJson;
+        payloadMessages = budgeted.payloadMessages;
+        estimatedBreakdown = budgeted.breakdown;
         const res = await invoke("ai_chat_english", {
           messages: payloadMessages,
           formality,
@@ -12663,6 +12685,13 @@ function initAiTranslatorPanel() {
         }
       }
 
+      const tokenMetrics = TokenMetricsMonitor.reconcileWithActualUsage(
+        estimatedBreakdown,
+        promptTokens,
+        completionTokens,
+        usedModel
+      );
+
       const newAiMsg = {
         role: "model",
         text: cleaned,
@@ -12671,6 +12700,8 @@ function initAiTranslatorPanel() {
         promptTokens,
         completionTokens,
         totalTokens,
+        activeModules: loadedModules,
+        tokenMetrics,
         attachments: [],
         proposal: proposal || null,
         questionSet: questionSet || null

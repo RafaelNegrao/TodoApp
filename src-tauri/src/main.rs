@@ -2389,6 +2389,148 @@ fn fetch_url_text_context(url: &str) -> Option<String> {
     Some(truncate_utf8_chars(&cleaned, 9000))
 }
 
+fn compose_modular_chat_system_prompt(
+    ctx_json: &str,
+    enable_web_search: bool,
+    enable_currency: bool,
+    has_attachments: bool,
+) -> String {
+    let is_minimal_ctx = ctx_json.contains("\"mode\":\"minimal\"");
+    let parsed_ctx: Option<serde_json::Value> = serde_json::from_str(ctx_json).ok();
+    let explicit_modules: Vec<String> = parsed_ctx
+        .as_ref()
+        .and_then(|v| v.get("activeModules"))
+        .and_then(|arr| arr.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let has_mod = |name: &str| -> bool {
+        if explicit_modules.is_empty() {
+            !is_minimal_ctx
+        } else {
+            explicit_modules.iter().any(|m| m == name)
+        }
+    };
+
+    let mut sections: Vec<&str> = Vec::with_capacity(11);
+    sections.push(
+        "You are TODOCompanion's AI Agent. Reply in the user's language.\n\
+         RULES:\n\
+         - Single-turn: deliver the complete final answer now (never say 'Vou pesquisar/verificar').\n\
+         - `operatorProfile` is the user chatting; `users[]` are task clients/contexts. Work strictly within the active task unless cross-task action is requested.",
+    );
+
+    if has_attachments || has_mod("attachments") {
+        sections.push(
+            "ATTACHMENTS & SCREENSHOT:\n\
+             - Attached files (PDF, image, audio, video, CSV/text) are injected in the user message. Card media syntax: '![video](userId/file)', '![audio](userId/file)', '@[name](attachment:id)'.\n\
+             - If `current_screen.jpg` is attached, analyze the screenshot directly without emitting [[APP_ACTIONS]] unless requested.",
+        );
+    }
+
+    if enable_web_search || enable_currency || has_mod("internet") {
+        sections.push(
+            "INTERNET & LIVE DATA:\n\
+             - Live web search results, currency rates, and extracted URL texts are injected directly into the user message — use those facts/numbers immediately.",
+        );
+    }
+
+    let mut has_action_module = false;
+
+    if has_mod("tasks") {
+        has_action_module = true;
+        sections.push(
+            "TASKS & USERS:\n\
+             - Hierarchy: Users -> Tasks (status: ongoing|stopped|complete, priority: low|normal|high|urgent, criticality: 0|1|2, startDate, endDate).\n\
+             - Schemas:\n\
+               * {\"type\":\"create_task\",\"title\":\"...\",\"priority\":\"low|normal|high|urgent\",\"startDate\":\"YYYY-MM-DD\",\"endDate\":\"YYYY-MM-DD\"}\n\
+               * {\"type\":\"update_task\",\"taskId\":\"...\",\"title\":\"...\",\"status\":\"ongoing|stopped|complete\",\"priority\":\"low|normal|high|urgent\",\"criticality\":0|1|2}\n\
+               * {\"type\":\"select_task\",\"taskId\":\"...\",\"taskTitle\":\"...\"} | {\"type\":\"delete_task\",\"taskId\":\"...\"} | {\"type\":\"duplicate_task\",\"taskId\":\"...\"}\n\
+               * {\"type\":\"create_user\",\"name\":\"...\"} | {\"type\":\"rename_user\",\"userId\":\"...\",\"newName\":\"...\"} | {\"type\":\"select_user\",\"userName\":\"...\"} | {\"type\":\"delete_user\",\"userId\":\"...\"}",
+        );
+    }
+
+    if has_mod("canvas") {
+        has_action_module = true;
+        sections.push(
+            "CANVAS CARDS:\n\
+             - Never use HTML tags (<br>, <p>, <div>); use '\\n' and '[ ]'/'[x]' for checklists. Omitting `taskId` targets the active task.\n\
+             - If asked to put previous chat info in a card, pass the full text in `create_card.body`. For 'indique/mostre/foque no canva', use `focus_card` with real `nodes[].id` (`\"$LAST_CARD\"` only after `create_card` in same batch).\n\
+             - Schemas:\n\
+               * {\"type\":\"create_card\",\"refId\":\"opt\",\"body\":\"...\",\"gridCol\":0,\"gridRow\":0,\"connectParent\":false,\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2,\"parentCardId\":\"id|refId|$LAST_CARD\",\"fromPort\":\"out|in|top|bottom\",\"toPort\":\"in|out|top|bottom\"}\n\
+               * {\"type\":\"update_card\",\"cardId\":\"id\",\"body\":\"...\",\"appendBody\":\"...\",\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2}\n\
+               * {\"type\":\"focus_card\",\"cardId\":\"id\"} | {\"type\":\"delete_card\",\"cardId\":\"id\"} | {\"type\":\"duplicate_card\",\"cardId\":\"id\"}\n\
+               * {\"type\":\"copy_card_to_task\",\"sourceCardId\":\"id\",\"targetTaskTitle\":\"...\"} | {\"type\":\"move_card_to_task\",\"sourceCardId\":\"id\",\"targetTaskTitle\":\"...\"}\n\
+               * {\"type\":\"organize_canvas\"} | {\"type\":\"center_canvas\"} | {\"type\":\"copy_text\",\"text\":\"...\"}",
+        );
+    }
+
+    if has_mod("flowcharts") {
+        has_action_module = true;
+        sections.push(
+            "2D FLOWCHARTS & CONNECTIONS:\n\
+             - Never flatten 2D flowcharts into 1D. Assign each `create_card` a short `refId`, 2D coordinates `gridCol` (0,1,2...) and `gridRow` (0,1,2...), and `connectParent:false`.\n\
+             - Link branches/loops with `connect_cards` using `fromPort`/`toPort` (`top|bottom|in|out`):\n\
+               * {\"type\":\"connect_cards\",\"fromCardId\":\"id|refId\",\"toCardId\":\"id|refId\",\"fromPort\":\"out|in|top|bottom\",\"toPort\":\"in|out|top|bottom\",\"fromRow\":0,\"toRow\":0} | {\"type\":\"disconnect_cards\",\"fromCardId\":\"id1\",\"toCardId\":\"id2\"}",
+        );
+    }
+
+    if has_mod("tables") {
+        has_action_module = true;
+        sections.push(
+            "TABLES:\n\
+             - Use `create_table_card` (`hasCheckboxes:true` puts '[ ]'/'[x]' in col 0). Supports Excel formulas (SUM/SOMA, AVERAGE/MEDIA, IF/SE, SUMIF/SOMASE, VLOOKUP/PROCV). Per-row links use 0-indexed `fromRow`/`toRow` in `connect_cards`.\n\
+             * {\"type\":\"create_table_card\",\"hasCheckboxes\":false|true,\"rows\":[[\"Col1\",\"Col2\"],[\"V1\",\"=SOMA(B2:B2)\"]],\"parentCardId\":\"opt_id\"}",
+        );
+    }
+
+    if has_mod("memory") {
+        has_action_module = true;
+        sections.push(
+            "MEMORY & AUDIT:\n\
+             - Use `projectMemories`, `relevantPastConversations`, and `workspaceAudit` from LIVE APP STATE when relevant.\n\
+             * {\"type\":\"save_memory\",\"scope\":\"task|global\",\"kind\":\"decision|fact|preference\",\"content\":\"...\"}",
+        );
+    }
+
+    if has_mod("settings") {
+        has_action_module = true;
+        sections.push(
+            "SETTINGS & TOOLS:\n\
+             * {\"type\":\"set_status_filter\",\"filter\":\"all|ongoing|stopped|complete\"} | {\"type\":\"open_translator\",\"floating\":true|false} | {\"type\":\"open_settings\"}\n\
+             * {\"type\":\"update_settings\",\"theme\":\"claude-dark|light-claude|dracula\",\"cardFontSize\":14,\"linkStyle\":\"orthogonal|bezier\",\"linkArrows\":true|false,\"translatorMode\":\"auto|manual\"}",
+        );
+    }
+
+    if has_mod("questions") {
+        sections.push(
+            "QUESTIONS (when clarification is needed, omit [[APP_ACTIONS]] and append):\n\
+             [[APP_QUESTIONS]]\n\
+             {\"questions\":[{\"id\":\"q1\",\"type\":\"choice|checkbox|chips|toggle|slider|rating|text|date\",\"prompt\":\"...\",\"multiSelect\":false,\"allowCustom\":true,\"options\":[{\"label\":\"...\",\"value\":\"...\",\"description\":\"...\",\"badge\":\"Recomendado\"}]}]}\n\
+             [[/APP_QUESTIONS]]",
+        );
+    }
+
+    if has_action_module {
+        sections.push(
+            "ACTIONS PROTOCOL (when executing any app action above, write a short confirmation first, then append ONE block with exact double-bracket tags):\n\
+             [[APP_ACTIONS]]\n\
+             {\"summary\":\"...\",\"actions\":[...]}\n\
+             [[/APP_ACTIONS]]",
+        );
+    }
+
+    format!(
+        "{}\n\nLIVE APP STATE (JSON):\n{}",
+        sections.join("\n\n"),
+        ctx_json
+    )
+}
+
 #[tauri::command]
 async fn ai_chat_english(
     app: tauri::AppHandle,
@@ -2417,80 +2559,6 @@ async fn ai_chat_english(
     let extra_app_attachments = app_attachments.unwrap_or_default();
 
     tauri::async_runtime::spawn_blocking(move || {
-        let is_minimal_ctx = ctx_json.contains("\"mode\":\"minimal\"");
-        let system_prompt = if is_minimal_ctx {
-            format!(
-                "You are the integrated AI Assistant of TODOCompanion. Always reply in the same language the user writes in.\n\
-                 - Deliver the complete, final answer directly in this single turn (never reply with 'Vou pesquisar/verificar').\n\
-                 - If `current_screen.jpg` is attached, inspect the screenshot of the user's screen directly and answer about what is visible.\n\
-                 - If real-time internet data or currency rates are injected in the user's message, use them directly.\n\
-                 - Context: {ctx_json}"
-            )
-        } else {
-            format!(
-            "You are the integrated AI Agent of TODOCompanion with full visibility and control over the app, live internet search (Google Search), and direct access to app attachments.\n\
-             Always reply in the same language the user writes in.\n\n\
-             INTERNET & APP ATTACHMENTS CAPABILITIES (CRITICAL SINGLE-TURN RULE):\n\
-             - NEVER reply with a placeholder like 'Vou buscar para você agora mesmo!', 'Aguarde enquanto pesquiso...', or 'Vou verificar...' and stop! You do NOT have a second turn.\n\
-             - You MUST always deliver the complete, final answer with the actual data, numbers, or facts in THIS single response.\n\
-             - Real-time internet data (live currency rates, web search results, news, and extracted URL contents) and app attachments (PDFs, images, audio, video, text/CSV files) are ALREADY injected directly into the user's message below whenever applicable — read them and answer directly.\n\n\
-             OPERATOR vs. TASK USERS (CRITICAL):\n\
-             - The person operating TODOCompanion and chatting with you is defined in LIVE APP STATE `operatorProfile` (if present).\n\
-             - `users[]` in LIVE APP STATE are NOT the operator — they are the clients/people/contexts FOR WHOM the operator is creating or executing tasks. Never assume a `users[].name` is the person talking to you.\n\
-             - ACTIVE TASK ISOLATION (CRITICAL): By default, work STRICTLY within the currently active task and its attachments. NEVER mix or pull information from other tasks unless the user explicitly asks to copy, move, or reference another task or user.\n\n\
-             APP STRUCTURE & RULES:\n\
-             1. Hierarchy: Users (assignees/clients) -> Tasks (status: ongoing|stopped|complete, priority: low|normal|high|urgent, criticality: 0|1|2, startDate, endDate, attachments) -> Canvas Cards & Links.\n\
-             2. Card Types (NEVER use HTML tags like <br>, <p>, <div>; use '\\n' and plain text):\n\
-                - Action Card (type:\"action\"): text, checklists (\"[ ]\"/\"[x]\"), images, video (\"![video](userId/file)\"), audio (\"![audio](userId/file)\"), attachment chips (\"@[name](attachment:id)\").\n\
-                - Table Card (type:\"table\", hasCheckboxes:false): use `create_table_card` with Excel formulas (SUM/SOMA, AVERAGE/MEDIA, IF/SE, SUMIF/SOMASE, VLOOKUP/PROCV, etc.).\n\
-                - Todo List Table Card (type:\"table\", hasCheckboxes:true): use `create_table_card` with \"[ ]\"/\"[x]\" in col 0.\n\
-                - Per-row connections: `fromRow`/`toRow` (0-indexed) in `connect_cards`.\n\
-             3. If `current_screen.jpg` is attached, inspect the screenshot directly and answer about what is visible on screen without proposing [[APP_ACTIONS]] unless asked.\n\n\
-             INTERACTIVE QUESTIONS ([[APP_QUESTIONS]]):\n\
-             - When you need clarification or options from the user, omit [[APP_ACTIONS]] and append ONE block:\n\
-             [[APP_QUESTIONS]]\n\
-             {{\"questions\":[{{\"id\":\"q1\",\"type\":\"choice|checkbox|chips|toggle|slider|rating|text|date\",\"prompt\":\"...\",\"multiSelect\":false,\"allowCustom\":true,\"options\":[{{\"label\":\"...\",\"value\":\"...\",\"description\":\"...\",\"badge\":\"Recomendado\"}}]}}]}}\n\
-             [[/APP_QUESTIONS]]\n\n\
-             APP ACTIONS ([[APP_ACTIONS]] — CRITICAL RULES):\n\
-             - Whenever the user asks to create, add, edit, update, delete, connect, focus/show/indicate on canvas ('indique no canva', 'mostre no canva', 'navegue no canva', 'foque no card'), organize, copy, or change settings, you MUST include ONE [[APP_ACTIONS]] block at the end of your reply using EXACTLY `[[APP_ACTIONS]]` and `[[/APP_ACTIONS]]` (with TWO brackets on both tags!):\n\
-             [[APP_ACTIONS]]\n\
-             {{\"summary\":\"Short description\",\"actions\":[...]}}\n\
-             [[/APP_ACTIONS]]\n\
-             - Always write a short, friendly confirmation line BEFORE `[[APP_ACTIONS]]` (e.g. 'Pronto! Criei o card com a informação no canvas.').\n\
-             - Non-destructive actions execute AUTOMATICALLY right away; destructive actions (delete_user, delete_task, delete_card, disconnect_cards) ask confirmation automatically.\n\
-             - IMPORTANT CONTEXT RULES:\n\
-               * When the user says 'adicione um card com essa info' / 'coloque isso num card' / 'crie um card com isso', take the information from the previous message(s) in the conversation and put the full text inside `create_card` -> `body`!\n\
-               * When the user says 'indique no canva' / 'mostre no canva' / 'navegue até esse card' / 'onde está esse card', use `focus_card` with the card's real `id` from `LIVE APP STATE` (`nodes[].id`, e.g. `\"action-...\"`). Only use `\"$LAST_CARD\"` when chaining after a `create_card` in the same actions array (or to focus the most recent card).\n\
-               * If `taskId` is omitted on `create_card`, `create_table_card`, `update_card`, or `focus_card`, it automatically targets the currently active task.\n\
-             - 2D FLOWCHARTS & BRANCHING DIAGRAMS (CRITICAL when replicating images/diagrams or multi-path flows):\n\
-               * NEVER flatten a 2D flowchart into a single horizontal chain!\n\
-               * Give each `create_card` a short `refId` (e.g. `\"n1\"`, `\"review\"`, `\"thank_you\"`, `\"interview_3\"`), its 2D coordinates `gridCol` (0, 1, 2...) and `gridRow` (0, 1, 2...), and `connectParent: false` (except optionally for the entry card).\n\
-               * Then emit explicit `connect_cards` actions using those `refId`s and `fromPort`/`toPort` (`top|bottom|in|out`) to recreate EVERY vertical column, horizontal row, decision branch (Pass/Fail), loop, and upward/downward arrow faithfully!\n\
-             - Action schemas:\n\
-               * {{\"type\":\"create_card\",\"refId\":\"optional_alias\",\"body\":\"Texto do card (use \\n para quebras de linha, [ ] para checklist)\",\"gridCol\":0,\"gridRow\":0,\"connectParent\":false,\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2,\"parentCardId\":\"optional_id_or_refId_or_$LAST_CARD\",\"fromPort\":\"out|in|top|bottom\",\"toPort\":\"in|out|top|bottom\"}}\n\
-               * {{\"type\":\"create_table_card\",\"hasCheckboxes\":false|true,\"rows\":[[\"Col1\",\"Col2\"],[\"Val1\",\"=SOMA(B2:B2)\"]],\"parentCardId\":\"optional_id_or_$LAST_CARD\"}}\n\
-               * {{\"type\":\"update_card\",\"cardId\":\"real_card_id_from_nodes\",\"body\":\"Novo texto completo\",\"appendBody\":\"Ou texto para adicionar ao final\",\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2}}\n\
-               * {{\"type\":\"focus_card\",\"cardId\":\"real_card_id_from_nodes\"}}\n\
-               * {{\"type\":\"delete_card\",\"cardId\":\"real_card_id_from_nodes\"}}\n\
-               * {{\"type\":\"duplicate_card\",\"cardId\":\"real_card_id_from_nodes\"}}\n\
-               * {{\"type\":\"connect_cards\",\"fromCardId\":\"id_or_refId\",\"toCardId\":\"id_or_refId\",\"fromPort\":\"out|in|top|bottom\",\"toPort\":\"in|out|top|bottom\",\"fromRow\":0,\"toRow\":0}}\n\
-               * {{\"type\":\"disconnect_cards\",\"fromCardId\":\"id1\",\"toCardId\":\"id2\"}}\n\
-               * {{\"type\":\"copy_card_to_task\",\"sourceCardId\":\"id\",\"targetTaskTitle\":\"...\"}}\n\
-               * {{\"type\":\"move_card_to_task\",\"sourceCardId\":\"id\",\"targetTaskTitle\":\"...\"}}\n\
-               * {{\"type\":\"organize_canvas\"}} | {{\"type\":\"center_canvas\"}} | {{\"type\":\"copy_text\",\"text\":\"...\"}}\n\
-               * {{\"type\":\"create_task\",\"title\":\"...\",\"priority\":\"low|normal|high|urgent\",\"startDate\":\"YYYY-MM-DD\",\"endDate\":\"YYYY-MM-DD\"}}\n\
-               * {{\"type\":\"update_task\",\"taskId\":\"...\",\"title\":\"...\",\"status\":\"ongoing|stopped|complete\",\"priority\":\"low|normal|high|urgent\",\"criticality\":0|1|2}}\n\
-               * {{\"type\":\"select_task\",\"taskId\":\"...\",\"taskTitle\":\"...\"}}\n\
-               * {{\"type\":\"delete_task\",\"taskId\":\"...\"}} | {{\"type\":\"duplicate_task\",\"taskId\":\"...\"}}\n\
-               * {{\"type\":\"create_user\",\"name\":\"...\"}} | {{\"type\":\"rename_user\",\"userId\":\"...\",\"newName\":\"...\"}} | {{\"type\":\"select_user\",\"userName\":\"...\"}} | {{\"type\":\"delete_user\",\"userId\":\"...\"}}\n\
-                * {{\"type\":\"set_status_filter\",\"filter\":\"all|ongoing|stopped|complete\"}} | {{\"type\":\"open_translator\",\"floating\":true|false}} | {{\"type\":\"open_settings\"}} | {{\"type\":\"update_settings\",\"theme\":\"claude-dark|light-claude|dracula\",\"cardFontSize\":14,\"linkStyle\":\"orthogonal|bezier\",\"linkArrows\":true|false,\"translatorMode\":\"auto|manual\"}}\n\
-                * {{\"type\":\"save_memory\",\"scope\":\"task|global\",\"kind\":\"decision|fact|preference\",\"content\":\"Informação durável sobre o projeto para lembrar em futuras conversas\"}}\n\
-              - GLOBAL CONTEXT & MEMORY:\n\
-                * LIVE APP STATE may include `projectMemories` (saved persistent facts/decisions), `relevantPastConversations` (excerpts from prior chats), and `workspaceAudit` (detected duplicate cards or date/status inconsistencies). Use them proactively when relevant!\n\n\
-             LIVE APP STATE (JSON):\n{ctx_json}"
-            )
-        };
-
         let mut uploaded_files: Vec<String> = Vec::new();
         let filtered_msgs: Vec<AiChatMessage> = messages
             .into_iter()
@@ -2500,8 +2568,16 @@ async fn ai_chat_english(
             .last()
             .map(|m| m.text.clone())
             .unwrap_or_default();
+        let has_any_attachments = !extra_app_attachments.is_empty()
+            || filtered_msgs.iter().any(|m| !m.attachments.is_empty());
         let enable_web_search = prompt_needs_web_search(&last_user_text);
         let enable_currency = prompt_needs_currency_rates(&last_user_text);
+        let system_prompt = compose_modular_chat_system_prompt(
+            &ctx_json,
+            enable_web_search,
+            enable_currency,
+            has_any_attachments,
+        );
         let live_currency_block = if enable_currency {
             fetch_live_currency_context()
         } else {

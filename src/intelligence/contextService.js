@@ -1,4 +1,5 @@
 import { buildAppContextSnapshot, promptReferencesCrossTask } from "../aiAppAgent.js";
+import { PromptModuleRegistry } from "./tokenOptimizer.js";
 
 function normalizeTokens(text) {
   return String(text || "")
@@ -118,6 +119,7 @@ export function auditWorkspaceConsistency(state, { scopeTaskIds = null, todayIso
 export class WorkspaceContextService {
   constructor(persistenceService = null) {
     this.persistence = persistenceService;
+    this.promptRegistry = new PromptModuleRegistry();
     this.scope = {
       mode: "auto", // "auto" | "active" | "all" | "custom"
       taskIds: new Set(),
@@ -186,15 +188,25 @@ export class WorkspaceContextService {
   }
 
   async buildEnrichedContextJson(state, extras = {}) {
+    const detectedModules = Array.isArray(extras.activeModules)
+      ? extras.activeModules
+      : this.promptRegistry.detectModules({
+        userPrompt: extras.userPrompt,
+        hasAttachments: Boolean(extras.hasAttachments),
+        hasAppAttachments: Boolean(extras.hasAppAttachments),
+        willCaptureScreen: Boolean(extras.willCaptureScreen)
+      });
     const autoRelevantIds = this.scope.mode === "auto"
       ? this.detectRelevantTaskIds(state, extras.userPrompt)
       : new Set();
     const expandAll = this.scope.mode === "all" || this.scope.mode === "custom" || autoRelevantIds.size > 0;
     const baseJson = buildAppContextSnapshot(state, {
       ...extras,
+      activeModules: detectedModules,
       compactOnlyActive: !expandAll
     });
     const payload = JSON.parse(baseJson);
+    payload.activeModules = detectedModules;
 
     const allowedTaskIds = this.scope.mode === "custom"
       ? this.scope.taskIds
@@ -241,27 +253,42 @@ export class WorkspaceContextService {
       return JSON.stringify(payload);
     }
 
-    const asksAuditOrHistory =
+    const promptStr = String(extras.userPrompt || "");
+    const asksHistoryOrMemory =
       this.scope.mode === "custom" ||
       this.scope.mode === "all" ||
-      /\b(duplicad|inconsist|atrasad|prazo|auditoria|lembr[ea]|mem[oó]ria|conversas? anterior|hist[oó]rico)\b/i.test(
-        String(extras.userPrompt || "")
-      );
+      /\b(lembr[ea]|mem[oó]ria|conversas? anterior|hist[oó]rico|decidimos|combinamos)\b/i.test(promptStr);
+    const asksWorkspaceAudit =
+      this.scope.mode === "custom" ||
+      this.scope.mode === "all" ||
+      /\b(duplicad|inconsist|atrasad|auditoria)\b/i.test(promptStr);
 
-    // 1. Memoria persistente do projeto (SQLite)
+    // 1. Memoria persistente do projeto (SQLite) — filtrada por relevancia
     if (this.persistence) {
       const memories = await this.persistence.listProjectMemories(activeTaskId);
       if (memories.length > 0) {
-        payload.projectMemories = memories.slice(0, 10).map(m => ({
-          id: m.id,
-          scope: m.scope_key,
-          kind: m.kind,
-          content: m.content
-        }));
+        const promptToks = new Set(normalizeTokens(extras.userPrompt));
+        const relevantMems = (asksHistoryOrMemory || asksWorkspaceAudit)
+          ? memories.slice(0, 8)
+          : memories
+            .filter(m => {
+              if (m.scope_key === activeTaskId) return true;
+              const mToks = normalizeTokens(m.content);
+              return mToks.some(t => promptToks.has(t));
+            })
+            .slice(0, 4);
+        if (relevantMems.length > 0) {
+          payload.projectMemories = relevantMems.map(m => ({
+            id: m.id,
+            scope: m.scope_key,
+            kind: m.kind,
+            content: m.content
+          }));
+        }
       }
 
       // 2. Recuperacao de conversas anteriores relevantes (SQLite)
-      if (asksAuditOrHistory && extras.userPrompt && String(extras.userPrompt).trim().length >= 4) {
+      if ((asksHistoryOrMemory || asksWorkspaceAudit) && promptStr.trim().length >= 4) {
         const pastHits = await this.persistence.searchPastChats(
           extras.userPrompt,
           extras.activeSessionId || null,
@@ -273,8 +300,8 @@ export class WorkspaceContextService {
       }
     }
 
-    // 3. Auditoria de duplicatas e inconsistencias (quando solicitada ou em escopo customizado)
-    if (asksAuditOrHistory) {
+    // 3. Auditoria de duplicatas e inconsistencias (somente quando solicitada auditoria ou escopo customizado)
+    if (asksWorkspaceAudit) {
       const scopeTaskIds = this.scope.mode === "custom" && this.scope.taskIds.size > 0
         ? this.scope.taskIds
         : this.scope.mode === "active" && activeTaskId
@@ -284,6 +311,14 @@ export class WorkspaceContextService {
       if (audit.duplicates.length > 0 || audit.inconsistencies.length > 0) {
         payload.workspaceAudit = audit;
       }
+    }
+
+    if (
+      (payload.projectMemories || payload.relevantPastConversations || payload.workspaceAudit) &&
+      Array.isArray(payload.activeModules) &&
+      !payload.activeModules.includes("memory")
+    ) {
+      payload.activeModules.push("memory");
     }
 
     return JSON.stringify(payload);

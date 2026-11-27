@@ -489,12 +489,29 @@ export function buildAppContextSnapshot(state, extras = {}) {
           };
         }
 
-        const bodyLimit = extras.compactOnlyActive ? 160 : 360;
+        const activeMods = Array.isArray(extras.activeModules)
+          ? new Set(extras.activeModules)
+          : null;
+        const promptAsksAudit = /\b(duplicad|inconsist|auditoria)\b/i.test(promptLower);
+        const needsCanvasNodes =
+          !activeMods ||
+          activeMods.has("canvas") ||
+          activeMods.has("flowcharts") ||
+          activeMods.has("tables") ||
+          activeMods.has("attachments") ||
+          promptAsksAudit;
+        const needsFullTables = !activeMods || activeMods.has("tables");
+        const needsLinks =
+          !activeMods ||
+          activeMods.has("flowcharts") ||
+          activeMods.has("tables");
+
+        const bodyLimit = extras.compactOnlyActive ? 110 : 360;
         const allNodes = t.nodes || [];
-        const slicedNodes = allNodes.length > 30
-          ? [allNodes[0], ...allNodes.slice(-29)]
-          : allNodes;
-        return {
+        const slicedNodes = !needsCanvasNodes
+          ? allNodes.filter((n, idx) => idx === 0 || (extras.selectedNodeId && n.id === extras.selectedNodeId))
+          : (allNodes.length > 30 ? [allNodes[0], ...allNodes.slice(-29)] : allNodes);
+        const taskSnap = {
           id: t.id,
           number: t.number || null,
           title: t.title,
@@ -518,30 +535,56 @@ export function buildAppContextSnapshot(state, extras = {}) {
             };
             if (tableMatch) {
               const decoded = decodeTableData(tableMatch[1]);
+              const maxTableRows = needsFullTables || isSelected ? 15 : 4;
               nodeSnap.table = {
                 hasCheckboxes: Boolean(decoded.hasCheckboxes),
-                rows: Array.isArray(decoded.rows) ? decoded.rows.slice(0, 15) : []
+                rows: Array.isArray(decoded.rows) ? decoded.rows.slice(0, maxTableRows) : []
               };
             }
             return nodeSnap;
-          }),
-          links: (t.links || []).slice(0, 40).map(l => {
+          })
+        };
+        if (Array.isArray(t.attachments) && t.attachments.length > 0) {
+          taskSnap.attachments = t.attachments.slice(0, 12).map(a => ({
+            id: a.id,
+            name: a.name,
+            file: a.file,
+            type: a.type || a.mime || undefined
+          }));
+        }
+        if (needsLinks && Array.isArray(t.links) && t.links.length > 0) {
+          taskSnap.links = t.links.slice(0, 40).map(l => {
             const linkSnap = { from: l.from, to: l.to };
             if (l.fromRow != null) linkSnap.fromRow = l.fromRow;
             if (l.toRow != null) linkSnap.toRow = l.toRow;
             return linkSnap;
-          })
-        };
+          });
+        } else if (!activeMods) {
+          taskSnap.links = [];
+        }
+        return taskSnap;
       })
     };
   });
 
+  const activeModsForRoot = Array.isArray(extras.activeModules)
+    ? new Set(extras.activeModules)
+    : null;
+  const includeSettings = !activeModsForRoot || activeModsForRoot.has("settings");
+
   const payload = {
     activeUserId: state.activeUserId || null,
     selectedNodeId: extras.selectedNodeId || null,
-    settings: extras.settings || {},
     users
   };
+  if (includeSettings && extras.settings && Object.keys(extras.settings).length > 0) {
+    payload.settings = extras.settings;
+  } else if (!activeModsForRoot) {
+    payload.settings = extras.settings || {};
+  }
+  if (Array.isArray(extras.activeModules) && extras.activeModules.length > 0) {
+    payload.activeModules = extras.activeModules;
+  }
   if (operatorProfile) {
     payload.operatorProfile = operatorProfile;
   }
