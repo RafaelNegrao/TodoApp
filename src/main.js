@@ -10455,6 +10455,7 @@ function initAiTranslatorPanel() {
     { value: "gemini-3.8-flash", label: "Gemini 3.8 Flash", desc: "Alta velocidade e raciocínio" },
     { value: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", desc: "Próxima geração" },
     { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash", desc: "Rápido para tarefas gerais" },
+    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash", desc: "Raciocínio avançado e rápido" },
     { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash", desc: "Estável e versátil" },
     { value: "gemini-3.5-flash-lite", label: "Gemini 3.5 Lite", desc: "Leve e econômico" },
     { value: "gemini-3.1-flash-lite", label: "Gemini 3.1 Lite", desc: "Respostas ultrarrápidas" },

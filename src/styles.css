@@ -5499,6 +5499,11 @@ body.translator-floating-mode .panel {
   grid-template-rows: minmax(0, 1fr);
 }
 
+body.translator-floating-mode .workspace,
+body.chat-floating-mode .workspace {
+  padding-left: 0 !important;
+}
+
 body.translator-floating-mode .topbar,
 body.translator-floating-mode .users-rail,
 body.translator-floating-mode .tasks-sidebar,
