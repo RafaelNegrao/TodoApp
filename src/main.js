@@ -89,6 +89,80 @@ const CRITICALITY_META = [
   { label: "Medium" },
   { label: "High" }
 ];
+const CARD_COLOR_PRESETS = [
+  { id: "default", label: "Padrão", hex: "transparent" },
+  { id: "blue", label: "Azul", hex: "#38bdf8" },
+  { id: "emerald", label: "Verde", hex: "#34d399" },
+  { id: "amber", label: "Amarelo", hex: "#fbbf24" },
+  { id: "orange", label: "Laranja", hex: "#fb923c" },
+  { id: "rose", label: "Vermelho", hex: "#fb7185" },
+  { id: "violet", label: "Roxo", hex: "#a78bfa" },
+  { id: "slate", label: "Cinza", hex: "#94a3b8" }
+];
+
+let activeCardColorPopover = null;
+function closeCardColorPopover() {
+  if (activeCardColorPopover) {
+    activeCardColorPopover.remove();
+    activeCardColorPopover = null;
+  }
+}
+
+function openCardColorPopover(anchorEl, node, cardEl) {
+  closeCardColorPopover();
+  const pop = document.createElement("div");
+  pop.className = "card-color-popover";
+  const currentColor = node.color || "default";
+
+  CARD_COLOR_PRESETS.forEach(preset => {
+    const sw = document.createElement("button");
+    sw.type = "button";
+    sw.className = `card-color-swatch${preset.id === "default" ? " is-default" : ""}${currentColor === preset.id ? " selected" : ""}`;
+    sw.title = preset.label;
+    sw.setAttribute("aria-label", preset.label);
+    if (preset.id !== "default") {
+      sw.style.background = preset.hex;
+    }
+    sw.addEventListener("pointerdown", ev => ev.stopPropagation());
+    sw.addEventListener("click", ev => {
+      ev.stopPropagation();
+      if (preset.id === "default") {
+        delete node.color;
+        delete cardEl.dataset.cardColor;
+      } else {
+        node.color = preset.id;
+        cardEl.dataset.cardColor = preset.id;
+      }
+      const dot = anchorEl.querySelector(".card-color-dot");
+      if (dot) {
+        dot.style.setProperty("--card-swatch", preset.hex);
+      }
+      saveState();
+      closeCardColorPopover();
+    });
+    pop.appendChild(sw);
+  });
+
+  document.body.appendChild(pop);
+  const rect = anchorEl.getBoundingClientRect();
+  const popW = pop.offsetWidth || 210;
+  const popH = pop.offsetHeight || 32;
+  const left = Math.max(10, Math.min(window.innerWidth - popW - 10, rect.left + rect.width / 2 - popW / 2));
+  const top = rect.top - popH - 8 > 10 ? rect.top - popH - 8 : rect.bottom + 8;
+  pop.style.left = `${Math.round(left)}px`;
+  pop.style.top = `${Math.round(top)}px`;
+  activeCardColorPopover = pop;
+}
+
+document.addEventListener("pointerdown", ev => {
+  if (
+    activeCardColorPopover &&
+    !activeCardColorPopover.contains(ev.target) &&
+    !ev.target.closest?.(".card-color-btn")
+  ) {
+    closeCardColorPopover();
+  }
+});
 
 const icons = {
   plus: `<svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>`,
@@ -743,13 +817,8 @@ function normalizeMainTask(task, index = 0) {
   task.links ||= [];
   task.links = task.links.filter(link =>
     task.nodes.some(node => node.id === link.from) &&
-    task.nodes.some(node => node.id === link.to) &&
-    !isRootNode(task, link.to)
+    task.nodes.some(node => node.id === link.to)
   );
-  task.links.forEach(link => {
-    if (link.fromPort === "top" || link.fromPort === "bottom") link.fromPort = "out";
-    if (link.toPort === "top" || link.toPort === "bottom") link.toPort = "in";
-  });
   return task;
 }
 
@@ -798,6 +867,7 @@ function normalizeNode(node) {
   if (node.type) normalized.type = node.type;
   if (node.imageUrl !== undefined) normalized.imageUrl = node.imageUrl;
   if (node.criticality !== undefined) normalized.criticality = node.criticality;
+  if (node.color && node.color !== "default") normalized.color = String(node.color);
   return normalized;
 }
 
@@ -1125,8 +1195,9 @@ function renderUsersRail() {
     if (transcribeBadge) {
       const isAnalyzing = cardAnalyzingState?.userId === item.id;
       transcribeBadge.className = `user-transcribing-badge${isAnalyzing ? " is-analyzing" : ""}`;
+      if (isAnalyzing) tab.classList.add("is-analyzing");
       transcribeBadge.innerHTML = isAnalyzing
-        ? `<span class="mini-transcribe-spinner" aria-hidden="true"></span>`
+        ? `<canvas class="sidebar-ai-sphere" aria-hidden="true"></canvas>`
         : `<span class="mini-wave" aria-hidden="true"><span></span><span></span><span></span></span>`;
       transcribeBadge.title = isAnalyzing ? "Analisando e transcrevendo áudio..." : "Gravando áudio para transcrever...";
       transcribeBadge.setAttribute("aria-label", transcribeBadge.title);
@@ -1194,6 +1265,27 @@ function renderUsersRail() {
     });
 
     usersRailList.appendChild(tab);
+  });
+  syncSidebarAiSpheres();
+}
+
+let sidebarAiSphereRenderers = [];
+function syncSidebarAiSpheres() {
+  sidebarAiSphereRenderers.forEach(r => {
+    try { r.stop(); } catch (_) {}
+  });
+  sidebarAiSphereRenderers = [];
+  document.querySelectorAll(".sidebar-ai-sphere").forEach(canvas => {
+    const isActiveItem = Boolean(canvas.closest(".active"));
+    const isCollapsed = Boolean(canvas.closest(".collapsed"));
+    const renderer = new GrokDodecahedronRenderer(canvas, {
+      size: isCollapsed ? 22 : 18,
+      speed: 1.75,
+      intensity: 1,
+      colorRgb: isActiveItem ? "255, 255, 255" : null
+    });
+    renderer.start();
+    sidebarAiSphereRenderers.push(renderer);
   });
 }
 
@@ -1703,6 +1795,11 @@ function renderNodes() {
     if (isMediaCard) {
       card.classList.add("media-card", cardMediaInfo.kind === "audio" ? "audio-card" : "video-card");
     }
+    if (node.color && node.color !== "default") {
+      card.dataset.cardColor = node.color;
+    }
+    const swatchHex = CARD_COLOR_PRESETS.find(c => c.id === node.color)?.hex || "transparent";
+    const colorPickerBtnHtml = `<span class="card-color-wrap"><button class="card-color-btn" type="button" aria-label="Cor do card" title="Mudar cor do card"><span class="card-color-dot" style="--card-swatch:${swatchHex}"></span></button></span>`;
     const createdAtHtml = (!rootCard && node.createdAt && node.type !== "image" && !isTableCard)
       ? `<span class="card-created-at">${formatCreatedAt(node.createdAt)}</span>`
       : "";
@@ -1711,6 +1808,7 @@ function renderNodes() {
       ${isTableCard ? "" : `<button class="port port-out${pendingLink?.from === node.id || (linkDragState?.nodeId === node.id && linkDragState?.port === "out") ? " pending" : ""}" data-port="out" type="button" aria-label="Right port"></button>`}
       <button class="port port-top${linkDragState?.nodeId === node.id && linkDragState?.port === "top" ? " pending" : ""}" data-port="top" type="button" aria-label="Top port"></button>
       <button class="port port-bottom${linkDragState?.nodeId === node.id && linkDragState?.port === "bottom" ? " pending" : ""}" data-port="bottom" type="button" aria-label="Bottom port"></button>
+      ${rootCard ? colorPickerBtnHtml : ""}
       <div class="card-bento-inner">
         ${rootCard ? "" : node.type === "image" ? `
           <div class="card-top image-card-top">
@@ -1811,6 +1909,8 @@ function renderNodes() {
             <div class="card-format-bar-sep"></div>
             <button class="card-format-btn" type="button" data-command="insertAttachmentInline" title="Anexar arquivo (imagem, vídeo, áudio, documento)">${icons.paperclip}</button>
             <button class="card-format-btn" type="button" data-command="removeFormat" title="Clear Formatting">${icons.formatClear}</button>
+            <div class="card-format-bar-sep"></div>
+            ${colorPickerBtnHtml}
           </div>
         `}
       </div>
@@ -1819,10 +1919,17 @@ function renderNodes() {
 
     card.addEventListener("pointerdown", event => {
       if (event.target.closest(".card-action")) return;
-      selectedNodeId = node.id;
-      selectedLinkId = null;
-      renderLinks();
-      refreshSelectionClasses();
+      const bodyEl = event.target.closest(".card-body");
+      if (bodyEl && event.offsetX >= bodyEl.clientWidth - 2) {
+        event.stopPropagation();
+        return;
+      }
+      if (selectedNodeId !== node.id || selectedLinkId !== null) {
+        selectedNodeId = node.id;
+        selectedLinkId = null;
+        renderLinks();
+        refreshSelectionClasses();
+      }
     }, true);
 
     card.addEventListener("change", event => {
@@ -2223,6 +2330,11 @@ function renderNodes() {
     card.querySelector(".port-in")?.addEventListener("pointerdown", event => startLinkDrag(event, node.id, "in"));
     card.querySelector(".port-top")?.addEventListener("pointerdown", event => startLinkDrag(event, node.id, "top"));
     card.querySelector(".port-bottom")?.addEventListener("pointerdown", event => startLinkDrag(event, node.id, "bottom"));
+    card.querySelector(".card-color-btn")?.addEventListener("pointerdown", event => event.stopPropagation());
+    card.querySelector(".card-color-btn")?.addEventListener("click", event => {
+      event.stopPropagation();
+      openCardColorPopover(event.currentTarget, node, card);
+    });
     card.querySelector(".resize-handle")?.addEventListener("pointerdown", event => startResize(event, node.id));
 
     [".card-format-bar", ".image-card-bottom"].forEach(sel => {
@@ -2954,7 +3066,7 @@ function renderUserTasks() {
       ? formatReminderSummary(activeReminder)
       : "Definir lembrete ou alarme";
     const card = document.createElement("article");
-    card.className = `user-task-card status-${status} priority-${priority} crit-${criticality}${task.id === activeId ? " active" : ""}${task.id === dockDragId ? " dragging" : ""}${isRecordingThisTask ? " is-recording" : ""}${isTranscribingThisTask ? " is-transcribing" : ""}${hasActiveReminder ? " has-reminder" : ""}`;
+    card.className = `user-task-card status-${status} priority-${priority} crit-${criticality}${task.id === activeId ? " active" : ""}${task.id === dockDragId ? " dragging" : ""}${isRecordingThisTask ? " is-recording" : ""}${isTranscribingThisTask ? " is-transcribing" : ""}${isAnalyzingThisTask ? " is-analyzing" : ""}${hasActiveReminder ? " has-reminder" : ""}`;
     card.dataset.id = task.id;
     // Card enxuto: so o titulo. Numero, datas, criticidade e anexos continuam
     // acessiveis pelo popup de info (botao "i") e pelo overlay do canvas.
@@ -2967,7 +3079,7 @@ function renderUserTasks() {
           : task.title;
     card.innerHTML = `
       ${isRecordingThisTask ? `<span class="task-recording-dot" title="Gravando agora" aria-label="Gravando agora"></span>` : ""}
-      ${!isRecordingThisTask && isTranscribingThisTask ? `<span class="task-transcribing-badge${isAnalyzingThisTask ? " is-analyzing" : ""}" title="${isAnalyzingThisTask ? "Analisando e transcrevendo áudio..." : "Gravando áudio para transcrever..."}" aria-label="Transcrevendo áudio">${isAnalyzingThisTask ? `<span class="mini-transcribe-spinner" aria-hidden="true"></span>` : `<span class="mini-wave" aria-hidden="true"><span></span><span></span><span></span></span>`}</span>` : ""}
+      ${!isRecordingThisTask && isTranscribingThisTask ? `<span class="task-transcribing-badge${isAnalyzingThisTask ? " is-analyzing" : ""}" title="${isAnalyzingThisTask ? "Analisando e transcrevendo áudio..." : "Gravando áudio para transcrever..."}" aria-label="Transcrevendo áudio">${isAnalyzingThisTask ? `<canvas class="sidebar-ai-sphere" aria-hidden="true"></canvas>` : `<span class="mini-wave" aria-hidden="true"><span></span><span></span><span></span></span>`}</span>` : ""}
       <span class="user-task-id">#${task.number || ""}</span>
       <span class="user-task-title">${escapeHtml(task.title)}</span>
       <div class="user-task-actions">
@@ -3019,12 +3131,89 @@ function renderUserTasks() {
 
     userTaskList.appendChild(card);
   });
+  syncSidebarAiSpheres();
 }
 
 const USERS_RAIL_KEY = "todocompanion.settings.usersRailCollapsed";
+const TASKS_SIDEBAR_KEY = "todocompanion.settings.tasksSidebarCollapsed";
+const TASKS_SIDEBAR_WIDTH_KEY = "todocompanion.settings.tasksSidebarWidth";
+const TASKS_SIDEBAR_DEFAULT_WIDTH = 264;
+const TASKS_SIDEBAR_MIN_WIDTH = 180;
+const TASKS_SIDEBAR_MAX_WIDTH = 600;
+
+let usersRailPinnedCollapsed = false;
+let tasksSidebarPinnedCollapsed = false;
+
+function syncPinnedCollapsedWorkspaceClasses() {
+  const workspaceEl = usersRail?.closest(".workspace") || tasksSidebar?.closest(".workspace");
+  if (!workspaceEl) return;
+  workspaceEl.classList.toggle("users-pinned-collapsed", usersRailPinnedCollapsed);
+  workspaceEl.classList.toggle("tasks-pinned-collapsed", tasksSidebarPinnedCollapsed);
+  const leftOffset = usersRailPinnedCollapsed ? 46 : 210;
+  tasksSidebar?.style.setProperty("--tasks-pinned-left", `${leftOffset}px`);
+}
+
+function bindSidebarHoverExpand({
+  element,
+  isPinnedCollapsed,
+  applyCollapsed,
+  shouldKeepOpen = () => false
+}) {
+  if (!element) return { suppressUntilLeave: () => {} };
+  let openTimer = 0;
+  let closeTimer = 0;
+  let suppressed = false;
+
+  const clearTimers = () => {
+    if (openTimer) { clearTimeout(openTimer); openTimer = 0; }
+    if (closeTimer) { clearTimeout(closeTimer); closeTimer = 0; }
+  };
+
+  element.addEventListener("mouseenter", () => {
+    clearTimers();
+    if (!isPinnedCollapsed() || suppressed) return;
+    openTimer = setTimeout(() => {
+      openTimer = 0;
+      if (!isPinnedCollapsed() || suppressed) return;
+      element.classList.add("hover-expanded");
+      applyCollapsed(false);
+    }, 90);
+  });
+
+  element.addEventListener("mouseleave", () => {
+    clearTimers();
+    suppressed = false;
+    if (!isPinnedCollapsed() || !element.classList.contains("hover-expanded")) return;
+    closeTimer = setTimeout(() => {
+      closeTimer = 0;
+      if (!isPinnedCollapsed() || element.matches(":hover") || shouldKeepOpen()) return;
+      element.classList.remove("hover-expanded");
+      applyCollapsed(true);
+    }, 180);
+  });
+
+  return {
+    suppressUntilLeave: () => {
+      clearTimers();
+      suppressed = true;
+      element.classList.remove("hover-expanded");
+    }
+  };
+}
+
+let usersRailHoverCtrl = null;
+let tasksSidebarHoverCtrl = null;
 
 function initUsersRail() {
-  applyUsersRailCollapsed(localStorage.getItem(USERS_RAIL_KEY) === "1");
+  usersRailPinnedCollapsed = localStorage.getItem(USERS_RAIL_KEY) === "1";
+  syncPinnedCollapsedWorkspaceClasses();
+  applyUsersRailCollapsed(usersRailPinnedCollapsed);
+  usersRailHoverCtrl = bindSidebarHoverExpand({
+    element: usersRail,
+    isPinnedCollapsed: () => usersRailPinnedCollapsed,
+    applyCollapsed: applyUsersRailCollapsed,
+    shouldKeepOpen: () => Boolean(usersRail.querySelector("input:focus"))
+  });
 }
 
 function applyUsersRailCollapsed(collapsed) {
@@ -3035,20 +3224,22 @@ function applyUsersRailCollapsed(collapsed) {
 }
 
 function toggleUsersRail() {
-  const collapsed = !usersRail.classList.contains("collapsed");
-  localStorage.setItem(USERS_RAIL_KEY, collapsed ? "1" : "0");
-  applyUsersRailCollapsed(collapsed);
+  const wasHoverExpanded = usersRail.classList.contains("hover-expanded");
+  const nextCollapsed = wasHoverExpanded ? false : !usersRailPinnedCollapsed;
+  usersRailPinnedCollapsed = nextCollapsed;
+  localStorage.setItem(USERS_RAIL_KEY, nextCollapsed ? "1" : "0");
+  if (nextCollapsed) {
+    usersRailHoverCtrl?.suppressUntilLeave();
+  } else {
+    usersRail.classList.remove("hover-expanded");
+  }
+  syncPinnedCollapsedWorkspaceClasses();
+  applyUsersRailCollapsed(nextCollapsed);
   requestAnimationFrame(() => {
     applyViewport();
     renderLinks();
   });
 }
-
-const TASKS_SIDEBAR_KEY = "todocompanion.settings.tasksSidebarCollapsed";
-const TASKS_SIDEBAR_WIDTH_KEY = "todocompanion.settings.tasksSidebarWidth";
-const TASKS_SIDEBAR_DEFAULT_WIDTH = 264;
-const TASKS_SIDEBAR_MIN_WIDTH = 180;
-const TASKS_SIDEBAR_MAX_WIDTH = 600;
 
 function getStoredTasksSidebarWidth() {
   const stored = parseInt(localStorage.getItem(TASKS_SIDEBAR_WIDTH_KEY), 10);
@@ -3056,9 +3247,25 @@ function getStoredTasksSidebarWidth() {
 }
 
 function initTasksSidebar() {
-  const collapsed = localStorage.getItem(TASKS_SIDEBAR_KEY) === "1";
-  applyTasksSidebarCollapsed(collapsed);
+  tasksSidebarPinnedCollapsed = localStorage.getItem(TASKS_SIDEBAR_KEY) === "1";
+  syncPinnedCollapsedWorkspaceClasses();
+  applyTasksSidebarCollapsed(tasksSidebarPinnedCollapsed);
   initTasksSidebarResizer();
+  tasksSidebarHoverCtrl = bindSidebarHoverExpand({
+    element: tasksSidebar,
+    isPinnedCollapsed: () => tasksSidebarPinnedCollapsed,
+    applyCollapsed: applyTasksSidebarCollapsed,
+    shouldKeepOpen: () => {
+      const editPopup = document.getElementById("taskEditPopup");
+      const remPopup = document.getElementById("taskReminderPopover");
+      const sortMenu = document.getElementById("tasksSortMenu");
+      return Boolean(
+        (editPopup && !editPopup.hidden) ||
+        (remPopup && !remPopup.hidden) ||
+        (sortMenu && !sortMenu.hidden)
+      );
+    }
+  });
 }
 
 function applyTasksSidebarCollapsed(collapsed) {
@@ -3075,9 +3282,17 @@ function applyTasksSidebarCollapsed(collapsed) {
 }
 
 function toggleTasksSidebar() {
-  const collapsed = !tasksSidebar.classList.contains("collapsed");
-  localStorage.setItem(TASKS_SIDEBAR_KEY, collapsed ? "1" : "0");
-  applyTasksSidebarCollapsed(collapsed);
+  const wasHoverExpanded = tasksSidebar.classList.contains("hover-expanded");
+  const nextCollapsed = wasHoverExpanded ? false : !tasksSidebarPinnedCollapsed;
+  tasksSidebarPinnedCollapsed = nextCollapsed;
+  localStorage.setItem(TASKS_SIDEBAR_KEY, nextCollapsed ? "1" : "0");
+  if (nextCollapsed) {
+    tasksSidebarHoverCtrl?.suppressUntilLeave();
+  } else {
+    tasksSidebar.classList.remove("hover-expanded");
+  }
+  syncPinnedCollapsedWorkspaceClasses();
+  applyTasksSidebarCollapsed(nextCollapsed);
   requestAnimationFrame(() => {
     applyViewport();
     renderLinks();
@@ -4100,7 +4315,9 @@ function stepZoomAnim() {
 }
 
 function handleZoom(event) {
-  const cardBody = event.target?.closest?.(".card-body");
+  const cardBody =
+    event.target?.closest?.(".card-body") ||
+    event.target?.closest?.(".card-body-wrap")?.querySelector?.(".card-body");
   if (cardBody && !event.ctrlKey && cardBody.scrollHeight > cardBody.clientHeight + 2) {
     return;
   }
