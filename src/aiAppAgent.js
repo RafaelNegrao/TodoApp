@@ -24,8 +24,7 @@ function tryParseBalancedJson(rawJson) {
     const firstBrace = cleaned.indexOf("{");
     if (firstBrace === -1) return null;
     let candidate = cleaned.slice(firstBrace).replace(/,\s*$/, "");
-    let braces = 0;
-    let brackets = 0;
+    const stack = [];
     let inString = false;
     let escaped = false;
     for (let i = 0; i < candidate.length; i++) {
@@ -43,20 +42,16 @@ function tryParseBalancedJson(rawJson) {
         continue;
       }
       if (inString) continue;
-      if (ch === "{") braces++;
-      else if (ch === "}") braces = Math.max(0, braces - 1);
-      else if (ch === "[") brackets++;
-      else if (ch === "]") brackets = Math.max(0, brackets - 1);
+      if (ch === "{") stack.push("}");
+      else if (ch === "[") stack.push("]");
+      else if ((ch === "}" || ch === "]") && stack[stack.length - 1] === ch) {
+        stack.pop();
+      }
     }
     if (inString) candidate += '"';
     candidate = candidate.replace(/,\s*$/, "");
-    while (brackets > 0) {
-      candidate += "]";
-      brackets--;
-    }
-    while (braces > 0) {
-      candidate += "}";
-      braces--;
+    while (stack.length > 0) {
+      candidate += stack.pop();
     }
     try {
       return JSON.parse(candidate);
@@ -310,6 +305,8 @@ export function describeAiAction(action) {
       return "Abrir configurações (Settings)";
     case "update_settings":
       return "Alterar configurações do aplicativo";
+    case "save_memory":
+      return `Salvar memória do projeto: "${String(action.content || "").slice(0, 48)}"`;
     default:
       return `Executar ${action.type}`;
   }
@@ -318,7 +315,7 @@ export function describeAiAction(action) {
 export function shouldAutoCaptureScreen(promptText) {
   const text = String(promptText || "").trim();
   if (!text) return false;
-  return /\b(tela|screen|print|screenshot|monitor|janela|window|aparecendo|mostrando|olh[ea]|vej[aa]|aqui na tela|na minha tela|on my screen|what is this|o que [eé] isso|este erro|esse erro|this error|este campo|esse campo|este bot[aã]o|esse bot[aã]o)\b/i.test(
+  return /\b(tela|screen|print|screenshot|monitor|janela|window|aparecendo|mostrando|olh[ea]|vej[aa]|ver a tela|vendo|aqui na tela|na minha tela|on my screen|what is this|o que [eé] isso|este erro|esse erro|this error|este campo|esse campo|este bot[aã]o|esse bot[aã]o)\b/i.test(
     text
   );
 }
@@ -342,16 +339,18 @@ export function collectRelevantAppAttachments(state, userPrompt = "", selectedNo
     });
   };
 
-  // 1. Anexos mencionados explicitamente pelo nome em qualquer user/task
-  if (promptLower.length >= 2) {
+  const mentionsAttachmentsOrCard = /\b(anexo|anexos|arquivo|arquivos|pdf|audio|áudio|video|vídeo|gravação|gravacao|gravações|gravacoes|reunião|reuniao|imagem|imagens|foto|fotos|planilha|documento|documentos|relatório|relatorio|csv|txt|attachment|attachments|file|files|recording|meeting|transcrev|analis[ae]|resum[ao]|esse card|este card|card selecionado)\b/i.test(promptLower);
+
+  // 1. Anexos mencionados explicitamente pelo nome completo (com extensão) ou quando o prompt pede arquivo/anexo
+  if (promptLower.length >= 4) {
     for (const u of state.users) {
       for (const t of u.tasks || []) {
         for (const a of t.attachments || []) {
           const nameLower = String(a?.name || "").toLowerCase().trim();
           const stemLower = nameLower.replace(/\.[^.]+$/, "");
           if (
-            (nameLower.length >= 3 && promptLower.includes(nameLower)) ||
-            (stemLower.length >= 4 && promptLower.includes(stemLower))
+            (nameLower.length >= 5 && promptLower.includes(nameLower)) ||
+            (mentionsAttachmentsOrCard && stemLower.length >= 4 && promptLower.includes(stemLower))
           ) {
             pushRef(u.id, a);
           }
@@ -360,10 +359,10 @@ export function collectRelevantAppAttachments(state, userPrompt = "", selectedNo
     }
   }
 
-  // 2. Anexos referenciados no card selecionado atualmente
+  // 2. Anexos referenciados no card selecionado atualmente (SOMENTE se o usuário pediu para analisar/ler o card ou mídia)
   const activeUser = state.users.find(u => u.id === state.activeUserId);
   const activeTask = activeUser?.tasks?.find(t => t.id === activeUser.activeTaskId);
-  if (activeUser && activeTask && selectedNodeId) {
+  if (activeUser && activeTask && selectedNodeId && mentionsAttachmentsOrCard) {
     const node = (activeTask.nodes || []).find(n => n.id === selectedNodeId);
     const body = String(node?.body ?? node?.title ?? "");
     for (const m of body.matchAll(/!\[(video|audio)\]\(([^)\n]+)\)/g)) {
@@ -383,16 +382,23 @@ export function collectRelevantAppAttachments(state, userPrompt = "", selectedNo
     }
   }
 
-  // 3. Se o usuario perguntar de forma geral sobre anexos/arquivos/midia, inclui os mais recentes da task ativa
-  const mentionsAttachmentsGenerically = /\b(anexo|anexos|arquivo|arquivos|pdf|audio|áudio|video|vídeo|gravação|gravacao|gravações|gravacoes|reunião|reuniao|imagem|imagens|foto|fotos|planilha|documento|documentos|relatório|relatorio|csv|txt|attachment|attachments|file|files|recording|meeting)\b/i.test(promptLower);
-  if (activeUser && activeTask && mentionsAttachmentsGenerically && result.length < maxItems) {
+  // 3. Se o usuario perguntar de forma geral sobre anexos/arquivos/midia, inclui o mais recente da task ativa
+  if (activeUser && activeTask && mentionsAttachmentsOrCard && result.length === 0) {
     const sorted = [...(activeTask.attachments || [])].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
-    for (const a of sorted) {
-      pushRef(activeUser.id, a);
+    if (sorted[0]) {
+      pushRef(activeUser.id, sorted[0]);
     }
   }
 
   return result;
+}
+
+export function promptNeedsWorkspaceContext(userPrompt = "") {
+  const text = String(userPrompt || "").trim();
+  if (!text) return false;
+  return /\b(card|cards|bloco|blocos|task|tasks|tarefa|tarefas|projeto|projetos|user|users|usu[aá]rio|usu[aá]rios|cliente|clientes|canva|canvas|quadro|mapa|fluxo|fluxograma|diagrama|flowchart|repliqu[ea]|replicar|mont[ea]|desenh[ea]|tabela|tabelas|checklist|todo|cri[ea]|adicion[ea]|insir[ao]|coloc[ao]|edit[ea]|atualiz[ea]|alter[ea]|mud[ea]|exclu[ia]|delet[ea]|remov[ea]|apag[ue]|conect[ea]|ligu[ea]|desconect[ea]|organiz[ea]|centraliz[ea]|foqu[ea]|mostr[ea]|indiqu[ea]|navegu[ea]|duplic|inconsist|atrasad|prazo|status|prioridade|criticidade|anexo|anexos|arquivo|arquivos|mem[oó]ria|lembr[ea]|configura|settings|tema|fonte|filtro|tradutor|resum[ao] d[oa]|o que tem|quais s[aã]o)\b/i.test(
+    text
+  );
 }
 
 export function buildAppContextSnapshot(state, extras = {}) {
@@ -405,6 +411,34 @@ export function buildAppContextSnapshot(state, extras = {}) {
   }
 
   const promptLower = String(extras.userPrompt || "").trim().toLowerCase();
+  const needsWorkspace = extras.forceFullContext || promptNeedsWorkspaceContext(promptLower);
+
+  // Modo ultra-enxuto (~60 tokens) para mensagens simples/conversacionais ou consultas externas (ex: "teste", "oi", "valor do dólar")
+  if (!needsWorkspace && extras.compactOnlyActive) {
+    const activeUser = state.users.find(u => u.id === state.activeUserId);
+    const activeTask = activeUser?.tasks?.find(t => t.id === activeUser?.activeTaskId);
+    const selectedNode = activeTask && extras.selectedNodeId
+      ? (activeTask.nodes || []).find(n => n.id === extras.selectedNodeId)
+      : null;
+    const minimal = {
+      mode: "minimal",
+      activeUser: activeUser ? { id: activeUser.id, name: activeUser.name } : null,
+      activeTask: activeTask
+        ? { id: activeTask.id, title: activeTask.title, status: activeTask.status || "ongoing", cardsCount: (activeTask.nodes || []).length }
+        : null
+    };
+    if (selectedNode) {
+      minimal.selectedCard = {
+        id: selectedNode.id,
+        body: String(selectedNode.body ?? selectedNode.title ?? "").slice(0, 140)
+      };
+    }
+    if (operatorProfile) {
+      minimal.operatorProfile = operatorProfile;
+    }
+    return JSON.stringify(minimal);
+  }
+
   const wantsAllTasksDetails =
     !extras.compactOnlyActive ||
     /\b(todas as tasks|todos os cards|all tasks|all cards|resumo geral|todas as tarefas)\b/i.test(promptLower);
@@ -425,27 +459,17 @@ export function buildAppContextSnapshot(state, extras = {}) {
         if (!includeFullNodes) {
           return {
             id: t.id,
-            number: t.number || null,
             title: t.title,
             status: t.status || "ongoing",
-            priority: t.priority || "normal",
-            criticality: t.criticality ?? 0,
-            startDate: t.startDate || "",
-            endDate: t.endDate || "",
-            isActive: false,
-            cardsCount: (t.nodes || []).length,
-            attachmentsCount: (t.attachments || []).length,
-            attachments: (t.attachments || []).length
-              ? (t.attachments || []).map(a => ({
-                  name: a.name,
-                  file: a.file,
-                  type: a.type || ""
-                }))
-              : undefined
+            cardsCount: (t.nodes || []).length
           };
         }
 
-        const bodyLimit = extras.compactOnlyActive ? 240 : 600;
+        const bodyLimit = extras.compactOnlyActive ? 160 : 360;
+        const allNodes = t.nodes || [];
+        const slicedNodes = allNodes.length > 30
+          ? [allNodes[0], ...allNodes.slice(-29)]
+          : allNodes;
         return {
           id: t.id,
           number: t.number || null,
@@ -453,39 +477,31 @@ export function buildAppContextSnapshot(state, extras = {}) {
           status: t.status || "ongoing",
           priority: t.priority || "normal",
           criticality: t.criticality ?? 0,
-          startDate: t.startDate || "",
-          endDate: t.endDate || "",
+          startDate: t.startDate || undefined,
+          endDate: t.endDate || undefined,
           isActive: isTaskActive,
-          nodes: (t.nodes || []).map((n, idx) => {
+          nodes: slicedNodes.map((n, idx) => {
             const rawBody = String(n.body ?? n.title ?? "");
             const tableMatch = rawBody.match(/\[\[table:([A-Za-z0-9_-]+)\]\]/);
             const isSelected = extras.selectedNodeId && n.id === extras.selectedNodeId;
-            const maxChars = isSelected ? 600 : bodyLimit;
+            const maxChars = isSelected ? 480 : bodyLimit;
             const nodeSnap = {
               id: n.id,
-              isRoot: idx === 0,
-              type: n.type || "action",
-              status: n.status || "ongoing",
-              criticality: n.criticality ?? 0,
+              isRoot: idx === 0 || undefined,
+              type: n.type && n.type !== "action" ? n.type : undefined,
+              status: n.status && n.status !== "ongoing" ? n.status : undefined,
               body: rawBody.replace(/\[\[table:[A-Za-z0-9_-]+\]\]/g, "[tabela]").slice(0, maxChars)
             };
             if (tableMatch) {
               const decoded = decodeTableData(tableMatch[1]);
               nodeSnap.table = {
                 hasCheckboxes: Boolean(decoded.hasCheckboxes),
-                rows: Array.isArray(decoded.rows) ? decoded.rows.slice(0, 30) : []
+                rows: Array.isArray(decoded.rows) ? decoded.rows.slice(0, 15) : []
               };
             }
             return nodeSnap;
           }),
-          attachments: (t.attachments || []).map(a => ({
-            id: a.id,
-            name: a.name,
-            file: a.file,
-            size: a.size || 0,
-            type: a.type || ""
-          })),
-          links: (t.links || []).map(l => {
+          links: (t.links || []).slice(0, 40).map(l => {
             const linkSnap = { from: l.from, to: l.to };
             if (l.fromRow != null) linkSnap.fromRow = l.fromRow;
             if (l.toRow != null) linkSnap.toRow = l.toRow;
@@ -519,6 +535,7 @@ export function buildActionDependencyMap(actions) {
   let lastTaskCreatorIdx = -1;
   let lastCardCreatorIdx = -1;
   const createdTaskOrCardIndices = [];
+  const refIdToCreatorIdx = new Map();
 
   list.forEach((action, idx) => {
     if (!action || typeof action.type !== "string") return;
@@ -530,6 +547,12 @@ export function buildActionDependencyMap(actions) {
     if (actionReferencesPlaceholder(action, "$LAST_CARD") && lastCardCreatorIdx >= 0) {
       needed.add(lastCardCreatorIdx);
     }
+    ["parentCardId", "fromCardId", "toCardId", "cardId"].forEach(field => {
+      const val = action[field];
+      if (typeof val === "string" && refIdToCreatorIdx.has(val)) {
+        needed.add(refIdToCreatorIdx.get(val));
+      }
+    });
 
     // Acoes sem taskId/taskTitle explicito apos um create_task aguardam a task ser criada
     if (
@@ -538,6 +561,7 @@ export function buildActionDependencyMap(actions) {
       !action.taskTitle &&
       (action.type === "create_card" ||
         action.type === "create_table_card" ||
+        action.type === "connect_cards" ||
         action.type === "update_task" ||
         action.type === "focus_task" ||
         action.type === "organize_canvas" ||
@@ -559,6 +583,9 @@ export function buildActionDependencyMap(actions) {
     } else if (action.type === "create_card" || action.type === "create_table_card") {
       lastCardCreatorIdx = idx;
       createdTaskOrCardIndices.push(idx);
+      if (typeof action.refId === "string" && action.refId.trim()) {
+        refIdToCreatorIdx.set(action.refId.trim(), idx);
+      }
     }
   });
 
@@ -579,6 +606,7 @@ export async function executeAiActionPlan(actions, api) {
   const results = new Array(validEntries.length);
   const outcomes = new Array(validEntries.length);
   const stepPromises = new Array(validEntries.length);
+  const cardRefs = new Map();
 
   validEntries.forEach(({ action }, idx) => {
     api.onStepUpdate?.({
@@ -618,7 +646,7 @@ export async function executeAiActionPlan(actions, api) {
       });
 
       try {
-        const ctx = { lastCreatedCardId, lastCreatedTaskId };
+        const ctx = { lastCreatedCardId, lastCreatedTaskId, cardRefs };
         const outcome = await api.runAction(action, ctx);
         outcomes[idx] = outcome || {};
         const message = outcome?.message || describeAiAction(action);

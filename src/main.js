@@ -34,6 +34,23 @@ import {
   renderCardTableHtml,
   colIndexToLetter
 } from "./cardTable.js";
+import { PersistenceService } from "./intelligence/persistenceService.js";
+import { WorkspaceContextService } from "./intelligence/contextService.js";
+import { WorkspaceUndoStack, buildActionPreviewDiffs } from "./intelligence/actionPreviewUndo.js";
+import {
+  TaskReminderService,
+  AlarmSoundPlayer,
+  normalizeReminder,
+  formatLocalDateTimeInput,
+  formatReminderSummary
+} from "./intelligence/reminderService.js";
+
+const persistenceService = new PersistenceService(
+  typeof window !== "undefined" ? (window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke || null) : null
+);
+const workspaceContextService = new WorkspaceContextService(persistenceService);
+const workspaceUndoStack = new WorkspaceUndoStack(15);
+const alarmSoundPlayer = new AlarmSoundPlayer();
 
 const STORAGE_KEY = "todocompanion.state.v4";
 const LEGACY_STORAGE_KEYS = ["todocompanion.state.v3", "todocompanion.state.v2", "todocompanion.state.v1"];
@@ -79,7 +96,7 @@ const icons = {
   fullscreen: `<svg class="icon" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>`,
   list: `<svg class="icon" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>`,
   link: `<svg class="icon" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.07 0l2.12-2.12a5 5 0 0 0-7.07-7.07L11 4.93"/><path d="M14 11a5 5 0 0 0-7.07 0L4.81 13.12a5 5 0 0 0 7.07 7.07L13 19.07"/></svg>`,
-  trash: `<svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg>`,
+  trash: `<svg class="icon icon-16" viewBox="0 0 16 16"><path d="M2.5 4h11"/><path d="M6 4V2.75A.75.75 0 0 1 6.75 2h2.5a.75.75 0 0 1 .75.75V4"/><path d="M4.2 4l.6 8.5a1.4 1.4 0 0 0 1.4 1.3h3.6a1.4 1.4 0 0 0 1.4-1.3L11.8 4"/></svg>`,
   check: `<svg class="icon" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>`,
   close: `<svg class="icon" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>`,
   eye: `<svg class="icon" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
@@ -88,14 +105,15 @@ const icons = {
   chevronDown: `<svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>`,
   focus: `<svg class="icon" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M12 8v8M8 12h8"/></svg>`,
   organize: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="6" height="5" rx="1.4"/><rect x="15" y="4" width="6" height="5" rx="1.4"/><rect x="9" y="15" width="6" height="5" rx="1.4"/><path d="M9 6.5h6M6 9v3a3 3 0 0 0 3 3M18 9v3a3 3 0 0 1-3 3"/></svg>`,
-  edit: `<svg class="icon" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>`,
+  edit: `<svg class="icon icon-16" viewBox="0 0 16 16"><path d="M11.35 2.65a1.45 1.45 0 1 1 2.05 2.05L5.6 12.5 2.6 13.4l.9-3L11.35 2.65Z"/></svg>`,
   paperclip: `<svg class="icon" viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`,
   file: `<svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`,
   image: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>`,
   video: `<svg class="icon" viewBox="0 0 24 24"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="m16 10 6-3v10l-6-3z"/></svg>`,
   audio: `<svg class="icon" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
   externalLink: `<svg class="icon" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>`,
-  info: `<svg class="icon" viewBox="0 0 24 24"><path d="M12 18v-8"/><path d="M12 6h.01"/></svg>`,
+  info: `<svg class="icon icon-16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.1"/><path d="M8 7.4v3.4"/><circle cx="8" cy="5.1" r="0.7" fill="currentColor" stroke="none"/></svg>`,
+  bell: `<svg class="icon icon-16" viewBox="0 0 16 16"><path d="M4.3 6.5a3.7 3.7 0 1 1 7.4 0c0 2.5.9 3.65 1.45 4.15H2.85c.55-.5 1.45-1.65 1.45-4.15Z"/><path d="M6.55 12.7a1.55 1.55 0 0 0 2.9 0"/></svg>`,
   grip: `<svg class="card-drag-icon" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="5" cy="19" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="19" r="1.6" fill="currentColor" stroke="none"/></svg>`,
   sort: `<svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h5"/></svg>`,
   record: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.6" fill="currentColor" stroke="none"/></svg>`,
@@ -869,6 +887,7 @@ function bindDateRangeInputs(startInput, endInput) {
 
 let saveDebounceTimer = null;
 function saveState() {
+  workspaceContextService.markWorkspaceChanged();
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
@@ -1688,8 +1707,10 @@ function renderNodes() {
       ? `<span class="card-created-at">${formatCreatedAt(node.createdAt)}</span>`
       : "";
     card.innerHTML = `
-      ${rootCard || isTableCard ? "" : `<button class="port port-in${linkDragState?.nodeId === node.id && linkDragState?.port === "in" ? " pending" : ""}" data-port="in" type="button" aria-label="Input"></button>`}
-      ${isTableCard ? "" : `<button class="port port-out${pendingLink?.from === node.id || (linkDragState?.nodeId === node.id && linkDragState?.port === "out") ? " pending" : ""}" data-port="out" type="button" aria-label="Output"></button>`}
+      ${isTableCard ? "" : `<button class="port port-in${linkDragState?.nodeId === node.id && linkDragState?.port === "in" ? " pending" : ""}" data-port="in" type="button" aria-label="Left port"></button>`}
+      ${isTableCard ? "" : `<button class="port port-out${pendingLink?.from === node.id || (linkDragState?.nodeId === node.id && linkDragState?.port === "out") ? " pending" : ""}" data-port="out" type="button" aria-label="Right port"></button>`}
+      <button class="port port-top${linkDragState?.nodeId === node.id && linkDragState?.port === "top" ? " pending" : ""}" data-port="top" type="button" aria-label="Top port"></button>
+      <button class="port port-bottom${linkDragState?.nodeId === node.id && linkDragState?.port === "bottom" ? " pending" : ""}" data-port="bottom" type="button" aria-label="Bottom port"></button>
       <div class="card-bento-inner">
         ${rootCard ? "" : node.type === "image" ? `
           <div class="card-top image-card-top">
@@ -2200,6 +2221,8 @@ function renderNodes() {
 
     card.querySelector(".port-out")?.addEventListener("pointerdown", event => startLinkDrag(event, node.id, "out"));
     card.querySelector(".port-in")?.addEventListener("pointerdown", event => startLinkDrag(event, node.id, "in"));
+    card.querySelector(".port-top")?.addEventListener("pointerdown", event => startLinkDrag(event, node.id, "top"));
+    card.querySelector(".port-bottom")?.addEventListener("pointerdown", event => startLinkDrag(event, node.id, "bottom"));
     card.querySelector(".resize-handle")?.addEventListener("pointerdown", event => startResize(event, node.id));
 
     [".card-format-bar", ".image-card-bottom"].forEach(sel => {
@@ -2544,15 +2567,15 @@ function renderLinks() {
   board.links.forEach(link => {
     const from = nodesById.get(link.from);
     const to = nodesById.get(link.to);
-    const fromPort = link.fromPort === "top" || link.fromPort === "bottom" ? "out" : (link.fromPort || "out");
-    const toPort = link.toPort === "top" || link.toPort === "bottom" ? "in" : (link.toPort || "in");
-    const start = getPortPoint(from, fromPort, link.fromRow ?? null);
+    const fromPort = link.fromPort || "out";
+    const toPort = link.toPort || "in";
+    const start = getPortPoint(from, fromPort, link.fromRow ?? null, link.fromOffset ?? null);
     // O ponto de destino tem que ser sempre o centro real do port: e dele que sai
     // a ponta da seta. Qualquer "endireitamento" da linha aqui (ex.: forcar
     // end.y = start.y quando os ports estao quase alinhados) desloca a seta da
     // bolinha. O desnivel pequeno fica por conta do roteador, que resolve com um
     // degrau curto antes da entrada.
-    const end = getPortPoint(to, toPort, link.toRow ?? null);
+    const end = getPortPoint(to, toPort, link.toRow ?? null, link.toOffset ?? null);
 
     // Inclui tambem os proprios cards de origem e destino nos obstaculos para que a linha
     // nunca atravesse por baixo do proprio card (ex.: quando os cards estao empilhados verticalmente).
@@ -2641,29 +2664,19 @@ function renderLinks() {
       const dragPort = linkDragState.port;
       const sourcePoint = getPortPoint(source, dragPort, linkDragState.row ?? null);
       const cursorPoint = { x: linkDragState.x, y: linkDragState.y };
-      const isOut = isOutputPort(dragPort);
-      const fromPoint = isOut ? sourcePoint : cursorPoint;
-      const toPoint = isOut ? cursorPoint : sourcePoint;
-
-      let previewToPort = "in";
-      let previewFromPort = "out";
-
-      if (isOut) {
-        if (linkDragState.snap) {
-          previewToPort = linkDragState.snap.port;
+      const fromPoint = sourcePoint;
+      const toPoint = cursorPoint;
+      const fromPort = dragPort;
+      let toPort = linkDragState.snappedPort || "in";
+      if (!linkDragState.snappedPort) {
+        const dx = cursorPoint.x - sourcePoint.x;
+        const dy = cursorPoint.y - sourcePoint.y;
+        if (Math.abs(dy) > Math.abs(dx)) {
+          toPort = dy >= 0 ? "top" : "bottom";
         } else {
-          previewToPort = cursorPoint.x >= sourcePoint.x ? "in" : "out";
-        }
-      } else {
-        if (linkDragState.snap) {
-          previewFromPort = linkDragState.snap.port;
-        } else {
-          previewFromPort = cursorPoint.x <= sourcePoint.x ? "out" : "in";
+          toPort = dx >= 0 ? "in" : "out";
         }
       }
-
-      const fromPort = isOut ? dragPort : previewFromPort;
-      const toPort = isOut ? previewToPort : dragPort;
       const previewStatus = normalizeStatus(source.status);
       const previewPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
       const previewArrowTip = toPoint;
@@ -2827,14 +2840,15 @@ function createSnapGuide(orientation, coord, bounds) {
   return line;
 }
 
-function getPortPoint(node, port, rowIndex = null) {
+function getPortPoint(node, port, rowIndex = null, offset = null) {
   const GRID = 24;
   const width = Math.max(node.type === "image" ? 72 : MIN_CARD_WIDTH, node.w || MIN_CARD_WIDTH);
   const height = nodeHeight(node);
   const snappedX = Math.round(node.x / GRID) * GRID;
   const snappedY = Math.round(node.y / GRID) * GRID;
-  if (port === "top") return { x: snappedX + width / 2, y: snappedY };
-  if (port === "bottom") return { x: snappedX + width / 2, y: snappedY + height };
+  const ratio = Number.isFinite(offset) ? clamp(offset, 0.08, 0.92) : 0.5;
+  if (port === "top") return { x: Math.round(snappedX + width * ratio), y: snappedY };
+  if (port === "bottom") return { x: Math.round(snappedX + width * ratio), y: snappedY + height };
   if (node.type === "table") {
     const resolvedRow = rowIndex != null ? rowIndex : 0;
     return {
@@ -2842,9 +2856,12 @@ function getPortPoint(node, port, rowIndex = null) {
       y: Math.round(snappedY + getTableRowPortOffsetY(node, resolvedRow))
     };
   }
+  const yCoord = Number.isFinite(offset)
+    ? Math.round(snappedY + height * ratio)
+    : Math.round((snappedY + height / 2) / GRID) * GRID;
   return {
     x: port === "out" ? snappedX + width : snappedX,
-    y: Math.round((snappedY + height / 2) / GRID) * GRID
+    y: yCoord
   };
 }
 
@@ -2931,8 +2948,13 @@ function renderUserTasks() {
     const isAnalyzingThisTask = Boolean(
       cardAnalyzingState && cardAnalyzingState.taskId === task.id && cardAnalyzingState.userId === user.id
     );
+    const activeReminder = normalizeReminder(task.reminder);
+    const hasActiveReminder = Boolean(activeReminder && activeReminder.enabled);
+    const reminderTooltip = hasActiveReminder
+      ? formatReminderSummary(activeReminder)
+      : "Definir lembrete ou alarme";
     const card = document.createElement("article");
-    card.className = `user-task-card status-${status} priority-${priority} crit-${criticality}${task.id === activeId ? " active" : ""}${task.id === dockDragId ? " dragging" : ""}${isRecordingThisTask ? " is-recording" : ""}${isTranscribingThisTask ? " is-transcribing" : ""}`;
+    card.className = `user-task-card status-${status} priority-${priority} crit-${criticality}${task.id === activeId ? " active" : ""}${task.id === dockDragId ? " dragging" : ""}${isRecordingThisTask ? " is-recording" : ""}${isTranscribingThisTask ? " is-transcribing" : ""}${hasActiveReminder ? " has-reminder" : ""}`;
     card.dataset.id = task.id;
     // Card enxuto: so o titulo. Numero, datas, criticidade e anexos continuam
     // acessiveis pelo popup de info (botao "i") e pelo overlay do canvas.
@@ -2940,15 +2962,18 @@ function renderUserTasks() {
       ? `${task.title} (Gravando)`
       : isTranscribingThisTask
         ? `${task.title} (${isAnalyzingThisTask ? "Analisando áudio com IA" : "Gravando áudio para análise"})`
-        : task.title;
+        : hasActiveReminder
+          ? `${task.title} · ${reminderTooltip}`
+          : task.title;
     card.innerHTML = `
       ${isRecordingThisTask ? `<span class="task-recording-dot" title="Gravando agora" aria-label="Gravando agora"></span>` : ""}
       ${!isRecordingThisTask && isTranscribingThisTask ? `<span class="task-transcribing-badge${isAnalyzingThisTask ? " is-analyzing" : ""}" title="${isAnalyzingThisTask ? "Analisando e transcrevendo áudio..." : "Gravando áudio para transcrever..."}" aria-label="Transcrevendo áudio">${isAnalyzingThisTask ? `<span class="mini-transcribe-spinner" aria-hidden="true"></span>` : `<span class="mini-wave" aria-hidden="true"><span></span><span></span><span></span></span>`}</span>` : ""}
       <span class="user-task-id">#${task.number || ""}</span>
       <span class="user-task-title">${escapeHtml(task.title)}</span>
       <div class="user-task-actions">
+        <button class="user-task-reminder${hasActiveReminder ? " has-reminder" : ""}${hasActiveReminder && activeReminder.mode === "alarm" ? " is-alarm" : ""}" type="button" aria-label="${escapeHtml(reminderTooltip)}" title="${escapeHtml(reminderTooltip)}">${icons.bell}</button>
         <button class="user-task-info" type="button" aria-label="Information" title="Information">${icons.info}</button>
-        <button class="user-task-remove" type="button" aria-label="Remove main task" title="Remove main task">${icons.close}</button>
+        <button class="user-task-remove" type="button" aria-label="Remove main task" title="Remove main task">${icons.trash}</button>
       </div>
     `;
 
@@ -2965,6 +2990,18 @@ function renderUserTasks() {
       control.addEventListener("pointerdown", event => event.stopPropagation());
     });
 
+    card.querySelector(".user-task-reminder").addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const sameOpen = !taskReminderPopover?.hidden &&
+        reminderModalTarget.userId === user.id &&
+        reminderModalTarget.taskId === task.id;
+      if (sameOpen) {
+        closeTaskReminderModal();
+      } else {
+        openTaskReminderModal(user.id, task.id, event.currentTarget);
+      }
+    });
     card.querySelector(".user-task-info").addEventListener("click", event => {
       const popup = document.querySelector("#taskEditPopup");
       const sameTaskOpen = !popup.hidden && taskEditPopupUserId === user.id && taskEditPopupTaskId === task.id;
@@ -4691,32 +4728,59 @@ async function removeMainTask(taskId, userId = state.activeUserId) {
   render();
 }
 
+function getClosestBorderPoint(node, cursorWorld) {
+  const GRID = 24;
+  const width = Math.max(node.type === "image" ? 72 : MIN_CARD_WIDTH, node.w || MIN_CARD_WIDTH);
+  const height = nodeHeight(node);
+  const x1 = Math.round(node.x / GRID) * GRID;
+  const y1 = Math.round(node.y / GRID) * GRID;
+  const x2 = x1 + width;
+  const y2 = y1 + height;
+
+  const clampedX = clamp(cursorWorld.x, x1 + width * 0.08, x2 - width * 0.08);
+  const clampedY = clamp(cursorWorld.y, y1 + height * 0.08, y2 - height * 0.08);
+
+  const candidates = [
+    { port: "in", point: { x: x1, y: Math.round(clampedY) }, offset: (clampedY - y1) / height },
+    { port: "out", point: { x: x2, y: Math.round(clampedY) }, offset: (clampedY - y1) / height },
+    { port: "top", point: { x: Math.round(clampedX), y: y1 }, offset: (clampedX - x1) / width },
+    { port: "bottom", point: { x: Math.round(clampedX), y: y2 }, offset: (clampedX - x1) / width }
+  ];
+
+  let best = candidates[0];
+  let bestDist = Infinity;
+  for (const c of candidates) {
+    const d = Math.hypot(c.point.x - cursorWorld.x, c.point.y - cursorWorld.y);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c;
+    }
+  }
+  return { ...best, dist: bestDist, inside: cursorWorld.x >= x1 && cursorWorld.x <= x2 && cursorWorld.y >= y1 && cursorWorld.y <= y2 };
+}
+
 function findSnapTarget(drag, cursorWorld) {
   const board = activeBoard();
   const zoom = board.view?.zoom || 1;
-  const snapRadiusWorld = 32 / zoom;
+  const portSnapRadius = 28 / zoom;
+  const borderSnapRadius = 20 / zoom;
+  const allPorts = ["in", "out", "top", "bottom"];
 
-  const candidatePorts = isOutputPort(drag.port)
-    ? ["in"]
-    : ["out"];
-
-  let best = null;
-  let bestDist = snapRadiusWorld;
+  let bestPort = null;
+  let bestPortDist = portSnapRadius;
 
   for (const node of board.nodes) {
     if (node.id === drag.nodeId) continue;
 
-    for (const port of candidatePorts) {
-      if (isRootNode(board, node.id) && isInputPort(port)) continue;
-
-      if (node.type === "table") {
+    for (const port of allPorts) {
+      if (node.type === "table" && (port === "in" || port === "out")) {
         const rowCount = getTableNodeRowCount(node);
         for (let r = 0; r < rowCount; r++) {
           const point = getPortPoint(node, port, r);
           const dist = Math.hypot(point.x - cursorWorld.x, point.y - cursorWorld.y);
-          if (dist < bestDist) {
-            bestDist = dist;
-            best = { nodeId: node.id, port, row: r, point };
+          if (dist < bestPortDist) {
+            bestPortDist = dist;
+            bestPort = { nodeId: node.id, port, row: r, offset: null, point };
           }
         }
         continue;
@@ -4724,14 +4788,35 @@ function findSnapTarget(drag, cursorWorld) {
 
       const point = getPortPoint(node, port, null);
       const dist = Math.hypot(point.x - cursorWorld.x, point.y - cursorWorld.y);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = { nodeId: node.id, port, row: null, point };
+      if (dist < bestPortDist) {
+        bestPortDist = dist;
+        bestPort = { nodeId: node.id, port, row: null, offset: null, point };
       }
     }
   }
 
-  return best;
+  if (bestPort) return bestPort;
+
+  // Permite conectar em qualquer ponto da borda de outro card (arrastando sobre a borda ou interior)
+  let bestBorder = null;
+  let bestBorderDist = borderSnapRadius;
+  for (const node of board.nodes) {
+    if (node.id === drag.nodeId || node.type === "table") continue;
+    const hit = getClosestBorderPoint(node, cursorWorld);
+    if (hit.inside || hit.dist < bestBorderDist) {
+      bestBorderDist = hit.inside ? 0 : hit.dist;
+      bestBorder = {
+        nodeId: node.id,
+        port: hit.port,
+        row: null,
+        offset: Number(hit.offset.toFixed(3)),
+        point: hit.point
+      };
+      if (hit.inside) break;
+    }
+  }
+
+  return bestBorder;
 }
 
 function startLinkDrag(event, nodeId, port, row = null) {
@@ -4776,12 +4861,14 @@ function startLinkDrag(event, nodeId, port, row = null) {
       linkDragState.snappedNodeId = snap.nodeId;
       linkDragState.snappedPort = snap.port;
       linkDragState.snappedRow = snap.row ?? null;
+      linkDragState.snappedOffset = snap.offset ?? null;
     } else {
       linkDragState.x = cursorWorld.x;
       linkDragState.y = cursorWorld.y;
       linkDragState.snappedNodeId = null;
       linkDragState.snappedPort = null;
       linkDragState.snappedRow = null;
+      linkDragState.snappedOffset = null;
     }
 
     const hoverSelector = snap
@@ -4831,32 +4918,39 @@ function finishLinkDrag(event) {
   let targetNodeId = null;
   let targetPort = null;
   let targetRow = null;
+  let targetOffset = null;
 
   if (drag.snappedNodeId && drag.snappedPort) {
     targetNodeId = drag.snappedNodeId;
     targetPort = drag.snappedPort;
     targetRow = drag.snappedRow ?? null;
+    targetOffset = drag.snappedOffset ?? null;
   } else {
     const target = document.elementFromPoint(event.clientX, event.clientY);
     const portEl = target?.closest(".port");
-    const targetCard = portEl?.closest(".task-card");
+    const targetCard = portEl?.closest(".task-card") || target?.closest(".task-card");
     targetNodeId = targetCard?.dataset.id;
-    targetPort = portEl?.dataset.port;
+    targetPort = portEl?.dataset.port || null;
     targetRow = portEl?.dataset.row != null ? parseInt(portEl.dataset.row, 10) : null;
+    if (targetNodeId && targetNodeId !== drag.nodeId && !targetPort) {
+      const targetNode = activeBoard()?.nodes?.find(n => n.id === targetNodeId);
+      if (targetNode) {
+        const hit = getClosestBorderPoint(targetNode, screenToWorld(event.clientX, event.clientY));
+        targetPort = hit.port;
+        targetOffset = Number(hit.offset.toFixed(3));
+      }
+    }
   }
 
   let createdNodeId = null;
 
   if (targetNodeId && targetNodeId !== drag.nodeId && targetPort) {
-    const isForward = isOutputPort(drag.port) && isInputPort(targetPort);
-    const isBackward = isInputPort(drag.port) && isOutputPort(targetPort);
-    if (isForward) {
-      addLink(drag.nodeId, targetNodeId, drag.port, targetPort, drag.row ?? null, targetRow);
-      selectedNodeId = targetNodeId;
-    } else if (isBackward) {
-      addLink(targetNodeId, drag.nodeId, targetPort, drag.port, targetRow, drag.row ?? null);
-      selectedNodeId = targetNodeId;
+    if (drag.port === "in" && targetPort === "out") {
+      addLink(targetNodeId, drag.nodeId, targetPort, drag.port, targetRow, drag.row ?? null, targetOffset, null);
+    } else {
+      addLink(drag.nodeId, targetNodeId, drag.port, targetPort, drag.row ?? null, targetRow, null, targetOffset);
     }
+    selectedNodeId = targetNodeId;
   } else if (isPointInsideBoard(event.clientX, event.clientY)) {
     const clickLike = Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY) < 6;
     createdNodeId = createCardFromConnection(drag, screenToWorld(event.clientX, event.clientY), clickLike, "action");
@@ -4955,17 +5049,14 @@ function getConnectionClickPosition(board, drag, width, height) {
   };
 }
 
-function addLink(from, to, fromPort = "out", toPort = "in", fromRow = null, toRow = null) {
+function addLink(from, to, fromPort = "out", toPort = "in", fromRow = null, toRow = null, fromOffset = null, toOffset = null) {
   const board = activeBoard();
   if (!from || !to || from === to) {
     return false;
   }
 
-  if (isRootNode(board, to) || (isRootNode(board, from) && fromPort !== "out")) {
-    return false;
-  }
-
   const sameRow = (a, b) => (a ?? null) === (b ?? null);
+  const sameOffset = (a, b) => Math.abs((a ?? 0.5) - (b ?? 0.5)) < 0.04;
   if (
     board.links.some(
       link =>
@@ -4974,7 +5065,9 @@ function addLink(from, to, fromPort = "out", toPort = "in", fromRow = null, toRo
         link.fromPort === fromPort &&
         link.toPort === toPort &&
         sameRow(link.fromRow, fromRow) &&
-        sameRow(link.toRow, toRow)
+        sameRow(link.toRow, toRow) &&
+        sameOffset(link.fromOffset, fromOffset) &&
+        sameOffset(link.toOffset, toOffset)
     )
   ) {
     return false;
@@ -4983,6 +5076,8 @@ function addLink(from, to, fromPort = "out", toPort = "in", fromRow = null, toRo
   const entry = { id: makeId("link"), from, to, fromPort, toPort };
   if (fromRow != null) entry.fromRow = fromRow;
   if (toRow != null) entry.toRow = toRow;
+  if (Number.isFinite(fromOffset) && Math.abs(fromOffset - 0.5) >= 0.03) entry.fromOffset = fromOffset;
+  if (Number.isFinite(toOffset) && Math.abs(toOffset - 0.5) >= 0.03) entry.toOffset = toOffset;
   board.links.push(entry);
   return true;
 }
@@ -10072,27 +10167,25 @@ function initAiTranslatorPanel() {
   }
 
   function saveChatSessions() {
-    try {
-      localStorage.setItem(AI_CHAT_SESSIONS_KEY, JSON.stringify(chatSessions.slice(0, 40)));
-      localStorage.setItem(AI_CHAT_ACTIVE_SESSION_KEY, activeSessionId);
-    } catch (_) {
-      try {
-        const slimmed = chatSessions.slice(0, 25).map((s, idx) => ({
-          ...s,
-          messages: (s.messages || []).slice(-30).map(m => ({
-            role: m.role,
-            text: m.text,
-            attachments: (m.attachments || []).map(att => ({
-              name: att.name,
-              mime_type: att.mime_type,
-              data_base64: idx === 0 ? att.data_base64 : "",
-              text_content: att.text_content || ""
-            }))
-          }))
-        }));
-        localStorage.setItem(AI_CHAT_SESSIONS_KEY, JSON.stringify(slimmed));
-      } catch (__) { }
-    }
+    const trimmed = chatSessions.slice(0, 60);
+    persistenceService.saveChatSessions(trimmed, AI_CHAT_SESSIONS_KEY);
+    persistenceService.saveSetting(AI_CHAT_ACTIVE_SESSION_KEY, activeSessionId);
+  }
+
+  function hydrateChatSessionsFromDb() {
+    persistenceService.loadChatSessions(AI_CHAT_SESSIONS_KEY).then(dbSessions => {
+      if (Array.isArray(dbSessions) && dbSessions.length > 0) {
+        chatSessions = dbSessions;
+        const savedActiveId = localStorage.getItem(AI_CHAT_ACTIVE_SESSION_KEY);
+        if (savedActiveId && chatSessions.some(s => s.id === savedActiveId)) {
+          activeSessionId = savedActiveId;
+        } else {
+          activeSessionId = chatSessions[0].id;
+        }
+        renderSessionsList();
+        renderChatMessages();
+      }
+    }).catch(() => {});
   }
 
   function getActiveSession() {
@@ -10108,6 +10201,214 @@ function initAiTranslatorPanel() {
   }
 
   loadChatSessions();
+  hydrateChatSessionsFromDb();
+
+  const AI_CHAT_ALWAYS_SEE_SCREEN_KEY = "todocompanion.settings.aiChatAlwaysSeeScreen";
+  const chatScreenVisionBtn = document.getElementById("aiChatScreenVisionBtn");
+  let alwaysSeeScreen = localStorage.getItem(AI_CHAT_ALWAYS_SEE_SCREEN_KEY) === "true";
+
+  function syncScreenVisionBtn() {
+    if (!chatScreenVisionBtn) return;
+    chatScreenVisionBtn.classList.toggle("is-active", alwaysSeeScreen);
+    chatScreenVisionBtn.setAttribute("aria-pressed", String(alwaysSeeScreen));
+    chatScreenVisionBtn.title = alwaysSeeScreen
+      ? "Sempre ver a tela: ATIVO (envia captura da tela em toda mensagem · clique para desativar)"
+      : "Sempre ver a tela: DESATIVADO (só captura a tela quando você pedir na mensagem · clique para ativar)";
+  }
+
+  if (chatScreenVisionBtn) {
+    syncScreenVisionBtn();
+    chatScreenVisionBtn.addEventListener("click", () => {
+      alwaysSeeScreen = !alwaysSeeScreen;
+      persistenceService.saveSetting(AI_CHAT_ALWAYS_SEE_SCREEN_KEY, alwaysSeeScreen ? "true" : "false");
+      syncScreenVisionBtn();
+    });
+    persistenceService.hydrateSettingsFromDb([AI_CHAT_ALWAYS_SEE_SCREEN_KEY]).then(dbMap => {
+      if (dbMap?.[AI_CHAT_ALWAYS_SEE_SCREEN_KEY] !== undefined) {
+        alwaysSeeScreen = dbMap[AI_CHAT_ALWAYS_SEE_SCREEN_KEY] === "true";
+        syncScreenVisionBtn();
+      }
+    }).catch(() => {});
+  }
+
+  const AI_CHAT_MODEL_KEY = "todocompanion.settings.aiChatModel";
+  const AI_CHAT_MODEL_OPTIONS = [
+    { value: "auto", label: "Auto", desc: "Cascata automática com fallback" },
+    { value: "gemini-flash-latest", label: "Gemini Flash", desc: "Mais recente e equilibrado" },
+    { value: "gemini-3.8-flash", label: "Gemini 3.8 Flash", desc: "Alta velocidade e raciocínio" },
+    { value: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", desc: "Próxima geração" },
+    { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash", desc: "Rápido para tarefas gerais" },
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash", desc: "Estável e versátil" },
+    { value: "gemini-3.5-flash-lite", label: "Gemini 3.5 Lite", desc: "Leve e econômico" },
+    { value: "gemini-3.1-flash-lite", label: "Gemini 3.1 Lite", desc: "Respostas ultrarrápidas" },
+    { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Lite", desc: "Baixo custo de tokens" },
+    { value: "gemma-4-31b-it", label: "Gemma 4 31B", desc: "Modelo aberto 31B" }
+  ];
+  const chatModelBtn = document.getElementById("aiChatModelBtn");
+  const chatModelLabel = document.getElementById("aiChatModelLabel");
+  const chatModelQuotaDot = document.getElementById("aiChatModelQuotaDot");
+  const chatModelPopover = document.getElementById("aiChatModelPopover");
+  let selectedChatModel = localStorage.getItem(AI_CHAT_MODEL_KEY) || "auto";
+  if (!AI_CHAT_MODEL_OPTIONS.some(opt => opt.value === selectedChatModel)) {
+    selectedChatModel = "auto";
+  }
+  let modelQuotaMap = new Map();
+  let quotaChecking = false;
+
+  function getModelQuotaEntry(modelId) {
+    if (!modelId || modelId === "auto") {
+      const all = [...modelQuotaMap.values()];
+      if (!all.length) {
+        return {
+          status: quotaChecking ? "checking" : "available",
+          remaining_seconds: 0,
+          quota_label: quotaChecking ? "Verificando..." : "Auto"
+        };
+      }
+      const availCount = all.filter(x => x.status === "available").length;
+      if (availCount > 0) {
+        return { status: "available", remaining_seconds: 0, quota_label: `${availCount} com cota` };
+      }
+      const hasCool = all.some(x => x.status === "cooldown");
+      return { status: hasCool ? "cooldown" : "exhausted", remaining_seconds: 0, quota_label: "Sem cota" };
+    }
+    return modelQuotaMap.get(modelId) || {
+      status: quotaChecking ? "checking" : "available",
+      remaining_seconds: 0,
+      quota_label: quotaChecking ? "Verificando..." : ""
+    };
+  }
+
+  async function refreshModelsQuotaStatus(forceProbe = false) {
+    if (typeof invoke !== "function" || quotaChecking) return;
+    quotaChecking = true;
+    if (chatModelPopover && !chatModelPopover.hidden && modelQuotaMap.size === 0) {
+      renderChatModelPopover();
+    }
+    try {
+      const list = await invoke("get_ai_models_quota_status", {
+        apiKey: localStorage.getItem(GEMINI_API_KEY_STORAGE) || null,
+        forceProbe: Boolean(forceProbe)
+      });
+      if (Array.isArray(list)) {
+        modelQuotaMap = new Map(list.map(item => [item.model, item]));
+      }
+    } catch (_) {
+    } finally {
+      quotaChecking = false;
+      syncChatModelLabel();
+      if (chatModelPopover && !chatModelPopover.hidden) {
+        renderChatModelPopover();
+      }
+    }
+  }
+
+  function closeModelPopover() {
+    if (!chatModelPopover || !chatModelBtn) return;
+    chatModelPopover.hidden = true;
+    chatModelBtn.classList.remove("is-open");
+    chatModelBtn.setAttribute("aria-expanded", "false");
+  }
+
+  function syncChatModelLabel() {
+    const current = AI_CHAT_MODEL_OPTIONS.find(opt => opt.value === selectedChatModel) || AI_CHAT_MODEL_OPTIONS[0];
+    if (chatModelLabel) chatModelLabel.textContent = current.label;
+    const q = getModelQuotaEntry(selectedChatModel);
+    if (chatModelQuotaDot) {
+      chatModelQuotaDot.className = `ai-model-quota-dot quota-${q.status || "available"}`;
+    }
+    if (chatModelBtn) {
+      const statusText = q.status === "exhausted"
+        ? "Sem cota disponível (usará fallback automático)"
+        : q.status === "unavailable"
+          ? "Indisponível na API (usará fallback automático)"
+          : q.status === "cooldown"
+            ? `Aguardando limite por minuto (${q.remaining_seconds}s)`
+            : q.status === "checking"
+              ? "Verificando cota em tempo real..."
+              : "Cota disponível";
+      chatModelBtn.title = `${current.label} · ${statusText}`;
+    }
+  }
+
+  function renderChatModelPopover() {
+    if (!chatModelPopover) return;
+    chatModelPopover.innerHTML = "";
+    AI_CHAT_MODEL_OPTIONS.forEach(opt => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.role = "option";
+      const isSelected = opt.value === selectedChatModel;
+      const q = getModelQuotaEntry(opt.value);
+      const qStatus = q.status || "available";
+      const badgeLabel = q.quota_label || (
+        opt.value === "auto"
+          ? "Ativo"
+          : qStatus === "exhausted"
+            ? "Sem cota"
+            : qStatus === "unavailable"
+              ? "Indisponível"
+              : qStatus === "checking"
+                ? "Verificando..."
+                : "Com cota"
+      );
+      btn.className = `ai-model-option${isSelected ? " selected" : ""}`;
+      btn.setAttribute("aria-selected", String(isSelected));
+      btn.innerHTML = `
+        <span class="ai-model-option-main">
+          <span class="ai-model-option-title-row">
+            <span class="ai-model-quota-dot quota-${escapeHtml(qStatus)}" aria-hidden="true"></span>
+            <span class="ai-model-option-name">${escapeHtml(opt.label)}</span>
+            <span class="ai-model-quota-badge quota-${escapeHtml(qStatus)}">${escapeHtml(badgeLabel)}</span>
+          </span>
+          <span class="ai-model-option-desc">${escapeHtml(opt.desc)}</span>
+        </span>
+        <svg class="ai-model-option-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M20 6 9 17l-5-5"/>
+        </svg>
+      `;
+      btn.addEventListener("click", () => {
+        selectedChatModel = opt.value;
+        persistenceService.saveSetting(AI_CHAT_MODEL_KEY, selectedChatModel);
+        syncChatModelLabel();
+        closeModelPopover();
+      });
+      chatModelPopover.appendChild(btn);
+    });
+  }
+
+  if (chatModelBtn && chatModelPopover) {
+    syncChatModelLabel();
+    refreshModelsQuotaStatus();
+    chatModelBtn.addEventListener("click", ev => {
+      ev.stopPropagation();
+      const willOpen = chatModelPopover.hidden;
+      if (willOpen) {
+        renderChatModelPopover();
+        refreshModelsQuotaStatus();
+      }
+      chatModelPopover.hidden = !willOpen;
+      chatModelBtn.classList.toggle("is-open", willOpen);
+      chatModelBtn.setAttribute("aria-expanded", String(willOpen));
+    });
+    document.addEventListener("click", ev => {
+      if (!chatModelPopover.hidden && !chatModelPopover.contains(ev.target) && !chatModelBtn.contains(ev.target)) {
+        closeModelPopover();
+      }
+    });
+    document.addEventListener("keydown", ev => {
+      if (ev.key === "Escape" && !chatModelPopover.hidden) {
+        closeModelPopover();
+      }
+    });
+    persistenceService.hydrateSettingsFromDb([AI_CHAT_MODEL_KEY]).then(dbMap => {
+      const saved = dbMap?.[AI_CHAT_MODEL_KEY];
+      if (saved && AI_CHAT_MODEL_OPTIONS.some(opt => opt.value === saved)) {
+        selectedChatModel = saved;
+        syncChatModelLabel();
+      }
+    }).catch(() => {});
+  }
 
   if (toneSlider) {
     toneSlider.value = String(formality);
@@ -11211,10 +11512,8 @@ function initAiTranslatorPanel() {
     const messages = (session.messages || []).filter(message => !message.coachAdvice);
 
     if (!messages.length) {
-      const modelTagEl = document.getElementById("aiChatModelTag");
-      if (modelTagEl) {
-        modelTagEl.textContent = "Auto";
-        modelTagEl.title = "Seleção automática na cascata";
+      if (chatModelBtn && selectedChatModel === "auto") {
+        chatModelBtn.title = "Auto (seleção automática na cascata)";
       }
       const empty = document.createElement("div");
       empty.className = "ai-chat-empty";
@@ -11318,8 +11617,17 @@ function initAiTranslatorPanel() {
 
         const timeSpan = document.createElement("span");
         timeSpan.className = "ai-msg-time";
-        timeSpan.textContent = msg.model ? formatAiModelName(msg.model) : "just now";
-        if (msg.model) timeSpan.title = msg.model;
+        if (msg.model) {
+          const usedName = formatAiModelName(msg.model);
+          timeSpan.textContent = msg.requestedModel
+            ? `${usedName} (${formatAiModelName(msg.requestedModel)} sem cota)`
+            : usedName;
+          timeSpan.title = msg.requestedModel
+            ? `Respondido via fallback por ${msg.model} porque ${msg.requestedModel} estava sem cota`
+            : msg.model;
+        } else {
+          timeSpan.textContent = "just now";
+        }
 
         actions.append(copyBtn, cardBtn, timeSpan);
         const totalTok = Number(msg.totalTokens) || 0;
@@ -11450,6 +11758,11 @@ function initAiTranslatorPanel() {
         }
 
         const runProposalExecution = async footEl => {
+          const undoBatchId = `undo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+          workspaceUndoStack.capture(undoBatchId, state);
+          proposal.undoBatchId = undoBatchId;
+          proposal.undone = false;
+
           proposal.status = "running";
           proposal.stepStates = proposal.actions.map(() => "pending");
           cardEl.className = "ai-action-card status-running";
@@ -11498,6 +11811,13 @@ function initAiTranslatorPanel() {
           proposal.status = "approved";
           proposal.results = results;
           delete proposal.stepStates;
+          const okCount = results.filter(r => r?.ok).length;
+          persistenceService.logAiActivity({
+            kind: "workspace_action",
+            status: okCount === results.length ? "ok" : "partial",
+            summary: proposal.summary || "Ações no workspace",
+            detail: `${okCount}/${results.length} ações executadas`
+          });
           saveChatSessions();
           await new Promise(resolve => setTimeout(resolve, 220));
           renderChatMessages();
@@ -11513,6 +11833,20 @@ function initAiTranslatorPanel() {
               });
             }
           } else {
+            const previewDiffs = buildActionPreviewDiffs(proposal.actions, state);
+            if (previewDiffs.length > 0) {
+              const previewBox = document.createElement("div");
+              previewBox.className = "ai-action-preview-list";
+              previewBox.innerHTML = `<div class="ai-action-preview-title">Prévia das alterações</div>`;
+              previewDiffs.forEach(d => {
+                const item = document.createElement("div");
+                item.className = "ai-action-preview-item";
+                item.innerHTML = `<span class="ai-action-preview-before">${escapeHtml(d.before)}</span> → <span class="ai-action-preview-after">${escapeHtml(d.after)}</span>`;
+                previewBox.appendChild(item);
+              });
+              cardEl.appendChild(previewBox);
+            }
+
             const foot = document.createElement("div");
             foot.className = "ai-action-card-foot";
 
@@ -11534,6 +11868,30 @@ function initAiTranslatorPanel() {
 
             foot.append(approveBtn, rejectBtn);
             cardEl.appendChild(foot);
+          }
+        } else if (proposal.status === "approved") {
+          if (proposal.undone) {
+            const tag = document.createElement("span");
+            tag.className = "ai-action-undone-tag";
+            tag.textContent = "Desfeito";
+            head.appendChild(tag);
+          } else if (proposal.undoBatchId && workspaceUndoStack.has(proposal.undoBatchId)) {
+            const undoBtn = document.createElement("button");
+            undoBtn.type = "button";
+            undoBtn.className = "ai-action-undo-btn";
+            undoBtn.textContent = "Desfazer";
+            undoBtn.title = "Reverter todas as alterações deste bloco";
+            undoBtn.addEventListener("click", () => {
+              const restored = workspaceUndoStack.restore(proposal.undoBatchId);
+              if (!restored) return;
+              state = restored;
+              proposal.undone = true;
+              saveState();
+              render();
+              saveChatSessions();
+              renderChatMessages();
+            });
+            head.appendChild(undoBtn);
           }
         }
 
@@ -11869,12 +12227,7 @@ function initAiTranslatorPanel() {
       }
     });
 
-    const modelTagEl = document.getElementById("aiChatModelTag");
-    if (modelTagEl) {
-      const lastModelMsg = [...messages].reverse().find(m => m.role === "model" && m.model);
-      modelTagEl.textContent = lastModelMsg ? formatAiModelName(lastModelMsg.model) : "Auto";
-      modelTagEl.title = lastModelMsg ? `Última resposta: ${lastModelMsg.model}` : "Seleção automática na cascata";
-    }
+    syncChatModelLabel();
     updateChatTokenCounter();
 
     if (chatBusy) {
@@ -11936,9 +12289,8 @@ function initAiTranslatorPanel() {
 
     if (chatInput) chatInput.value = "";
     const willCaptureScreen = Boolean(
-      isTranslatorFloating &&
       currentMode === "chat" &&
-      shouldAutoCaptureScreen(text)
+      (alwaysSeeScreen || shouldAutoCaptureScreen(text))
     );
     const relevantAppAttachments = collectRelevantAppAttachments(state, text, selectedNodeId, 4);
     activeChatThinkingSteps = buildChatThinkingSteps({
@@ -11967,15 +12319,15 @@ function initAiTranslatorPanel() {
               !m.coachAdvice &&
               !(m.role === "model" && typeof m.text === "string" && m.text.trimStart().startsWith("Error:"))
           )
-          .slice(-8);
+          .slice(-6);
         const lastMsgIndex = filteredHistory.length - 1;
         const payloadMessages = filteredHistory.map((m, idx) => {
           const isCurrentTurn = idx === lastMsgIndex;
-          const isRecentTurn = idx >= lastMsgIndex - 3;
+          const isRecentTurn = idx >= lastMsgIndex - 1;
           const rawMsgText = String(m.text || "");
           return {
             role: m.role,
-            text: isRecentTurn ? rawMsgText : rawMsgText.slice(0, 1200),
+            text: isCurrentTurn ? rawMsgText : (isRecentTurn ? rawMsgText.slice(0, 900) : rawMsgText.slice(0, 400)),
             attachments: (m.attachments || []).map(a => {
               if (isCurrentTurn) {
                 return {
@@ -11997,10 +12349,8 @@ function initAiTranslatorPanel() {
           };
         });
         if (
-          isTranslatorFloating &&
-          currentMode === "chat" &&
-          payloadMessages.length > 0 &&
-          shouldAutoCaptureScreen(text)
+          willCaptureScreen &&
+          payloadMessages.length > 0
         ) {
           try {
             const screenBase64 = await invoke("capture_current_monitor_png");
@@ -12033,9 +12383,9 @@ function initAiTranslatorPanel() {
             console.warn("Falha ao capturar tela atual para o mini chat:", screenErr);
           }
         }
-        const appContext = buildAppContextSnapshot(state, {
+        const appContext = await workspaceContextService.buildEnrichedContextJson(state, {
           selectedNodeId,
-          compactOnlyActive: true,
+          activeSessionId: session.id,
           userPrompt: text,
           operatorProfile: localStorage.getItem("todocompanion.settings.aiOperatorProfile") || "",
           settings: {
@@ -12051,7 +12401,8 @@ function initAiTranslatorPanel() {
           formality,
           apiKey: localStorage.getItem(GEMINI_API_KEY_STORAGE) || null,
           appContext,
-          appAttachments: relevantAppAttachments
+          appAttachments: relevantAppAttachments,
+          preferredModel: selectedChatModel === "auto" ? null : selectedChatModel
         });
         if (res && typeof res === "object") {
           reply = String(res.text || "");
@@ -12074,10 +12425,31 @@ function initAiTranslatorPanel() {
       const cleaned =
         cleanText ||
         (proposal ? proposal.summary : questionSet ? "" : "(No response)");
+      const previousSelectedModel = selectedChatModel;
+      const didFallbackFromSelected =
+        previousSelectedModel !== "auto" &&
+        Boolean(usedModel) &&
+        usedModel !== previousSelectedModel;
+
+      if (didFallbackFromSelected) {
+        modelQuotaMap.set(previousSelectedModel, {
+          model: previousSelectedModel,
+          status: "exhausted",
+          remaining_seconds: 1800,
+          quota_label: "Sem cota"
+        });
+        if (AI_CHAT_MODEL_OPTIONS.some(opt => opt.value === usedModel)) {
+          selectedChatModel = usedModel;
+          persistenceService.saveSetting(AI_CHAT_MODEL_KEY, selectedChatModel);
+          syncChatModelLabel();
+        }
+      }
+
       const newAiMsg = {
         role: "model",
         text: cleaned,
         model: usedModel,
+        requestedModel: didFallbackFromSelected ? previousSelectedModel : "",
         promptTokens,
         completionTokens,
         totalTokens,
@@ -12095,11 +12467,29 @@ function initAiTranslatorPanel() {
       }
       saveChatSessions();
       renderSessionsList();
+      persistenceService.logAiActivity({
+        kind: "chat",
+        model: usedModel,
+        status: "ok",
+        summary: String(text || "(anexo)").slice(0, 120),
+        detail: cleaned.slice(0, 200),
+        promptTokens,
+        completionTokens,
+        totalTokens
+      });
     } catch (err) {
       if (reqId !== activeChatRequestId) return;
+      const errMsg = String(err?.message || err);
+      persistenceService.logAiActivity({
+        kind: "chat",
+        model: "",
+        status: "error",
+        summary: String(text || "(anexo)").slice(0, 120),
+        detail: errMsg.slice(0, 300)
+      });
       session.messages.push({
         role: "model",
-        text: `Error: ${String(err?.message || err)}`,
+        text: `Error: ${errMsg}`,
         attachments: []
       });
       if (panel.hidden || currentMode !== "chat") {
@@ -12111,6 +12501,7 @@ function initAiTranslatorPanel() {
         chatBusy = false;
         syncChatSendButtonState();
         updateChatTopbarIndicator();
+        refreshModelsQuotaStatus();
         renderChatMessages();
         if (!panel.hidden && currentMode === "chat") {
           chatInput?.focus();
@@ -12440,7 +12831,24 @@ function resolveCardIdRef(rawId, ctx) {
   if (!rawId || rawId === "$LAST_CARD") {
     return ctx?.lastCreatedCardId || fallbackBoardCardId();
   }
+  if (typeof rawId === "string" && ctx?.cardRefs?.has(rawId)) {
+    return ctx.cardRefs.get(rawId);
+  }
   return rawId;
+}
+
+function chooseSmartPorts(fromNode, toNode) {
+  if (!fromNode || !toNode) return ["out", "in"];
+  const fw = fromNode.w || MIN_CARD_WIDTH;
+  const fh = nodeHeight(fromNode);
+  const tw = toNode.w || MIN_CARD_WIDTH;
+  const th = nodeHeight(toNode);
+  const dx = (toNode.x + tw / 2) - (fromNode.x + fw / 2);
+  const dy = (toNode.y + th / 2) - (fromNode.y + fh / 2);
+  if (Math.abs(dy) > Math.abs(dx) * 0.85) {
+    return dy >= 0 ? ["bottom", "top"] : ["top", "bottom"];
+  }
+  return dx >= 0 ? ["out", "in"] : ["in", "out"];
 }
 
 function findNodeLocationAcrossApp(cardId, hintAction = null, ctx = null) {
@@ -12805,15 +13213,34 @@ async function runSingleAiAppAction(action, ctx) {
         );
         bodyText = bodyText ? `${bodyText}\n${token}` : token;
       }
-      const parentRef = action.parentCardId === "$LAST_CARD" ? ctx?.lastCreatedCardId : action.parentCardId;
-      const parentId =
-        parentRef && board.nodes.some(n => n.id === parentRef)
-          ? parentRef
-          : board.nodes[0]?.id || null;
+      const explicitParent = action.parentCardId !== undefined && action.parentCardId !== null && action.parentCardId !== "";
+      const hasGridCoords = action.gridCol != null || action.gridRow != null;
+      const shouldConnectParent = action.connectParent !== false && (explicitParent || !hasGridCoords);
+      const rawParentRef = explicitParent ? resolveCardIdRef(action.parentCardId, ctx) : null;
+      const parentId = shouldConnectParent
+        ? (rawParentRef && board.nodes.some(n => n.id === rawParentRef)
+            ? rawParentRef
+            : board.nodes[0]?.id || null)
+        : null;
       const id = makeId("action");
       const { w: cardW, h: cardH } = estimateActionCardSize(bodyText);
-      const rawPos = parentId ? getReplyActionPosition(board, parentId) : getViewportActionPosition();
-      const freePos = findFreeCardPosition(board, rawPos.x, rawPos.y, cardW, cardH, 48);
+      let freePos;
+      if (hasGridCoords) {
+        const GRID = 24;
+        const rootNode = board.nodes[0] || { x: 120, y: 120, w: MIN_CARD_WIDTH, h: 144 };
+        const col = Math.max(0, Number(action.gridCol) || 0);
+        const row = Math.max(0, Number(action.gridRow) || 0);
+        const colStep = MIN_CARD_WIDTH + 96;
+        const rowStep = Math.max(DEFAULT_CARD_HEIGHT, cardH) + 72;
+        const baseX = rootNode.x + (rootNode.w || MIN_CARD_WIDTH) + 96;
+        const baseY = rootNode.y;
+        const gx = Math.round((baseX + col * colStep) / GRID) * GRID;
+        const gy = Math.round((baseY + row * rowStep) / GRID) * GRID;
+        freePos = findFreeCardPosition(board, gx, gy, cardW, cardH, 36);
+      } else {
+        const rawPos = parentId ? getReplyActionPosition(board, parentId) : getViewportActionPosition();
+        freePos = findFreeCardPosition(board, rawPos.x, rawPos.y, cardW, cardH, 48);
+      }
       const newNode = {
         id,
         title: "",
@@ -12828,9 +13255,17 @@ async function runSingleAiAppAction(action, ctx) {
       };
       if (parentId) {
         board.nodes.splice(getReplyInsertionIndex(board, parentId), 0, newNode);
-        board.links.push({ id: makeId("link"), from: parentId, to: id, fromPort: "out", toPort: "in" });
+        const parentNode = board.nodes.find(n => n.id === parentId);
+        const [autoFrom, autoTo] = chooseSmartPorts(parentNode, newNode);
+        const validPorts = new Set(["in", "out", "top", "bottom"]);
+        const fPort = validPorts.has(action.fromPort) ? action.fromPort : autoFrom;
+        const tPort = validPorts.has(action.toPort) ? action.toPort : autoTo;
+        board.links.push({ id: makeId("link"), from: parentId, to: id, fromPort: fPort, toPort: tPort });
       } else {
         board.nodes.push(newNode);
+      }
+      if (typeof action.refId === "string" && action.refId.trim()) {
+        ctx?.cardRefs?.set(action.refId.trim(), id);
       }
       if (board === activeBoard()) {
         pendingCardPop.add(id);
@@ -12981,7 +13416,14 @@ async function runSingleAiAppAction(action, ctx) {
       const toId = resolveCardIdRef(action.toCardId, ctx);
       const fromRow = action.fromRow != null ? Number(action.fromRow) : null;
       const toRow = action.toRow != null ? Number(action.toRow) : null;
-      if (!addLink(fromId, toId, "out", "in", fromRow, toRow)) {
+      const board = activeBoard();
+      const fromNode = board?.nodes?.find(n => n.id === fromId);
+      const toNode = board?.nodes?.find(n => n.id === toId);
+      const validPorts = new Set(["in", "out", "top", "bottom"]);
+      const [autoFrom, autoTo] = chooseSmartPorts(fromNode, toNode);
+      const fPort = validPorts.has(action.fromPort) ? action.fromPort : autoFrom;
+      const tPort = validPorts.has(action.toPort) ? action.toPort : autoTo;
+      if (!addLink(fromId, toId, fPort, tPort, fromRow, toRow)) {
         throw new Error("Não foi possível conectar os cards");
       }
       saveState();
@@ -13069,6 +13511,20 @@ async function runSingleAiAppAction(action, ctx) {
       return { message: "Configurações atualizadas" };
     }
 
+    case "save_memory": {
+      const content = String(action.content || "").trim();
+      if (!content) throw new Error("Conteúdo da memória vazio.");
+      const user = activeUser();
+      const scopeKey = action.scope === "global" ? "global" : (user?.activeTaskId || "global");
+      await persistenceService.upsertProjectMemory({
+        scopeKey,
+        kind: String(action.kind || "fact"),
+        content,
+        source: "ai"
+      });
+      return { message: `Memória salva (${scopeKey === "global" ? "global" : "projeto atual"})` };
+    }
+
     default:
       throw new Error(`Ação não suportada: ${action.type}`);
   }
@@ -13146,4 +13602,366 @@ async function fallbackBrowserTranslate(text, formality, direction) {
   });
   const data = await resp.json();
   return (data?.candidates?.[0]?.content?.parts?.map(p => (p.thought ? "" : p.text || "")).join("") || "").trim();
+}
+
+// =========================================================================
+// Task Reminders & Alarms (Popover + In-App + Windows Toast)
+// =========================================================================
+let reminderModalTarget = { userId: null, taskId: null };
+let reminderModalMode = "reminder";
+let reminderModalRepeat = "none";
+
+const taskReminderPopover = document.getElementById("taskReminderPopover");
+const taskReminderForm = document.getElementById("taskReminderForm");
+const taskReminderTaskName = document.getElementById("taskReminderTaskName");
+const taskReminderModeHint = document.getElementById("taskReminderModeHint");
+const taskReminderDateTimeInput = document.getElementById("taskReminderDateTimeInput");
+const taskReminderIntervalWrap = document.getElementById("taskReminderIntervalWrap");
+const taskReminderIntervalInput = document.getElementById("taskReminderIntervalInput");
+const taskReminderNoteInput = document.getElementById("taskReminderNoteInput");
+
+function syncReminderRepeatPills() {
+  taskReminderPopover?.querySelectorAll("[data-repeat]").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.repeat === reminderModalRepeat);
+  });
+  if (taskReminderIntervalWrap) {
+    taskReminderIntervalWrap.hidden = reminderModalRepeat !== "interval";
+  }
+}
+
+function syncIntervalPresetChips() {
+  const cur = String(taskReminderIntervalInput?.value || "");
+  taskReminderPopover?.querySelectorAll("[data-interval-preset]").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.intervalPreset === cur);
+  });
+}
+const taskReminderDeleteButton = document.getElementById("taskReminderDeleteButton");
+const taskReminderCancelButton = document.getElementById("taskReminderCancelButton");
+const taskReminderCancelIcon = document.getElementById("taskReminderCancelIcon");
+const reminderAlertStack = document.getElementById("reminderAlertStack");
+
+function syncReminderModeButtons() {
+  taskReminderPopover?.querySelectorAll("[data-reminder-mode]").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.reminderMode === reminderModalMode);
+  });
+  if (taskReminderModeHint) {
+    taskReminderModeHint.textContent = reminderModalMode === "alarm"
+      ? "Toca um alerta sonoro contínuo no app e no Windows até você dispensar ou adiar."
+      : "Envia uma notificação discreta no app e no Windows com um toque suave.";
+  }
+}
+
+function closeTaskReminderModal() {
+  if (!taskReminderPopover) return;
+  taskReminderPopover.hidden = true;
+  reminderModalTarget = { userId: null, taskId: null };
+}
+
+function positionReminderPopover(anchorEl) {
+  if (!taskReminderPopover) return;
+  const popWidth = 318;
+  const popHeight = 330;
+  const rect = anchorEl?.getBoundingClientRect?.();
+  let left = rect ? rect.right + 10 : Math.round((window.innerWidth - popWidth) / 2);
+  let top = rect ? rect.top - 12 : Math.round((window.innerHeight - popHeight) / 2);
+  if (left + popWidth > window.innerWidth - 12) {
+    left = Math.max(12, (rect ? rect.left - popWidth - 10 : window.innerWidth - popWidth - 12));
+  }
+  if (top + popHeight > window.innerHeight - 12) {
+    top = Math.max(12, window.innerHeight - popHeight - 12);
+  }
+  taskReminderPopover.style.left = `${Math.max(12, Math.round(left))}px`;
+  taskReminderPopover.style.top = `${Math.max(12, Math.round(top))}px`;
+}
+
+function openTaskReminderModal(userId, taskId, anchorEl = null) {
+  if (!taskReminderPopover) return;
+  const user = state.users.find(u => u.id === userId);
+  const task = user?.tasks?.find(t => t.id === taskId);
+  if (!user || !task) return;
+
+  reminderModalTarget = { userId, taskId };
+  const existing = normalizeReminder(task.reminder);
+  reminderModalMode = existing?.mode || "reminder";
+  syncReminderModeButtons();
+
+  if (taskReminderTaskName) {
+    taskReminderTaskName.textContent = `${user.name} · ${task.title || "Sem título"}`;
+  }
+  if (taskReminderDateTimeInput) {
+    const defaultDt = existing?.dateTime || formatLocalDateTimeInput(new Date(Date.now() + 15 * 60 * 1000));
+    taskReminderDateTimeInput.value = defaultDt;
+  }
+  reminderModalRepeat = existing?.repeat || "none";
+  if (taskReminderIntervalInput) {
+    taskReminderIntervalInput.value = String(existing?.intervalMinutes || 30);
+  }
+  syncReminderRepeatPills();
+  syncIntervalPresetChips();
+  if (taskReminderNoteInput) {
+    taskReminderNoteInput.value = existing?.note || "";
+  }
+  if (taskReminderDeleteButton) {
+    taskReminderDeleteButton.hidden = !existing;
+  }
+
+  positionReminderPopover(anchorEl);
+  taskReminderPopover.hidden = false;
+}
+
+async function showInAppReminderAlert({ user, task, reminder }) {
+  if (!reminderAlertStack) return;
+  const isAlarm = reminder.mode === "alarm";
+  const alertId = `alert-${task.id}-${Date.now()}`;
+
+  if (isAlarm) {
+    alarmSoundPlayer.startAlarm(alertId);
+  } else {
+    alarmSoundPlayer.playChime(false);
+  }
+
+  const timeStr = new Date(reminder.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const subtitle = reminder.note
+    ? `${timeStr} · ${reminder.note}`
+    : `${isAlarm ? "Alarme" : "Lembrete"} · ${timeStr}${user?.name ? ` · ${user.name}` : ""}`;
+
+  if (typeof invoke === "function") {
+    try {
+      const overlayOpened = await invoke("show_reminder_overlay", {
+        title: task.title || "Task",
+        subtitle,
+        isAlarm,
+        userId: user?.id || null,
+        taskId: task?.id || null
+      });
+      if (overlayOpened) {
+        reminderAlertStack.innerHTML = "";
+        return;
+      }
+    } catch (_) {}
+  }
+
+  reminderAlertStack.innerHTML = "";
+  const card = document.createElement("div");
+  card.className = `reminder-alert-card${isAlarm ? " is-alarm" : ""}`;
+
+  card.innerHTML = `
+    <span class="reminder-alert-icon" aria-hidden="true">${icons.bell}</span>
+    <div class="reminder-alert-copy">
+      <span class="reminder-alert-title">${escapeHtml(task.title || "Task")}</span>
+      <span class="reminder-alert-body">${escapeHtml(subtitle)}</span>
+    </div>
+    <div class="reminder-alert-actions">
+      <button class="reminder-alert-btn primary" type="button" data-action="open">Abrir</button>
+      <button class="reminder-alert-btn" type="button" data-action="snooze" title="Adiar 10 minutos">+10m</button>
+      <button class="reminder-alert-btn dismiss" type="button" data-action="dismiss" aria-label="Dispensar" title="Dispensar">×</button>
+    </div>
+  `;
+
+  const dismiss = () => {
+    alarmSoundPlayer.stopAlarm(alertId);
+    card.classList.add("is-closing");
+    setTimeout(() => card.remove(), 180);
+    if (typeof invoke === "function") {
+      invoke("close_reminder_overlay").catch(() => {});
+    }
+  };
+
+  card.addEventListener("pointerdown", ev => ev.stopPropagation());
+
+  card.querySelector('[data-action="open"]').addEventListener("click", ev => {
+    ev.stopPropagation();
+    if (user?.id) state.activeUserId = user.id;
+    const u = state.users.find(x => x.id === user?.id);
+    if (u && task?.id) u.activeTaskId = task.id;
+    saveState();
+    render();
+    dismiss();
+  });
+
+  card.querySelector('[data-action="snooze"]').addEventListener("click", ev => {
+    ev.stopPropagation();
+    const u = state.users.find(x => x.id === user?.id);
+    const t = u?.tasks?.find(x => x.id === task?.id);
+    if (t) {
+      const snoozedDt = formatLocalDateTimeInput(new Date(Date.now() + 10 * 60 * 1000));
+      t.reminder = normalizeReminder({
+        ...reminder,
+        enabled: true,
+        dateTime: snoozedDt,
+        lastTriggeredFor: null
+      });
+      saveState();
+      renderUserTasks();
+    }
+    dismiss();
+  });
+
+  card.querySelector('[data-action="dismiss"]').addEventListener("click", ev => {
+    ev.stopPropagation();
+    dismiss();
+  });
+
+  reminderAlertStack.appendChild(card);
+}
+
+if (taskReminderPopover && taskReminderForm) {
+  taskReminderPopover.querySelectorAll("[data-reminder-mode]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      reminderModalMode = btn.dataset.reminderMode === "alarm" ? "alarm" : "reminder";
+      syncReminderModeButtons();
+    });
+  });
+
+  const flashReminderDateInput = () => {
+    if (!taskReminderDateTimeInput) return;
+    taskReminderDateTimeInput.classList.remove("is-updated");
+    void taskReminderDateTimeInput.offsetWidth;
+    taskReminderDateTimeInput.classList.add("is-updated");
+    setTimeout(() => taskReminderDateTimeInput?.classList.remove("is-updated"), 450);
+  };
+
+  taskReminderPopover.querySelectorAll("[data-quick-minutes]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const mins = Number(btn.dataset.quickMinutes) || 15;
+      if (taskReminderDateTimeInput) {
+        const currentParsed = taskReminderDateTimeInput.value ? new Date(taskReminderDateTimeInput.value).getTime() : NaN;
+        const baseMs = Number.isFinite(currentParsed) && currentParsed > Date.now() ? currentParsed : Date.now();
+        taskReminderDateTimeInput.value = formatLocalDateTimeInput(new Date(baseMs + mins * 60 * 1000));
+        flashReminderDateInput();
+      }
+    });
+  });
+
+  taskReminderPopover.querySelectorAll("[data-quick-tomorrow]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const hr = Number(btn.dataset.quickTomorrow) || 9;
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      d.setHours(hr, 0, 0, 0);
+      if (taskReminderDateTimeInput) {
+        taskReminderDateTimeInput.value = formatLocalDateTimeInput(d);
+        flashReminderDateInput();
+      }
+    });
+  });
+
+  taskReminderPopover.querySelectorAll("[data-repeat]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      reminderModalRepeat = btn.dataset.repeat || "none";
+      syncReminderRepeatPills();
+    });
+  });
+
+  taskReminderPopover.querySelectorAll("[data-interval-preset]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (taskReminderIntervalInput) {
+        taskReminderIntervalInput.value = btn.dataset.intervalPreset || "30";
+        syncIntervalPresetChips();
+      }
+    });
+  });
+
+  taskReminderIntervalInput?.addEventListener("input", syncIntervalPresetChips);
+
+  taskReminderCancelButton?.addEventListener("click", closeTaskReminderModal);
+  taskReminderCancelIcon?.addEventListener("click", closeTaskReminderModal);
+  document.addEventListener("pointerdown", ev => {
+    if (
+      !taskReminderPopover.hidden &&
+      !taskReminderPopover.contains(ev.target) &&
+      !ev.target.closest?.(".user-task-reminder")
+    ) {
+      closeTaskReminderModal();
+    }
+  });
+
+  taskReminderDeleteButton?.addEventListener("click", () => {
+    const user = state.users.find(u => u.id === reminderModalTarget.userId);
+    const task = user?.tasks?.find(t => t.id === reminderModalTarget.taskId);
+    if (task) {
+      delete task.reminder;
+      saveState();
+      renderUserTasks();
+    }
+    closeTaskReminderModal();
+  });
+
+  taskReminderForm.addEventListener("submit", ev => {
+    ev.preventDefault();
+    const user = state.users.find(u => u.id === reminderModalTarget.userId);
+    const task = user?.tasks?.find(t => t.id === reminderModalTarget.taskId);
+    if (!task) {
+      closeTaskReminderModal();
+      return;
+    }
+    const nextReminder = normalizeReminder({
+      enabled: true,
+      mode: reminderModalMode,
+      dateTime: taskReminderDateTimeInput?.value || "",
+      repeat: reminderModalRepeat,
+      intervalMinutes: Number(taskReminderIntervalInput?.value || 30),
+      note: taskReminderNoteInput?.value || "",
+      lastTriggeredFor: null
+    });
+    if (!nextReminder) return;
+    task.reminder = nextReminder;
+    saveState();
+    renderUserTasks();
+    closeTaskReminderModal();
+  });
+
+  window.addEventListener("keydown", ev => {
+    if (ev.key === "Escape" && !taskReminderPopover.hidden) {
+      closeTaskReminderModal();
+    }
+  });
+}
+
+const taskReminderService = new TaskReminderService({
+  getState: () => state,
+  onStateMutated: () => {
+    saveState();
+    renderUserTasks();
+  },
+  onTrigger: item => showInAppReminderAlert(item),
+  invokeFn: typeof invoke === "function" ? invoke : null,
+  pollIntervalMs: 5000
+});
+taskReminderService.start();
+
+if (window.__TAURI__?.event?.listen) {
+  window.__TAURI__.event.listen("reminder-overlay-action", ev => {
+    const payload = ev?.payload || {};
+    const action = payload.action;
+    const userId = payload.userId;
+    const taskId = payload.taskId;
+
+    alarmSoundPlayer.stopAll();
+    if (reminderAlertStack) {
+      reminderAlertStack.innerHTML = "";
+    }
+
+    if (action === "open" && userId && taskId) {
+      state.activeUserId = userId;
+      const u = state.users.find(x => x.id === userId);
+      if (u) u.activeTaskId = taskId;
+      saveState();
+      render();
+    } else if (action === "snooze" && userId && taskId) {
+      const u = state.users.find(x => x.id === userId);
+      const t = u?.tasks?.find(x => x.id === taskId);
+      if (t) {
+        const snoozedDt = formatLocalDateTimeInput(new Date(Date.now() + 10 * 60 * 1000));
+        t.reminder = normalizeReminder({
+          ...(t.reminder || {}),
+          enabled: true,
+          dateTime: snoozedDt,
+          lastTriggeredFor: null
+        });
+        saveState();
+        renderUserTasks();
+      }
+    }
+  }).catch(() => {});
 }

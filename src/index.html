@@ -544,7 +544,26 @@
                         <path d="M12 5v14M5 12h14" />
                       </svg>
                     </button>
-                    <span class="ai-composer-model-tag" id="aiChatModelTag">Auto</span>
+                    <button class="ai-screen-vision-btn" id="aiChatScreenVisionBtn" type="button"
+                      aria-pressed="false"
+                      title="Sempre ver a tela (desativado: só captura quando você pedir na mensagem)">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect x="2" y="3" width="20" height="14" rx="2" />
+                        <path d="M8 21h8M12 17v4" />
+                      </svg>
+                      <span>Tela</span>
+                    </button>
+                    <div class="ai-model-picker-wrap">
+                      <button class="ai-model-picker-btn" id="aiChatModelBtn" type="button"
+                        title="Escolher modelo de IA" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="ai-model-quota-dot quota-available" id="aiChatModelQuotaDot" aria-hidden="true"></span>
+                        <span id="aiChatModelLabel">Auto</span>
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </button>
+                      <div class="ai-model-popover" id="aiChatModelPopover" role="listbox" hidden></div>
+                    </div>
                   </div>
                   <button class="ai-chat-send" id="aiChatSendBtn" type="submit" title="Send message (Enter)"
                     aria-label="Send message">
@@ -725,6 +744,23 @@
                 <input type="checkbox" id="settingsScreenShareProtectionInput" />
                 <span class="settings-switch" aria-hidden="true"></span>
               </label>
+              <div class="settings-row">
+                <div class="settings-row-copy">
+                  <span class="settings-label">Som do alarme</span>
+                  <small class="settings-desc">Toque usado quando um alarme de task dispara</small>
+                </div>
+                <div class="settings-sound-control">
+                  <select class="settings-select" id="settingsAlarmSoundInput" aria-label="Som do alarme">
+                    <option value="classic">Clássico</option>
+                    <option value="chime">Sino Cristal</option>
+                    <option value="pulse">Pulso Digital</option>
+                    <option value="radar">Radar</option>
+                    <option value="marimba">Marimba</option>
+                    <option value="urgent">Urgente</option>
+                  </select>
+                  <button class="settings-sound-test-btn" id="settingsAlarmSoundTestBtn" type="button">Testar</button>
+                </div>
+              </div>
               <div class="settings-row">
                 <div class="settings-row-copy">
                   <span class="settings-label">Versão instalada</span>
@@ -911,6 +947,84 @@
         </footer>
       </form>
     </div>
+
+    <div class="task-reminder-popover" id="taskReminderPopover" role="dialog" aria-label="Lembrete e Alarme" hidden>
+      <form class="reminder-popover-form" id="taskReminderForm">
+        <div class="reminder-popover-head">
+          <div class="reminder-head-copy">
+            <strong>Lembrete e Alarme</strong>
+            <div class="reminder-task-subtitle" id="taskReminderTaskName"></div>
+          </div>
+          <button class="reminder-close-btn" id="taskReminderCancelIcon" type="button" aria-label="Fechar" title="Fechar">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="reminder-mode-switch" role="radiogroup" aria-label="Tipo de alerta">
+          <button class="reminder-mode-btn active" type="button" data-reminder-mode="reminder">Lembrete</button>
+          <button class="reminder-mode-btn" type="button" data-reminder-mode="alarm">Alarme</button>
+        </div>
+        <p class="reminder-mode-hint" id="taskReminderModeHint">
+          Notificação discreta no app e no Windows com toque suave.
+        </p>
+
+        <div class="reminder-section">
+          <div class="reminder-section-head">
+            <span>Quando avisar</span>
+            <div class="reminder-quick-row">
+              <button class="reminder-quick-btn" type="button" data-quick-minutes="15">+15m</button>
+              <button class="reminder-quick-btn" type="button" data-quick-minutes="60">+1h</button>
+              <button class="reminder-quick-btn" type="button" data-quick-tomorrow="9">Amanhã 9h</button>
+            </div>
+          </div>
+          <input class="reminder-input" id="taskReminderDateTimeInput" type="datetime-local" required />
+        </div>
+
+        <div class="reminder-section">
+          <div class="reminder-section-head">
+            <span>Repetição</span>
+          </div>
+          <div class="reminder-repeat-pills" id="taskReminderRepeatPills" role="radiogroup" aria-label="Repetição">
+            <button class="reminder-pill-btn active" type="button" data-repeat="none">Uma vez</button>
+            <button class="reminder-pill-btn" type="button" data-repeat="interval">A cada Xm</button>
+            <button class="reminder-pill-btn" type="button" data-repeat="daily">Diário</button>
+            <button class="reminder-pill-btn" type="button" data-repeat="weekly">Semanal</button>
+          </div>
+          <div class="reminder-interval-bar" id="taskReminderIntervalWrap" hidden>
+            <span class="reminder-interval-label">Intervalo</span>
+            <div class="reminder-interval-chips">
+              <button class="reminder-chip-btn" type="button" data-interval-preset="5">5m</button>
+              <button class="reminder-chip-btn" type="button" data-interval-preset="15">15m</button>
+              <button class="reminder-chip-btn" type="button" data-interval-preset="30">30m</button>
+              <button class="reminder-chip-btn" type="button" data-interval-preset="60">60m</button>
+            </div>
+            <div class="reminder-interval-custom">
+              <input id="taskReminderIntervalInput" type="number" min="1" max="1440" step="1" value="30" />
+              <span>min</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="reminder-section">
+          <div class="reminder-section-head">
+            <span>Mensagem (opcional)</span>
+          </div>
+          <input class="reminder-input" id="taskReminderNoteInput" type="text" maxlength="200" placeholder="Ex: Enviar atualização para o cliente" autocomplete="off" />
+        </div>
+
+        <div class="reminder-popover-footer">
+          <button class="reminder-text-btn danger" id="taskReminderDeleteButton" type="button" hidden>Remover</button>
+          <div class="reminder-modal-footer-right">
+            <button class="reminder-text-btn" id="taskReminderCancelButton" type="button">Cancelar</button>
+            <button class="reminder-save-btn" type="submit">Ativar</button>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <div class="reminder-alert-stack" id="reminderAlertStack" aria-live="assertive"></div>
 
     <!-- Modal de Imagem em Tela Cheia com Zoom e Pan -->
     <div class="modal-backdrop image-fullscreen-modal" id="imageFullscreenModal" hidden>

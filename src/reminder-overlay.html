@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TODOCompanion Alert</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+    }
+    .pill {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 9px 12px 9px 13px;
+      border-radius: 999px;
+      background: rgba(24, 24, 29, 0.95);
+      border: 1px solid rgba(245, 158, 11, 0.55);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+      animation: dropIn 280ms cubic-bezier(0.22, 1.25, 0.36, 1);
+      max-width: 500px;
+    }
+    .pill.is-alarm {
+      border-color: rgba(239, 68, 68, 0.78);
+    }
+    @keyframes dropIn {
+      from { opacity: 0; transform: translateY(-14px) scale(0.94); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes bellRing {
+      0%, 100% { transform: rotate(0deg); }
+      15% { transform: rotate(18deg); }
+      30% { transform: rotate(-16deg); }
+      45% { transform: rotate(12deg); }
+      60% { transform: rotate(-10deg); }
+      75% { transform: rotate(5deg); }
+    }
+    .icon-wrap {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+      background: rgba(245, 158, 11, 0.16);
+      color: #fbbf24;
+    }
+    .pill.is-alarm .icon-wrap {
+      background: rgba(239, 68, 68, 0.22);
+      color: #f87171;
+    }
+    .icon-wrap svg {
+      width: 15px;
+      height: 15px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .pill.is-alarm .icon-wrap svg {
+      animation: bellRing 1.1s ease-in-out infinite;
+      transform-origin: top center;
+    }
+    .copy {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      max-width: 240px;
+    }
+    .title {
+      font-size: 12.5px;
+      font-weight: 650;
+      color: #f8fafc;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sub {
+      font-size: 11px;
+      color: rgba(226, 232, 240, 0.78);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+    button {
+      height: 26px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.07);
+      color: #f1f5f9;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 120ms ease, transform 90ms ease;
+    }
+    button:hover { background: rgba(255, 255, 255, 0.16); }
+    button:active { transform: scale(0.95); }
+    button.primary {
+      background: #0284c7;
+      border-color: transparent;
+      color: #ffffff;
+    }
+    button.primary:hover { filter: brightness(1.1); }
+    button.dismiss {
+      width: 26px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="pill" id="pill">
+    <span class="icon-wrap" aria-hidden="true">
+      <svg viewBox="0 0 16 16">
+        <path d="M4.3 6.5a3.7 3.7 0 1 1 7.4 0c0 2.5.9 3.65 1.45 4.15H2.85c.55-.5 1.45-1.65 1.45-4.15Z"/>
+        <path d="M6.55 12.7a1.55 1.55 0 0 0 2.9 0"/>
+      </svg>
+    </span>
+    <div class="copy">
+      <span class="title" id="title">Task</span>
+      <span class="sub" id="sub">Lembrete</span>
+    </div>
+    <div class="actions">
+      <button class="primary" type="button" id="openBtn">Abrir</button>
+      <button type="button" id="snoozeBtn" title="Adiar 10 minutos">+10m</button>
+      <button class="dismiss" type="button" id="dismissBtn" aria-label="Dispensar" title="Dispensar">×</button>
+    </div>
+  </div>
+  <script>
+    const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke || null;
+    const listen = window.__TAURI__?.event?.listen || null;
+    const params = new URLSearchParams(window.location.search);
+    let current = {
+      title: params.get("title") || "Task",
+      subtitle: params.get("subtitle") || "Lembrete",
+      isAlarm: params.get("alarm") === "1",
+      userId: params.get("userId") || "",
+      taskId: params.get("taskId") || ""
+    };
+
+    function render(data) {
+      current = { ...current, ...data };
+      document.getElementById("title").textContent = current.title || "Task";
+      document.getElementById("sub").textContent = current.subtitle || "";
+      document.getElementById("pill").classList.toggle("is-alarm", Boolean(current.isAlarm));
+    }
+
+    function sendAction(action) {
+      if (!invoke) return;
+      invoke("reminder_overlay_action", {
+        action,
+        userId: current.userId || null,
+        taskId: current.taskId || null
+      }).catch(() => {});
+    }
+
+    document.getElementById("openBtn").addEventListener("click", () => sendAction("open"));
+    document.getElementById("snoozeBtn").addEventListener("click", () => sendAction("snooze"));
+    document.getElementById("dismissBtn").addEventListener("click", () => sendAction("dismiss"));
+    window.addEventListener("keydown", ev => {
+      if (ev.key === "Escape") sendAction("dismiss");
+    });
+
+    if (listen) {
+      listen("reminder-overlay-update", ev => {
+        if (ev?.payload) render(ev.payload);
+      });
+    }
+
+    render(current);
+  </script>
+</body>
+</html>

@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod db;
+
 use std::env;
 use std::fs;
 use std::collections::{HashMap, VecDeque};
@@ -292,6 +294,320 @@ fn state_save(db: State<'_, DbState>, json: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn db_settings_get_all(db: State<'_, DbState>) -> Result<HashMap<String, String>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    db::get_all_settings(&conn)
+}
+
+#[tauri::command]
+fn db_setting_set(db: State<'_, DbState>, key: String, value: String) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    db::set_setting(&conn, &key, &value)
+}
+
+#[tauri::command]
+fn db_chat_sessions_load(db: State<'_, DbState>) -> Result<Vec<String>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    db::load_chat_sessions_json(&conn)
+}
+
+#[tauri::command]
+fn db_chat_sessions_save(db: State<'_, DbState>, sessions_json: String) -> Result<(), String> {
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    db::save_chat_sessions_json(&mut conn, &sessions_json)
+}
+
+#[tauri::command]
+fn db_chat_search_past(
+    db: State<'_, DbState>,
+    query: String,
+    exclude_session_id: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<db::ChatSearchHit>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    db::search_past_chat_messages(
+        &conn,
+        &query,
+        exclude_session_id.as_deref(),
+        limit.unwrap_or(4),
+    )
+}
+
+#[tauri::command]
+fn db_memory_list(
+    db: State<'_, DbState>,
+    scope_key: Option<String>,
+) -> Result<Vec<db::ProjectMemoryRecord>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    db::list_project_memories(&conn, scope_key.as_deref())
+}
+
+#[tauri::command]
+fn db_memory_upsert(
+    db: State<'_, DbState>,
+    id: String,
+    scope_key: String,
+    kind: String,
+    content: String,
+    source: Option<String>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    db::upsert_project_memory(
+        &conn,
+        &id,
+        &scope_key,
+        &kind,
+        &content,
+        source.as_deref().unwrap_or("ai"),
+    )
+}
+
+#[tauri::command]
+fn db_memory_delete(db: State<'_, DbState>, id: String) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    db::delete_project_memory(&conn, &id)
+}
+
+#[tauri::command]
+fn db_ai_activity_log(
+    db: State<'_, DbState>,
+    kind: String,
+    model: Option<String>,
+    status: String,
+    summary: String,
+    detail: Option<String>,
+    prompt_tokens: Option<i64>,
+    completion_tokens: Option<i64>,
+    total_tokens: Option<i64>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    db::log_ai_activity(
+        &conn,
+        &kind,
+        model.as_deref().unwrap_or(""),
+        &status,
+        &summary,
+        detail.as_deref().unwrap_or(""),
+        prompt_tokens.unwrap_or(0),
+        completion_tokens.unwrap_or(0),
+        total_tokens.unwrap_or(0),
+    )
+}
+
+#[tauri::command]
+fn db_ai_activity_list(
+    db: State<'_, DbState>,
+    limit: Option<usize>,
+) -> Result<Vec<db::AiActivityRecord>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    db::list_ai_activity(&conn, limit.unwrap_or(50))
+}
+
+fn escape_xml_text(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+#[tauri::command]
+fn send_windows_notification(title: String, body: String, is_alarm: Option<bool>) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let safe_title = escape_xml_text(title.trim());
+        let safe_body = escape_xml_text(body.trim());
+        let alarm = is_alarm.unwrap_or(false);
+        let scenario = if alarm { "alarm" } else { "reminder" };
+        let audio_src = if alarm {
+            "ms-winsoundevent:Notification.Looping.Alarm"
+        } else {
+            "ms-winsoundevent:Notification.Reminder"
+        };
+
+        let xml = format!(
+            "<toast scenario=\"{scenario}\"><visual><binding template=\"ToastGeneric\"><text>{safe_title}</text><text>{safe_body}</text></binding></visual><audio src=\"{audio_src}\"/></toast>"
+        );
+        let ps_xml = xml.replace('\'', "''");
+        let ps_title = title.trim().replace('\'', "''");
+        let ps_body = body.trim().replace('\'', "''");
+        let script = format!(
+            "$ok = $false; \
+             try {{ \
+               [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; \
+               [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null; \
+               $doc = New-Object Windows.Data.Xml.Dom.XmlDocument; \
+               $doc.LoadXml('{ps_xml}'); \
+               $toast = New-Object Windows.UI.Notifications.ToastNotification $doc; \
+               $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\powershell.exe'; \
+               [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show($toast); \
+               $ok = $true; \
+             }} catch {{ $ok = $false }}; \
+             if (-not $ok) {{ \
+               Add-Type -AssemblyName System.Windows.Forms; \
+               $n = New-Object System.Windows.Forms.NotifyIcon; \
+               $n.Icon = [System.Drawing.SystemIcons]::Information; \
+               $n.Visible = $true; \
+               $n.ShowBalloonTip(8000, '{ps_title}', '{ps_body}', [System.Windows.Forms.ToolTipIcon]::Info); \
+               Start-Sleep -Milliseconds 9000; \
+               $n.Dispose(); \
+             }}"
+        );
+
+        std::thread::spawn(move || {
+            let _ = std::process::Command::new("powershell.exe")
+                .creation_flags(CREATE_NO_WINDOW)
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    &script,
+                ])
+                .output();
+        });
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (title, body, is_alarm);
+    }
+    Ok(())
+}
+
+fn url_encode_query_value(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for byte in input.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char);
+            }
+            _ => {
+                out.push_str(&format!("%{:02X}", byte));
+            }
+        }
+    }
+    out
+}
+
+#[tauri::command]
+async fn show_reminder_overlay(
+    app: tauri::AppHandle,
+    title: String,
+    subtitle: String,
+    is_alarm: Option<bool>,
+    user_id: Option<String>,
+    task_id: Option<String>,
+) -> Result<bool, String> {
+    let alarm = is_alarm.unwrap_or(false);
+    if let Some(main_win) = app.get_webview_window("main") {
+        let visible = main_win.is_visible().unwrap_or(true);
+        let minimized = main_win.is_minimized().unwrap_or(false);
+        let focused = main_win.is_focused().unwrap_or(false);
+        if visible && !minimized && focused {
+            return Ok(false);
+        }
+    }
+
+    if let Some(existing) = app.get_webview_window("reminder-overlay") {
+        let _ = existing.emit(
+            "reminder-overlay-update",
+            serde_json::json!({
+                "title": title,
+                "subtitle": subtitle,
+                "isAlarm": alarm,
+                "userId": user_id.unwrap_or_default(),
+                "taskId": task_id.unwrap_or_default(),
+            }),
+        );
+        let _ = existing.show();
+        return Ok(true);
+    }
+
+    let query = format!(
+        "reminder-overlay.html?title={}&subtitle={}&alarm={}&userId={}&taskId={}",
+        url_encode_query_value(&title),
+        url_encode_query_value(&subtitle),
+        if alarm { "1" } else { "0" },
+        url_encode_query_value(user_id.as_deref().unwrap_or("")),
+        url_encode_query_value(task_id.as_deref().unwrap_or("")),
+    );
+
+    let win_w = 520.0_f64;
+    let win_h = 74.0_f64;
+    let mut pos_x = 400.0_f64;
+    let mut pos_y = 18.0_f64;
+
+    if let Ok(Some(monitor)) = app.primary_monitor() {
+        let scale = monitor.scale_factor();
+        let logical_w = monitor.size().width as f64 / scale;
+        let logical_x = monitor.position().x as f64 / scale;
+        let logical_y = monitor.position().y as f64 / scale;
+        pos_x = logical_x + ((logical_w - win_w) / 2.0).max(0.0);
+        pos_y = logical_y + 18.0;
+    }
+
+    tauri::WebviewWindowBuilder::new(&app, "reminder-overlay", tauri::WebviewUrl::App(query.into()))
+        .title("TODOCompanion Alert")
+        .inner_size(win_w, win_h)
+        .position(pos_x, pos_y)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .focused(false)
+        .visible(true)
+        .build()
+        .map_err(|e| format!("Falha ao abrir alerta flutuante: {e}"))?;
+
+    Ok(true)
+}
+
+#[tauri::command]
+async fn close_reminder_overlay(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("reminder-overlay") {
+        let _ = win.close();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn reminder_overlay_action(
+    app: tauri::AppHandle,
+    action: String,
+    user_id: Option<String>,
+    task_id: Option<String>,
+) -> Result<(), String> {
+    if action == "open" {
+        if let Some(main_win) = app.get_webview_window("main") {
+            let _ = main_win.unminimize();
+            let _ = main_win.show();
+            let _ = main_win.set_focus();
+        }
+    }
+    let _ = app.emit(
+        "reminder-overlay-action",
+        serde_json::json!({
+            "action": action,
+            "userId": user_id.unwrap_or_default(),
+            "taskId": task_id.unwrap_or_default(),
+        }),
+    );
+    if let Some(win) = app.get_webview_window("reminder-overlay") {
+        let _ = win.close();
+    }
+    Ok(())
+}
+
 #[derive(Clone, Serialize, Deserialize, Default)]
 struct AiChatAttachment {
     name: String,
@@ -374,6 +690,22 @@ const SIDE_CHAT_MODEL_CASCADE: &[&str] = &[
     "gemini-2.5-flash-lite",
     "gemma-4-31b-it",
 ];
+
+fn build_chat_model_list(preferred_model: Option<&str>) -> Vec<String> {
+    let mut models: Vec<String> = Vec::with_capacity(SIDE_CHAT_MODEL_CASCADE.len() + 1);
+    if let Some(raw) = preferred_model {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() && !trimmed.eq_ignore_ascii_case("auto") {
+            models.push(trimmed.to_string());
+        }
+    }
+    for &model in SIDE_CHAT_MODEL_CASCADE {
+        if !models.iter().any(|existing| existing == model) {
+            models.push(model.to_string());
+        }
+    }
+    models
+}
 
 fn is_deprecated_gemini_model(model: &str) -> bool {
     let lower = model.trim().to_lowercase();
@@ -473,10 +805,194 @@ fn gemini_model_cooldowns() -> &'static Mutex<HashMap<String, Instant>> {
     COOLDOWNS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+struct ModelQuotaStatus {
+    model: String,
+    status: String, // "available" | "cooldown" | "exhausted" | "unavailable"
+    remaining_seconds: u64,
+    quota_label: String,
+}
+
+fn gemini_live_quota_cache() -> &'static Mutex<Option<(Instant, Vec<ModelQuotaStatus>)>> {
+    static CACHE: OnceLock<Mutex<Option<(Instant, Vec<ModelQuotaStatus>)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn invalidate_live_quota_cache() {
+    if let Ok(mut guard) = gemini_live_quota_cache().lock() {
+        *guard = None;
+    }
+}
+
 fn mark_model_cooldown(model: &str, duration: Duration) {
     if let Ok(mut map) = gemini_model_cooldowns().lock() {
         map.insert(model.to_string(), Instant::now() + duration);
     }
+    invalidate_live_quota_cache();
+}
+
+fn clear_model_cooldown(model: &str) {
+    if let Ok(mut map) = gemini_model_cooldowns().lock() {
+        map.remove(model);
+    }
+}
+
+fn model_daily_quota_label(model: &str) -> &'static str {
+    match model {
+        "gemini-3.5-flash-lite" | "gemini-3.1-flash-lite" | "gemini-2.5-flash-lite" => "500/dia",
+        "gemma-4-31b-it" => "14.4k/dia",
+        _ => "20/dia",
+    }
+}
+
+fn probe_single_model_live(key: &str, model: &str) -> ModelQuotaStatus {
+    let now = Instant::now();
+    if is_model_marked_unavailable(model) {
+        return ModelQuotaStatus {
+            model: model.to_string(),
+            status: "unavailable".to_string(),
+            remaining_seconds: 0,
+            quota_label: "Indisponível".to_string(),
+        };
+    }
+
+    if let Ok(map) = gemini_model_cooldowns().lock() {
+        if let Some(&until) = map.get(model) {
+            if until > now {
+                let rem = until.duration_since(now).as_secs();
+                let st = if rem > 90 { "exhausted" } else { "cooldown" };
+                return ModelQuotaStatus {
+                    model: model.to_string(),
+                    status: st.to_string(),
+                    remaining_seconds: rem,
+                    quota_label: if st == "exhausted" {
+                        "Sem cota".to_string()
+                    } else {
+                        format!("Aguarde {rem}s")
+                    },
+                };
+            }
+        }
+    }
+
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+        model, key
+    );
+    let payload = serde_json::json!({
+        "contents": [{ "role": "user", "parts": [{ "text": "." }] }],
+        "generationConfig": { "maxOutputTokens": 1 }
+    });
+
+    match gemini_translate_agent()
+        .post(&url)
+        .set("Content-Type", "application/json")
+        .send_json(payload)
+    {
+        Ok(_) => {
+            clear_model_cooldown(model);
+            ModelQuotaStatus {
+                model: model.to_string(),
+                status: "available".to_string(),
+                remaining_seconds: 0,
+                quota_label: format!("Com cota · {}", model_daily_quota_label(model)),
+            }
+        }
+        Err(ureq::Error::Status(code, resp)) => {
+            let err_body = resp.into_string().unwrap_or_default().to_lowercase();
+            if is_quota_exhausted_error(code, &err_body) {
+                let dur = quota_cooldown_duration(&err_body);
+                if let Ok(mut map) = gemini_model_cooldowns().lock() {
+                    map.insert(model.to_string(), Instant::now() + dur);
+                }
+                let is_daily = dur.as_secs() > 90;
+                ModelQuotaStatus {
+                    model: model.to_string(),
+                    status: if is_daily { "exhausted" } else { "cooldown" }.to_string(),
+                    remaining_seconds: dur.as_secs(),
+                    quota_label: if is_daily {
+                        "Sem cota".to_string()
+                    } else {
+                        format!("Aguarde {}s", dur.as_secs())
+                    },
+                }
+            } else if code == 404
+                || code == 410
+                || err_body.contains("not found")
+                || err_body.contains("not supported")
+            {
+                mark_model_unavailable(model);
+                if let Ok(mut map) = gemini_model_cooldowns().lock() {
+                    map.insert(model.to_string(), Instant::now() + Duration::from_secs(3600));
+                }
+                ModelQuotaStatus {
+                    model: model.to_string(),
+                    status: "unavailable".to_string(),
+                    remaining_seconds: 3600,
+                    quota_label: "Indisponível".to_string(),
+                }
+            } else {
+                ModelQuotaStatus {
+                    model: model.to_string(),
+                    status: "available".to_string(),
+                    remaining_seconds: 0,
+                    quota_label: format!("Com cota · {}", model_daily_quota_label(model)),
+                }
+            }
+        }
+        Err(_) => ModelQuotaStatus {
+            model: model.to_string(),
+            status: "cooldown".to_string(),
+            remaining_seconds: 15,
+            quota_label: "Instável".to_string(),
+        },
+    }
+}
+
+#[tauri::command]
+async fn get_ai_models_quota_status(
+    api_key: Option<String>,
+    force_probe: Option<bool>,
+) -> Result<Vec<ModelQuotaStatus>, String> {
+    let force = force_probe.unwrap_or(false);
+    if !force {
+        if let Ok(guard) = gemini_live_quota_cache().lock() {
+            if let Some((ts, ref cached)) = *guard {
+                if ts.elapsed() < Duration::from_secs(90) {
+                    return Ok(cached.clone());
+                }
+            }
+        }
+    }
+
+    let (key, _) = resolve_gemini_key_and_models(api_key)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let key_ref = key.as_str();
+        let results: Vec<ModelQuotaStatus> = std::thread::scope(|s| {
+            let handles: Vec<_> = SIDE_CHAT_MODEL_CASCADE
+                .iter()
+                .map(|&m| s.spawn(move || probe_single_model_live(key_ref, m)))
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| {
+                    h.join().unwrap_or_else(|_| ModelQuotaStatus {
+                        model: String::new(),
+                        status: "unavailable".to_string(),
+                        remaining_seconds: 0,
+                        quota_label: "Erro".to_string(),
+                    })
+                })
+                .collect()
+        });
+
+        if let Ok(mut guard) = gemini_live_quota_cache().lock() {
+            *guard = Some((Instant::now(), results.clone()));
+        }
+        Ok(results)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn is_token_limit_error(status: u16, err_lower: &str) -> bool {
@@ -978,6 +1494,7 @@ fn execute_gemini_fast_payload_with_model(
                     }
                     let final_text = combined.trim();
                     if !final_text.is_empty() {
+                        clear_model_cooldown(&model);
                         let usage = extract_token_usage(&body, final_text);
                         return Ok((final_text.to_string(), model.clone(), usage));
                     }
@@ -1034,11 +1551,8 @@ fn execute_gemini_fast_payload_with_model(
                         || err_lower.contains("not found")
                         || err_lower.contains("deprecated")
                     {
-                        if strict_side_chat_models {
-                            mark_model_cooldown(&model, Duration::from_secs(120));
-                        } else {
-                            mark_model_unavailable(&model);
-                        }
+                        mark_model_unavailable(&model);
+                        mark_model_cooldown(&model, Duration::from_secs(3600));
                         break;
                     }
                     if code == 400
@@ -1882,6 +2396,7 @@ async fn ai_chat_english(
     api_key: Option<String>,
     app_context: Option<String>,
     app_attachments: Option<Vec<AiAppAttachmentRef>>,
+    preferred_model: Option<String>,
 ) -> Result<AiChatReply, String> {
     if messages.is_empty() {
         return Ok(AiChatReply {
@@ -1895,16 +2410,23 @@ async fn ai_chat_english(
 
     let (key, _models) = resolve_gemini_key_and_models(api_key)?;
     let root_dir = app_root(&app).ok();
-    let models: Vec<String> = SIDE_CHAT_MODEL_CASCADE
-        .iter()
-        .map(|model| (*model).to_string())
-        .collect();
+    let models = build_chat_model_list(preferred_model.as_deref());
     let _ = formality;
     let ctx_json = app_context.unwrap_or_else(|| "{}".to_string());
     let extra_app_attachments = app_attachments.unwrap_or_default();
 
     tauri::async_runtime::spawn_blocking(move || {
-        let system_prompt = format!(
+        let is_minimal_ctx = ctx_json.contains("\"mode\":\"minimal\"");
+        let system_prompt = if is_minimal_ctx {
+            format!(
+                "You are the integrated AI Assistant of TODOCompanion. Always reply in the same language the user writes in.\n\
+                 - Deliver the complete, final answer directly in this single turn (never reply with 'Vou pesquisar/verificar').\n\
+                 - If `current_screen.jpg` is attached, inspect the screenshot of the user's screen directly and answer about what is visible.\n\
+                 - If real-time internet data or currency rates are injected in the user's message, use them directly.\n\
+                 - Context: {ctx_json}"
+            )
+        } else {
+            format!(
             "You are the integrated AI Agent of TODOCompanion with full visibility and control over the app, live internet search (Google Search), and direct access to app attachments.\n\
              Always reply in the same language the user writes in.\n\n\
              INTERNET & APP ATTACHMENTS CAPABILITIES (CRITICAL SINGLE-TURN RULE):\n\
@@ -1938,14 +2460,18 @@ async fn ai_chat_english(
                * When the user says 'adicione um card com essa info' / 'coloque isso num card' / 'crie um card com isso', take the information from the previous message(s) in the conversation and put the full text inside `create_card` -> `body`!\n\
                * When the user says 'indique no canva' / 'mostre no canva' / 'navegue até esse card' / 'onde está esse card', use `focus_card` with the card's real `id` from `LIVE APP STATE` (`nodes[].id`, e.g. `\"action-...\"`). Only use `\"$LAST_CARD\"` when chaining after a `create_card` in the same actions array (or to focus the most recent card).\n\
                * If `taskId` is omitted on `create_card`, `create_table_card`, `update_card`, or `focus_card`, it automatically targets the currently active task.\n\
+             - 2D FLOWCHARTS & BRANCHING DIAGRAMS (CRITICAL when replicating images/diagrams or multi-path flows):\n\
+               * NEVER flatten a 2D flowchart into a single horizontal chain!\n\
+               * Give each `create_card` a short `refId` (e.g. `\"n1\"`, `\"review\"`, `\"thank_you\"`, `\"interview_3\"`), its 2D coordinates `gridCol` (0, 1, 2...) and `gridRow` (0, 1, 2...), and `connectParent: false` (except optionally for the entry card).\n\
+               * Then emit explicit `connect_cards` actions using those `refId`s and `fromPort`/`toPort` (`top|bottom|in|out`) to recreate EVERY vertical column, horizontal row, decision branch (Pass/Fail), loop, and upward/downward arrow faithfully!\n\
              - Action schemas:\n\
-               * {{\"type\":\"create_card\",\"body\":\"Texto do card (use \\n para quebras de linha, [ ] para checklist)\",\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2,\"parentCardId\":\"optional_id_or_$LAST_CARD\"}}\n\
+               * {{\"type\":\"create_card\",\"refId\":\"optional_alias\",\"body\":\"Texto do card (use \\n para quebras de linha, [ ] para checklist)\",\"gridCol\":0,\"gridRow\":0,\"connectParent\":false,\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2,\"parentCardId\":\"optional_id_or_refId_or_$LAST_CARD\",\"fromPort\":\"out|in|top|bottom\",\"toPort\":\"in|out|top|bottom\"}}\n\
                * {{\"type\":\"create_table_card\",\"hasCheckboxes\":false|true,\"rows\":[[\"Col1\",\"Col2\"],[\"Val1\",\"=SOMA(B2:B2)\"]],\"parentCardId\":\"optional_id_or_$LAST_CARD\"}}\n\
                * {{\"type\":\"update_card\",\"cardId\":\"real_card_id_from_nodes\",\"body\":\"Novo texto completo\",\"appendBody\":\"Ou texto para adicionar ao final\",\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2}}\n\
                * {{\"type\":\"focus_card\",\"cardId\":\"real_card_id_from_nodes\"}}\n\
                * {{\"type\":\"delete_card\",\"cardId\":\"real_card_id_from_nodes\"}}\n\
                * {{\"type\":\"duplicate_card\",\"cardId\":\"real_card_id_from_nodes\"}}\n\
-               * {{\"type\":\"connect_cards\",\"fromCardId\":\"id1\",\"toCardId\":\"id2\",\"fromRow\":0,\"toRow\":0}}\n\
+               * {{\"type\":\"connect_cards\",\"fromCardId\":\"id_or_refId\",\"toCardId\":\"id_or_refId\",\"fromPort\":\"out|in|top|bottom\",\"toPort\":\"in|out|top|bottom\",\"fromRow\":0,\"toRow\":0}}\n\
                * {{\"type\":\"disconnect_cards\",\"fromCardId\":\"id1\",\"toCardId\":\"id2\"}}\n\
                * {{\"type\":\"copy_card_to_task\",\"sourceCardId\":\"id\",\"targetTaskTitle\":\"...\"}}\n\
                * {{\"type\":\"move_card_to_task\",\"sourceCardId\":\"id\",\"targetTaskTitle\":\"...\"}}\n\
@@ -1955,9 +2481,13 @@ async fn ai_chat_english(
                * {{\"type\":\"select_task\",\"taskId\":\"...\",\"taskTitle\":\"...\"}}\n\
                * {{\"type\":\"delete_task\",\"taskId\":\"...\"}} | {{\"type\":\"duplicate_task\",\"taskId\":\"...\"}}\n\
                * {{\"type\":\"create_user\",\"name\":\"...\"}} | {{\"type\":\"rename_user\",\"userId\":\"...\",\"newName\":\"...\"}} | {{\"type\":\"select_user\",\"userName\":\"...\"}} | {{\"type\":\"delete_user\",\"userId\":\"...\"}}\n\
-               * {{\"type\":\"set_status_filter\",\"filter\":\"all|ongoing|stopped|complete\"}} | {{\"type\":\"open_translator\",\"floating\":true|false}} | {{\"type\":\"open_settings\"}} | {{\"type\":\"update_settings\",\"theme\":\"claude-dark|light-claude|dracula\",\"cardFontSize\":14,\"linkStyle\":\"orthogonal|bezier\",\"linkArrows\":true|false,\"translatorMode\":\"auto|manual\"}}\n\n\
+                * {{\"type\":\"set_status_filter\",\"filter\":\"all|ongoing|stopped|complete\"}} | {{\"type\":\"open_translator\",\"floating\":true|false}} | {{\"type\":\"open_settings\"}} | {{\"type\":\"update_settings\",\"theme\":\"claude-dark|light-claude|dracula\",\"cardFontSize\":14,\"linkStyle\":\"orthogonal|bezier\",\"linkArrows\":true|false,\"translatorMode\":\"auto|manual\"}}\n\
+                * {{\"type\":\"save_memory\",\"scope\":\"task|global\",\"kind\":\"decision|fact|preference\",\"content\":\"Informação durável sobre o projeto para lembrar em futuras conversas\"}}\n\
+              - GLOBAL CONTEXT & MEMORY:\n\
+                * LIVE APP STATE may include `projectMemories` (saved persistent facts/decisions), `relevantPastConversations` (excerpts from prior chats), and `workspaceAudit` (detected duplicate cards or date/status inconsistencies). Use them proactively when relevant!\n\n\
              LIVE APP STATE (JSON):\n{ctx_json}"
-        );
+            )
+        };
 
         let mut uploaded_files: Vec<String> = Vec::new();
         let filtered_msgs: Vec<AiChatMessage> = messages
@@ -5876,14 +6406,7 @@ fn init_db(app: &tauri::AppHandle) -> Result<Connection, String> {
     let root = app_root(app)?;
     let db_path = root.join(DB_FILE);
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS state (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            json TEXT NOT NULL,
-            updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
-        );",
-    )
-    .map_err(|e| e.to_string())?;
+    db::run_migrations(&conn)?;
     Ok(conn)
 }
 
@@ -6230,6 +6753,21 @@ fn main() {
             set_translator_floating_mode,
             state_load,
             state_save,
+            db_settings_get_all,
+            db_setting_set,
+            db_chat_sessions_load,
+            db_chat_sessions_save,
+            db_chat_search_past,
+            db_memory_list,
+            db_memory_upsert,
+            db_memory_delete,
+            db_ai_activity_log,
+            db_ai_activity_list,
+            send_windows_notification,
+            show_reminder_overlay,
+            close_reminder_overlay,
+            reminder_overlay_action,
+            get_ai_models_quota_status,
             attachment_save_from_path,
             attachment_save_from_bytes,
             attachment_list_dir,
@@ -6322,10 +6860,29 @@ mod gemini_failover_tests {
 
     #[test]
     fn detects_token_limit_errors_separately_from_generic_errors() {
-        assert!(is_token_limit_error(429, "resource_exhausted: input tokens per minute exceeded"));
+        assert!(!is_token_limit_error(429, "resource_exhausted: input tokens per minute exceeded"));
+        assert!(is_quota_exhausted_error(429, "resource_exhausted: input tokens per minute exceeded"));
         assert!(is_token_limit_error(400, "request payload size exceeds limit"));
         assert!(is_token_limit_error(413, "payload too large"));
         assert!(!is_token_limit_error(429, "daily requests per project exceeded"));
+    }
+
+    #[test]
+    fn prioritizes_preferred_chat_model_with_cascade_fallback() {
+        let auto_list = build_chat_model_list(Some("auto"));
+        assert_eq!(auto_list[0], SIDE_CHAT_MODEL_CASCADE[0]);
+        assert_eq!(auto_list.len(), SIDE_CHAT_MODEL_CASCADE.len());
+
+        let pinned = build_chat_model_list(Some("gemini-2.5-flash"));
+        assert_eq!(pinned[0], "gemini-2.5-flash");
+        assert_eq!(pinned.len(), SIDE_CHAT_MODEL_CASCADE.len());
+        assert_eq!(pinned.iter().filter(|m| m.as_str() == "gemini-2.5-flash").count(), 1);
+    }
+
+    #[test]
+    fn escapes_xml_for_windows_toast() {
+        let escaped = escape_xml_text("Task <A & B> \"urgent\" 'now'");
+        assert_eq!(escaped, "Task &lt;A &amp; B&gt; &quot;urgent&quot; &apos;now&apos;");
     }
 
     #[test]

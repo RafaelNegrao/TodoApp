@@ -1,4 +1,13 @@
+import { PersistenceService } from "../intelligence/persistenceService.js";
+import { AlarmSoundPlayer, ALARM_SOUND_KEY, getSelectedAlarmSound } from "../intelligence/reminderService.js";
+
 const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke || null;
+const settingsPersistence = new PersistenceService(invoke);
+const settingsSoundPreview = new AlarmSoundPlayer();
+
+function writeSetting(key, value) {
+  settingsPersistence.saveSetting(key, String(value));
+}
 
 const openButton = document.querySelector("#openSettingsButton");
 const closeButton = document.querySelector("#closeAppButton");
@@ -19,6 +28,8 @@ const operatorProfileInput = document.querySelector("#settingsOperatorProfileInp
 const operatorProfileCount = document.querySelector("#settingsOperatorProfileCount");
 const checkUpdateButton = document.querySelector("#settingsCheckUpdateButton");
 const updateStatusEl = document.querySelector("#settingsUpdateStatus");
+const alarmSoundInput = document.querySelector("#settingsAlarmSoundInput");
+const alarmSoundTestBtn = document.querySelector("#settingsAlarmSoundTestBtn");
 
 const LINK_STYLE_KEY = "todocompanion.settings.linkStyle";
 const LINK_ARROWS_KEY = "todocompanion.settings.linkArrows";
@@ -50,7 +61,7 @@ function applyTheme(theme) {
 
 function persistTheme(event) {
   const theme = THEMES.includes(event.target.value) ? event.target.value : DEFAULT_THEME;
-  localStorage.setItem(THEME_KEY, theme);
+  writeSetting(THEME_KEY, theme);
   applyTheme(theme);
 }
 
@@ -80,7 +91,7 @@ function persistCardFontSize(event) {
   if (event.type === "change") {
     event.target.value = size;
   }
-  localStorage.setItem(CARD_FONT_SIZE_KEY, String(size));
+  writeSetting(CARD_FONT_SIZE_KEY, String(size));
   applyCardFontSize(size);
   window.dispatchEvent(new CustomEvent("app:card-font-size-changed", { detail: { fontSize: size } }));
 }
@@ -134,6 +145,9 @@ async function loadSettings() {
   if (screenShareProtectionInput) {
     screenShareProtectionInput.checked = currentScreenShareProtection();
   }
+  if (alarmSoundInput) {
+    alarmSoundInput.value = getSelectedAlarmSound();
+  }
 
   if (!invoke) return;
 
@@ -177,17 +191,17 @@ async function persistAutostart(event) {
 }
 
 function persistLinkStyle(event) {
-  localStorage.setItem(LINK_STYLE_KEY, event.target.checked ? "orthogonal" : "bezier");
+  writeSetting(LINK_STYLE_KEY, event.target.checked ? "orthogonal" : "bezier");
   window.dispatchEvent(new CustomEvent("app:link-style-changed"));
 }
 
 function persistLinkArrows(event) {
-  localStorage.setItem(LINK_ARROWS_KEY, event.target.checked ? "true" : "false");
+  writeSetting(LINK_ARROWS_KEY, event.target.checked ? "true" : "false");
   window.dispatchEvent(new CustomEvent("app:link-style-changed"));
 }
 
 function persistLineageHover(event) {
-  localStorage.setItem(LINEAGE_HOVER_KEY, event.target.checked ? "true" : "false");
+  writeSetting(LINEAGE_HOVER_KEY, event.target.checked ? "true" : "false");
 }
 
 function syncOperatorProfileCount(len) {
@@ -201,7 +215,7 @@ function persistOperatorProfile(event) {
   if (event.target.value !== raw) {
     event.target.value = raw;
   }
-  localStorage.setItem(OPERATOR_PROFILE_KEY, raw.trim());
+  writeSetting(OPERATOR_PROFILE_KEY, raw.trim());
   syncOperatorProfileCount(raw.length);
 }
 
@@ -226,7 +240,7 @@ async function persistScreenShareProtection(event) {
     if (invoke) {
       await invoke("set_screen_share_protection", { enabled: desired });
     }
-    localStorage.setItem(SCREEN_SHARE_PROTECTION_KEY, desired ? "true" : "false");
+    writeSetting(SCREEN_SHARE_PROTECTION_KEY, desired ? "true" : "false");
   } catch (err) {
     console.warn("[settings] set_screen_share_protection failed", err);
     checkbox.checked = !desired;
@@ -236,8 +250,14 @@ async function persistScreenShareProtection(event) {
 }
 
 function persistTranslatorMode(event) {
-  localStorage.setItem(TRANSLATOR_MODE_KEY, event.target.checked ? "auto" : "manual");
+  writeSetting(TRANSLATOR_MODE_KEY, event.target.checked ? "auto" : "manual");
   window.dispatchEvent(new CustomEvent("app:translator-mode-changed"));
+}
+
+function persistAlarmSound(event) {
+  const val = String(event.target.value || "classic");
+  writeSetting(ALARM_SOUND_KEY, val);
+  settingsSoundPreview.playChime(true, val);
 }
 
 function selectSettingsTab(tabName) {
@@ -317,6 +337,10 @@ export function initSettings() {
   translatorAutoInput?.addEventListener("change", persistTranslatorMode);
   operatorProfileInput?.addEventListener("input", persistOperatorProfile);
   operatorProfileInput?.addEventListener("change", persistOperatorProfile);
+  alarmSoundInput?.addEventListener("change", persistAlarmSound);
+  alarmSoundTestBtn?.addEventListener("click", () => {
+    settingsSoundPreview.playChime(true, alarmSoundInput?.value || getSelectedAlarmSound());
+  });
   checkUpdateButton?.addEventListener("click", handleManualUpdateCheck);
   modal.querySelectorAll("[data-settings-tab]").forEach((btn) => {
     btn.addEventListener("click", () => selectSettingsTab(btn.dataset.settingsTab));
@@ -324,6 +348,22 @@ export function initSettings() {
   applyTheme(currentTheme());
   applyCardFontSize(currentCardFontSize());
   applyScreenShareProtection(currentScreenShareProtection());
+
+  settingsPersistence.hydrateSettingsFromDb([
+    LINK_STYLE_KEY,
+    LINK_ARROWS_KEY,
+    LINEAGE_HOVER_KEY,
+    THEME_KEY,
+    CARD_FONT_SIZE_KEY,
+    TRANSLATOR_MODE_KEY,
+    OPERATOR_PROFILE_KEY,
+    SCREEN_SHARE_PROTECTION_KEY,
+    ALARM_SOUND_KEY
+  ]).then(() => {
+    applyTheme(currentTheme());
+    applyCardFontSize(currentCardFontSize());
+    applyScreenShareProtection(currentScreenShareProtection());
+  }).catch(() => {});
 
   closeButton?.addEventListener("click", hideApp);
 
