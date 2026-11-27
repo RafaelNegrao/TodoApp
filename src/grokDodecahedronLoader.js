@@ -15,11 +15,11 @@ const DEFAULT_SPHERE_CONFIG = Object.freeze({
   layerProb: 0.45,
   layerSpeed: 1,
   layerCap: 0.25,
-  dotRadius: 1.17,
+  dotRadius: 1.05,
   sphereRadius: 0.37,
   fov: 3.2,
   sizeBack: 0.46,
-  backAlpha: 0.14,
+  backAlpha: 0.05,
   trail: 2.4,
   trailAlpha: 0.6
 });
@@ -168,10 +168,12 @@ export class GrokDodecahedronRenderer {
 
   _configureCanvas() {
     if (!this.canvas || !this.ctx) return;
-    const dpr = Math.max(window.devicePixelRatio || 1, 3);
+    const dpr = Math.max(window.devicePixelRatio || 1, 2);
     this.canvas.width = Math.round(this.size * dpr);
     this.canvas.height = Math.round(this.size * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.imageSmoothingQuality = "high";
   }
 
   _ease(progress) {
@@ -310,10 +312,13 @@ export class GrokDodecahedronRenderer {
         0.35 * K,
         c.dotRadius * K * (c.sizeBack + (1.24 - c.sizeBack) * Math.pow(dn, 1.15))
       );
-      const baseAlpha = c.backAlpha + (1 - c.backAlpha) * Math.pow(dn, 1.5);
-      const al = activeButton
-        ? Math.min(1, 0.32 + 0.68 * Math.pow(dn, 1.25))
-        : Math.min(1, baseAlpha * this.intensity);
+      const frontRamp = Math.min(1, Math.pow(dn / 0.72, 2.2));
+      const baseAlpha = c.backAlpha + (1 - c.backAlpha) * frontRamp;
+      const al = dn >= 0.72
+        ? 1
+        : activeButton
+          ? Math.min(1, 0.12 + 0.88 * frontRamp)
+          : Math.min(1, baseAlpha * Math.max(this.intensity, 0.85));
 
       if (this.isBurst && c.trail > 0) {
         const tx = p.x - (p.x - p.px) * c.trail;
@@ -330,9 +335,15 @@ export class GrokDodecahedronRenderer {
         ctx.stroke();
       }
 
+      const aaRadius = r + 0.55;
+      const dotGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, aaRadius);
+      const coreStop = Math.max(0.45, Math.min(0.78, (r - 0.25) / aaRadius));
+      dotGrad.addColorStop(0, `rgba(${bs},${al.toFixed(3)})`);
+      dotGrad.addColorStop(coreStop, `rgba(${bs},${al.toFixed(3)})`);
+      dotGrad.addColorStop(1, `rgba(${bs},0)`);
       ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(${bs},${al.toFixed(3)})`;
+      ctx.arc(p.x, p.y, aaRadius, 0, Math.PI * 2);
+      ctx.fillStyle = dotGrad;
       ctx.fill();
     }
   }

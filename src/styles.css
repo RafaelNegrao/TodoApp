@@ -5213,8 +5213,8 @@ button {
   height: 42px;
   padding: 0;
   border-radius: 50%;
-  border: 1px solid rgba(var(--hi-rgb), 0.14);
-  background: var(--elevated, rgba(28, 29, 34, 0.92));
+  border: 0;
+  background: transparent;
   color: var(--text);
   display: inline-flex;
   align-items: center;
@@ -5222,25 +5222,19 @@ button {
   cursor: pointer;
   box-shadow: none;
   transition: opacity 160ms var(--ease-out),
-    background var(--t-fast) var(--ease-out),
-    border-color var(--t-fast) var(--ease-out),
     transform 160ms var(--ease-out);
 }
 
 .canvas-ai-fab:hover {
-  background: var(--elevated-hover, var(--elevated, rgba(40, 42, 50, 0.96)));
-  border-color: rgba(var(--hi-rgb), 0.24);
-  transform: scale(1.05);
+  background: transparent;
+  border: 0;
+  transform: scale(1.08);
 }
 
-:root[data-theme="light-claude"] .canvas-ai-fab {
-  background: #ffffff;
-  border-color: rgba(24, 24, 27, 0.14);
-}
-
+:root[data-theme="light-claude"] .canvas-ai-fab,
 :root[data-theme="light-claude"] .canvas-ai-fab:hover {
-  background: #f5f4f0;
-  border-color: rgba(24, 24, 27, 0.24);
+  background: transparent;
+  border: 0;
 }
 
 .canvas-ai-fab:active {

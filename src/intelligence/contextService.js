@@ -1,4 +1,4 @@
-import { buildAppContextSnapshot, promptNeedsWorkspaceContext } from "../aiAppAgent.js";
+import { buildAppContextSnapshot, promptReferencesCrossTask } from "../aiAppAgent.js";
 
 function normalizeTokens(text) {
   return String(text || "")
@@ -164,9 +164,12 @@ export class WorkspaceContextService {
 
   detectRelevantTaskIds(state, userPrompt) {
     const matched = new Set();
-    const promptTokens = normalizeTokens(userPrompt);
-    if (promptTokens.length < 2 || !Array.isArray(state?.users)) return matched;
-    const globalQuery = /\b(todos os projetos|todas as tasks|outras tasks|workspace|duplicad|inconsist|atrasad|resumo geral)\b/i.test(String(userPrompt || ""));
+    const rawPrompt = String(userPrompt || "");
+    if (!promptReferencesCrossTask(rawPrompt) || !Array.isArray(state?.users)) {
+      return matched;
+    }
+    const promptTokens = normalizeTokens(rawPrompt);
+    const globalQuery = /\b(todos os projetos|todas as tasks|todas as tarefas|workspace inteiro|duplicad|inconsist|atrasad|resumo geral)\b/i.test(rawPrompt);
     for (const u of state.users) {
       for (const t of u.tasks || []) {
         if (globalQuery) {

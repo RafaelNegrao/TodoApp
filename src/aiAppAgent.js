@@ -320,6 +320,14 @@ export function shouldAutoCaptureScreen(promptText) {
   );
 }
 
+export function promptReferencesCrossTask(userPrompt = "") {
+  const text = String(userPrompt || "").trim();
+  if (!text) return false;
+  return /\b(outra task|outras tasks|todas as tasks|todos os projetos|todas as tarefas|outro usu[aá]rio|outros usu[aá]rios|outro user|outros users|todos os usu[aá]rios|para o user|para o usu[aá]rio|para a task|da task|na task|entre tasks|copi[ae] a task|mov[ae].*task|dupliqu[ae].*task|exclu[ia].*task|delet[ae].*task|abr[ae].*task|selecion[ae].*task|cri[ae].*nova task|cri[ae].*task|cri[ae].*usu[aá]rio|renome[ia].*usu[aá]rio|resumo geral|workspace inteiro)\b/i.test(
+    text
+  );
+}
+
 export function collectRelevantAppAttachments(state, userPrompt = "", selectedNodeId = null, maxItems = 4) {
   if (!state || !Array.isArray(state.users)) return [];
   const promptLower = String(userPrompt || "").trim().toLowerCase();
@@ -340,11 +348,18 @@ export function collectRelevantAppAttachments(state, userPrompt = "", selectedNo
   };
 
   const mentionsAttachmentsOrCard = /\b(anexo|anexos|arquivo|arquivos|pdf|audio|áudio|video|vídeo|gravação|gravacao|gravações|gravacoes|reunião|reuniao|imagem|imagens|foto|fotos|planilha|documento|documentos|relatório|relatorio|csv|txt|attachment|attachments|file|files|recording|meeting|transcrev|analis[ae]|resum[ao]|esse card|este card|card selecionado)\b/i.test(promptLower);
+  const allowCrossTask = promptReferencesCrossTask(promptLower);
 
-  // 1. Anexos mencionados explicitamente pelo nome completo (com extensão) ou quando o prompt pede arquivo/anexo
+  const activeUser = state.users.find(u => u.id === state.activeUserId);
+  const activeTask = activeUser?.tasks?.find(t => t.id === activeUser.activeTaskId);
+
+  // 1. Por padrao, busca anexos SOMENTE na task ativa (isolamento de contexto).
+  // So busca em outras tasks/usuarios quando o usuario pedir explicitamente operacao cross-task.
   if (promptLower.length >= 4) {
-    for (const u of state.users) {
-      for (const t of u.tasks || []) {
+    const searchUsers = allowCrossTask ? state.users : (activeUser ? [activeUser] : []);
+    for (const u of searchUsers) {
+      const searchTasks = allowCrossTask ? (u.tasks || []) : (activeTask ? [activeTask] : []);
+      for (const t of searchTasks) {
         for (const a of t.attachments || []) {
           const nameLower = String(a?.name || "").toLowerCase().trim();
           const stemLower = nameLower.replace(/\.[^.]+$/, "");
@@ -360,8 +375,6 @@ export function collectRelevantAppAttachments(state, userPrompt = "", selectedNo
   }
 
   // 2. Anexos referenciados no card selecionado atualmente (SOMENTE se o usuário pediu para analisar/ler o card ou mídia)
-  const activeUser = state.users.find(u => u.id === state.activeUserId);
-  const activeTask = activeUser?.tasks?.find(t => t.id === activeUser.activeTaskId);
   if (activeUser && activeTask && selectedNodeId && mentionsAttachmentsOrCard) {
     const node = (activeTask.nodes || []).find(n => n.id === selectedNodeId);
     const body = String(node?.body ?? node?.title ?? "");
@@ -439,21 +452,32 @@ export function buildAppContextSnapshot(state, extras = {}) {
     return JSON.stringify(minimal);
   }
 
+  const wantsCrossTask =
+    !extras.compactOnlyActive ||
+    promptReferencesCrossTask(promptLower);
+
   const wantsAllTasksDetails =
     !extras.compactOnlyActive ||
     /\b(todas as tasks|todos os cards|all tasks|all cards|resumo geral|todas as tarefas)\b/i.test(promptLower);
 
-  const users = state.users.map(u => {
+  const visibleUsers = wantsCrossTask
+    ? state.users
+    : state.users.filter(u => u.id === state.activeUserId);
+
+  const users = visibleUsers.map(u => {
     const isUserActive = u.id === state.activeUserId;
+    const visibleTasks = wantsCrossTask
+      ? (u.tasks || [])
+      : (u.tasks || []).filter(t => isUserActive && t.id === u.activeTaskId);
     return {
       id: u.id,
       name: u.name,
       isActive: isUserActive,
-      tasks: (u.tasks || []).map(t => {
+      tasks: visibleTasks.map(t => {
         const isTaskActive = isUserActive && t.id === u.activeTaskId;
         const titleLower = String(t.title || "").toLowerCase();
         const isTaskMentioned =
-          promptLower.length >= 3 && titleLower.length >= 3 && promptLower.includes(titleLower);
+          wantsCrossTask && promptLower.length >= 3 && titleLower.length >= 3 && promptLower.includes(titleLower);
         const includeFullNodes = isTaskActive || isTaskMentioned || wantsAllTasksDetails;
 
         if (!includeFullNodes) {

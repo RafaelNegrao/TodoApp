@@ -106,8 +106,18 @@ test("WorkspaceContextService injects memories, past chats, audit and respects c
     }
   };
   const ctxSvc = new WorkspaceContextService(fakePersistence);
+  // Sem pedido explícito cross-task, mantém estritamente isolado na task ativa (t1)
+  const isolatedJson = await ctxSvc.buildEnrichedContextJson(state, {
+    userPrompt: "resuma os cards da minha task atual",
+    activeSessionId: "s1"
+  });
+  const isolatedParsed = JSON.parse(isolatedJson);
+  assert.equal(isolatedParsed.users[0].tasks.length, 1);
+  assert.equal(isolatedParsed.users[0].tasks[0].id, "t1");
+
+  // Com pedido explícito cross-task, inclui a task mencionada (t2)
   const autoJson = await ctxSvc.buildEnrichedContextJson(state, {
-    userPrompt: "como está o release mobile?",
+    userPrompt: "copie o card da task release mobile para a task atual",
     activeSessionId: "s1"
   });
   const autoParsed = JSON.parse(autoJson);
