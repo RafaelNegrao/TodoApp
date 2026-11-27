@@ -437,6 +437,16 @@ button {
   stroke-linejoin: round;
 }
 
+.icon[fill="currentColor"] {
+  fill: currentColor;
+  stroke: none;
+}
+
+.workspace:not(.users-pinned-collapsed) .users-rail-toggle .sidebar-icon-pane,
+.workspace:not(.tasks-pinned-collapsed) .tasks-sidebar-toggle .sidebar-icon-pane {
+  fill: currentColor;
+}
+
 
 .confirm-modal .confirm-text {
   margin: 0;
@@ -10223,6 +10233,11 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   display: flex;
 }
 
+.user-task-card.has-reminder:not(:hover):not(:focus-within) .user-task-info,
+.user-task-card.has-reminder:not(:hover):not(:focus-within) .user-task-remove {
+  display: none;
+}
+
 .user-rail-action {
   width: 22px;
   height: 22px;
@@ -10570,4 +10585,35 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
 :root[data-theme="light-claude"] .task-card[data-card-color] .card-transcribe-tokens,
 :root[data-theme="light-claude"] .task-card[data-card-color] .card-ai-tokens-badge {
   color: rgba(15, 23, 42, 0.82) !important;
+}
+
+.settings-icon-colors {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-icon-color-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.settings-icon-color-btn:hover {
+  transform: scale(1.12);
+}
+
+.settings-icon-color-btn.active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
+  transform: scale(1.14);
+}
+
+:root[data-theme="light-claude"] .settings-icon-color-btn.active {
+  border-color: #0f172a;
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.18);
 }

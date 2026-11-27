@@ -793,6 +793,30 @@
                   <span class="settings-range-value" id="settingsCardFontSizeValue">14px</span>
                 </div>
               </label>
+              <label class="settings-row">
+                <div class="settings-row-copy">
+                  <span class="settings-label">Ícone da IA</span>
+                  <small class="settings-desc">Estilo animado do assistente no chat e indicadores</small>
+                </div>
+                <select class="settings-select" id="settingsAiIconStyleInput">
+                  <option value="dodecahedron">Esfera de Pontos 3D</option>
+                  <option value="flat-eyes">Assistente 3D (Olhos)</option>
+                </select>
+              </label>
+              <div class="settings-row" id="settingsAiIconColorRow" hidden>
+                <div class="settings-row-copy">
+                  <span class="settings-label">Cor do ícone da IA</span>
+                  <small class="settings-desc">Cor sólida do anel externo do assistente</small>
+                </div>
+                <div class="settings-icon-colors" id="settingsAiIconColorPicker" role="radiogroup" aria-label="Cor do ícone da IA">
+                  <button type="button" class="settings-icon-color-btn" data-icon-color="#6366f1" style="background-color:#6366f1" title="Índigo"></button>
+                  <button type="button" class="settings-icon-color-btn" data-icon-color="#0284c7" style="background-color:#0284c7" title="Azul"></button>
+                  <button type="button" class="settings-icon-color-btn" data-icon-color="#a855f7" style="background-color:#a855f7" title="Roxo"></button>
+                  <button type="button" class="settings-icon-color-btn" data-icon-color="#22c55e" style="background-color:#22c55e" title="Verde"></button>
+                  <button type="button" class="settings-icon-color-btn" data-icon-color="#06b6d4" style="background-color:#06b6d4" title="Ciano"></button>
+                  <button type="button" class="settings-icon-color-btn" data-icon-color="#f97316" style="background-color:#f97316" title="Laranja"></button>
+                </div>
+              </div>
             </section>
 
             <section class="settings-pane" data-settings-pane="canvas" hidden>

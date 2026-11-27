@@ -1,5 +1,14 @@
 import { PersistenceService } from "../intelligence/persistenceService.js";
 import { AlarmSoundPlayer, ALARM_SOUND_KEY, getSelectedAlarmSound } from "../intelligence/reminderService.js";
+import {
+  AI_ICON_STYLE_KEY,
+  AI_ICON_COLOR_KEY,
+  AI_ICON_STYLES,
+  DEFAULT_AI_ICON_STYLE,
+  DEFAULT_AI_ICON_COLOR,
+  getSelectedAiIconStyle,
+  getSelectedAiIconColor
+} from "../grokDodecahedronLoader.js";
 
 const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke || null;
 const settingsPersistence = new PersistenceService(invoke);
@@ -30,6 +39,9 @@ const checkUpdateButton = document.querySelector("#settingsCheckUpdateButton");
 const updateStatusEl = document.querySelector("#settingsUpdateStatus");
 const alarmSoundInput = document.querySelector("#settingsAlarmSoundInput");
 const alarmSoundTestBtn = document.querySelector("#settingsAlarmSoundTestBtn");
+const aiIconStyleInput = document.querySelector("#settingsAiIconStyleInput");
+const aiIconColorRow = document.querySelector("#settingsAiIconColorRow");
+const aiIconColorPicker = document.querySelector("#settingsAiIconColorPicker");
 
 const LINK_STYLE_KEY = "todocompanion.settings.linkStyle";
 const LINK_ARROWS_KEY = "todocompanion.settings.linkArrows";
@@ -148,6 +160,7 @@ async function loadSettings() {
   if (alarmSoundInput) {
     alarmSoundInput.value = getSelectedAlarmSound();
   }
+  syncAiIconSettingsUi();
 
   if (!invoke) return;
 
@@ -260,6 +273,42 @@ function persistAlarmSound(event) {
   settingsSoundPreview.playChime(true, val);
 }
 
+function syncAiIconSettingsUi() {
+  const style = getSelectedAiIconStyle();
+  const color = getSelectedAiIconColor();
+  if (aiIconStyleInput) {
+    aiIconStyleInput.value = style;
+  }
+  if (aiIconColorRow) {
+    aiIconColorRow.hidden = style !== "flat-eyes";
+  }
+  if (aiIconColorPicker) {
+    aiIconColorPicker.querySelectorAll(".settings-icon-color-btn").forEach((btn) => {
+      const isSelected = String(btn.dataset.iconColor || "").toLowerCase() === color.toLowerCase();
+      btn.classList.toggle("active", isSelected);
+      btn.setAttribute("aria-checked", String(isSelected));
+    });
+  }
+}
+
+function persistAiIconStyle(event) {
+  const style = AI_ICON_STYLES.includes(event.target.value)
+    ? event.target.value
+    : DEFAULT_AI_ICON_STYLE;
+  writeSetting(AI_ICON_STYLE_KEY, style);
+  syncAiIconSettingsUi();
+  window.dispatchEvent(new CustomEvent("app:ai-icon-style-changed", { detail: { style } }));
+}
+
+function persistAiIconColor(colorHex) {
+  const clean = /^#[0-9a-f]{6}$/i.test(String(colorHex || ""))
+    ? String(colorHex)
+    : DEFAULT_AI_ICON_COLOR;
+  writeSetting(AI_ICON_COLOR_KEY, clean);
+  syncAiIconSettingsUi();
+  window.dispatchEvent(new CustomEvent("app:ai-icon-style-changed", { detail: { color: clean } }));
+}
+
 function selectSettingsTab(tabName) {
   if (!modal) return;
   modal.querySelectorAll("[data-settings-tab]").forEach((btn) => {
@@ -341,6 +390,12 @@ export function initSettings() {
   alarmSoundTestBtn?.addEventListener("click", () => {
     settingsSoundPreview.playChime(true, alarmSoundInput?.value || getSelectedAlarmSound());
   });
+  aiIconStyleInput?.addEventListener("change", persistAiIconStyle);
+  aiIconColorPicker?.addEventListener("click", (event) => {
+    const btn = event.target.closest(".settings-icon-color-btn");
+    if (!btn) return;
+    persistAiIconColor(btn.dataset.iconColor);
+  });
   checkUpdateButton?.addEventListener("click", handleManualUpdateCheck);
   modal.querySelectorAll("[data-settings-tab]").forEach((btn) => {
     btn.addEventListener("click", () => selectSettingsTab(btn.dataset.settingsTab));
@@ -358,11 +413,14 @@ export function initSettings() {
     TRANSLATOR_MODE_KEY,
     OPERATOR_PROFILE_KEY,
     SCREEN_SHARE_PROTECTION_KEY,
-    ALARM_SOUND_KEY
+    ALARM_SOUND_KEY,
+    AI_ICON_STYLE_KEY,
+    AI_ICON_COLOR_KEY
   ]).then(() => {
     applyTheme(currentTheme());
     applyCardFontSize(currentCardFontSize());
     applyScreenShareProtection(currentScreenShareProtection());
+    syncAiIconSettingsUi();
   }).catch(() => {});
 
   closeButton?.addEventListener("click", hideApp);

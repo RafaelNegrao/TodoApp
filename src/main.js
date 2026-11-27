@@ -3,7 +3,8 @@ import {
   GrokDodecahedronRenderer,
   ThinkingPhraseCycler,
   AI_CHAT_THINKING_PHRASES,
-  AI_TRANSLATOR_THINKING_PHRASES
+  AI_TRANSLATOR_THINKING_PHRASES,
+  setAiIconMood
 } from "./grokDodecahedronLoader.js";
 import { LiveEnglishCoachController } from "./liveCoach.js";
 import {
@@ -179,44 +180,44 @@ const icons = {
   fullscreen: `<svg class="icon" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>`,
   list: `<svg class="icon" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>`,
   link: `<svg class="icon" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.07 0l2.12-2.12a5 5 0 0 0-7.07-7.07L11 4.93"/><path d="M14 11a5 5 0 0 0-7.07 0L4.81 13.12a5 5 0 0 0 7.07 7.07L13 19.07"/></svg>`,
-  trash: `<svg class="icon icon-16" viewBox="0 0 16 16"><path d="M2.5 4h11"/><path d="M6 4V2.75A.75.75 0 0 1 6.75 2h2.5a.75.75 0 0 1 .75.75V4"/><path d="M4.2 4l.6 8.5a1.4 1.4 0 0 0 1.4 1.3h3.6a1.4 1.4 0 0 0 1.4-1.3L11.8 4"/></svg>`,
+  trash: `<svg class="icon icon-16" viewBox="0 0 16 16" fill="currentColor" stroke="none"><path d="M5.75 1.75A1.25 1.25 0 0 1 7 .5h2a1.25 1.25 0 0 1 1.25 1.25V2.5h3a.75.75 0 0 1 0 1.5h-.6l-.72 9.12A1.75 1.75 0 0 1 10.18 14.75H5.82a1.75 1.75 0 0 1-1.75-1.63L3.35 4h-.6a.75.75 0 0 1 0-1.5h3v-.75Zm1.5.75h1.5V2h-1.5v.5Z"/></svg>`,
   check: `<svg class="icon" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>`,
   close: `<svg class="icon" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>`,
-  eye: `<svg class="icon" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
+  eye: `<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 4.5C5.5 4.5 1.8 11.4 1.6 11.7a.65.65 0 0 0 0 .6c.2.3 3.9 7.2 10.4 7.2s10.2-6.9 10.4-7.2a.65.65 0 0 0 0-.6C22.2 11.4 18.5 4.5 12 4.5Zm0 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/></svg>`,
   chevronLeft: `<svg class="icon" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>`,
   chevronRight: `<svg class="icon" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>`,
   chevronDown: `<svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>`,
   focus: `<svg class="icon" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M12 8v8M8 12h8"/></svg>`,
-  organize: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="6" height="5" rx="1.4"/><rect x="15" y="4" width="6" height="5" rx="1.4"/><rect x="9" y="15" width="6" height="5" rx="1.4"/><path d="M9 6.5h6M6 9v3a3 3 0 0 0 3 3M18 9v3a3 3 0 0 1-3 3"/></svg>`,
-  edit: `<svg class="icon icon-16" viewBox="0 0 16 16"><path d="M11.35 2.65a1.45 1.45 0 1 1 2.05 2.05L5.6 12.5 2.6 13.4l.9-3L11.35 2.65Z"/></svg>`,
+  organize: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="6" height="5" rx="1.4" fill="currentColor" stroke="none"/><rect x="15" y="4" width="6" height="5" rx="1.4" fill="currentColor" stroke="none"/><rect x="9" y="15" width="6" height="5" rx="1.4" fill="currentColor" stroke="none"/><path d="M9 6.5h6M6 9v3a3 3 0 0 0 3 3M18 9v3a3 3 0 0 1-3 3"/></svg>`,
+  edit: `<svg class="icon icon-16" viewBox="0 0 16 16" fill="currentColor" stroke="none"><path d="M11.65 1.85a1.85 1.85 0 0 1 2.62 2.62L5.9 12.84a1 1 0 0 1-.42.25l-2.95.88a.5.5 0 0 1-.62-.62l.88-2.95a1 1 0 0 1 .25-.42l8.61-8.13Z"/></svg>`,
   paperclip: `<svg class="icon" viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`,
-  file: `<svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`,
-  image: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>`,
-  video: `<svg class="icon" viewBox="0 0 24 24"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="m16 10 6-3v10l-6-3z"/></svg>`,
-  audio: `<svg class="icon" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
+  file: `<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M6 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9h-5a2 2 0 0 1-2-2V2H6Zm9 .5V7a.5.5 0 0 0 .5.5h4.5L15 2.5Z"/></svg>`,
+  image: `<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M5 3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5Zm3.5 4a1.75 1.75 0 1 0 0 3.5 1.75 1.75 0 0 0 0-3.5Zm10.5 11H5l4.2-5.2a1 1 0 0 1 1.54-.04l2.06 2.34 2.15-2.6a1 1 0 0 1 1.56.02L19 18Z"/></svg>`,
+  video: `<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="2" y="5" width="14" height="14" rx="2.5"/><path d="M17.5 10.2 21.8 7.5a.8.8 0 0 1 1.2.68v7.64a.8.8 0 0 1-1.2.68l-4.3-2.7v-3.6Z"/></svg>`,
+  audio: `<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20 3.2a1 1 0 0 0-1.15-.99l-10 1.67A1 1 0 0 0 8 4.86V15.3a3.5 3.5 0 1 0 2 3.16V9.2l8-1.33v5.43a3.5 3.5 0 1 0 2 3.16V3.2Z"/></svg>`,
   externalLink: `<svg class="icon" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>`,
-  info: `<svg class="icon icon-16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.1"/><path d="M8 7.4v3.4"/><circle cx="8" cy="5.1" r="0.7" fill="currentColor" stroke="none"/></svg>`,
-  bell: `<svg class="icon icon-16" viewBox="0 0 16 16"><path d="M4.3 6.5a3.7 3.7 0 1 1 7.4 0c0 2.5.9 3.65 1.45 4.15H2.85c.55-.5 1.45-1.65 1.45-4.15Z"/><path d="M6.55 12.7a1.55 1.55 0 0 0 2.9 0"/></svg>`,
+  info: `<svg class="icon icon-16" viewBox="0 0 16 16" fill="currentColor" stroke="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm0 3a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Zm-.8 3a.8.8 0 0 1 1.6 0v3.3a.8.8 0 0 1-1.6 0V7.5Z"/></svg>`,
+  bell: `<svg class="icon icon-16" viewBox="0 0 16 16" fill="currentColor" stroke="none"><path d="M8 1.5a4.2 4.2 0 0 0-4.2 4.2c0 2.3-.85 3.4-1.52 4.02a.65.65 0 0 0 .44 1.13h10.56a.65.65 0 0 0 .44-1.13C13.05 9.1 12.2 8 12.2 5.7A4.2 4.2 0 0 0 8 1.5ZM6.25 12a1.85 1.85 0 0 0 3.5 0h-3.5Z"/></svg>`,
   grip: `<svg class="card-drag-icon" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="5" cy="19" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="19" r="1.6" fill="currentColor" stroke="none"/></svg>`,
   sort: `<svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h5"/></svg>`,
-  record: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.6" fill="currentColor" stroke="none"/></svg>`,
-  folder: `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`,
-  user: `<svg class="icon" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
-  board: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>`,
+  record: `<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M4 3.5A2.5 2.5 0 0 0 1.5 6v9A2.5 2.5 0 0 0 4 17.5h7v2H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2h7a2.5 2.5 0 0 0 2.5-2.5V6A2.5 2.5 0 0 0 20 3.5H4Zm8 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></svg>`,
+  folder: `<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M2 6.5A2.5 2.5 0 0 1 4.5 4h4.3c.66 0 1.3.26 1.77.73L12.1 6.2H19.5A2.5 2.5 0 0 1 22 8.7v9.8a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 18.5v-12Z"/></svg>`,
+  user: `<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="7.5" r="4.2"/><path d="M4.2 20.5a7.8 7.8 0 0 1 15.6 0 .8.8 0 0 1-.8.8H5a.8.8 0 0 1-.8-.8Z"/></svg>`,
+  board: `<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M5 3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5Zm0 6h14v1.5H10.5V19H9v-8.5H5V9Z"/></svg>`,
   formatBold: `<svg class="icon" viewBox="0 0 24 24"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg>`,
   formatItalic: `<svg class="icon" viewBox="0 0 24 24"><path d="M10 4h8M6 20h8M14.5 4 9.5 20"/></svg>`,
   formatUnderline: `<svg class="icon" viewBox="0 0 24 24"><path d="M6 4v6a6 6 0 0 0 12 0V4"/><path d="M4 20h16"/></svg>`,
   formatStrikethrough: `<svg class="icon" viewBox="0 0 24 24"><path d="M16 4c-1.1-.7-2.7-1-4-1-3.3 0-5.5 1.5-5.5 4 0 1.2.5 2.2 1.5 3"/><path d="M4 12h16"/><path d="M18 16c0 2.5-2.7 4.5-6 4.5-1.8 0-3.5-.5-5-1.5"/></svg>`,
   formatListBulleted: `<svg class="icon" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>`,
   formatListNumbered: `<svg class="icon" viewBox="0 0 24 24"><path d="M10 6h11M10 12h11M10 18h11"/><text x="3" y="7" font-size="6" fill="currentColor">1</text><text x="3" y="13" font-size="6" fill="currentColor">2</text><text x="3" y="19" font-size="6" fill="currentColor">3</text></svg>`,
-  checkbox: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  checkbox: `<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M5.5 3A2.5 2.5 0 0 0 3 5.5v13A2.5 2.5 0 0 0 5.5 21h13a2.5 2.5 0 0 0 2.5-2.5v-13A2.5 2.5 0 0 0 18.5 3h-13Zm11.2 6.2a1 1 0 0 0-1.4-1.4L11 12.08l-1.8-1.8a1 1 0 1 0-1.4 1.42l2.5 2.5a1 1 0 0 0 1.4 0l5-5Z"/></svg>`,
   table: `<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>`,
   formatClear: `<svg class="icon" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m13.3 9 5.5 5.5"/></svg>`,
-  micAi: `<svg class="icon" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4M8 22h8"/></svg>`,
-  aiSparkle: `<svg class="icon" viewBox="0 0 24 24"><path d="M11.5 2.5 13.9 9.6 21 12l-7.1 2.4-2.4 7.1-2.4-7.1L2 12l7.1-2.4 2.4-7.1Z"/><path d="M19.5 3v3M18 4.5h3"/></svg>`,
-  chatTranscribe: `<svg class="icon" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><path d="M9 11.5v1"/><path d="M12 9.5v5"/><path d="M15 11.5v1"/></svg>`,
+  micAi: `<svg class="icon" viewBox="0 0 24 24"><rect x="8.5" y="2" width="7" height="12" rx="3.5" fill="currentColor" stroke="none"/><path d="M5 10.5v.5a7 7 0 0 0 14 0v-.5"/><path d="M12 18v4M8 22h8"/></svg>`,
+  aiSparkle: `<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M11.5 2 14 9.5 21.5 12 14 14.5 11.5 22 9 14.5 1.5 12 9 9.5 11.5 2Z"/><path d="M19.5 2.5 20.3 5l2.5.8-2.5.8-.8 2.5-.8-2.5-2.5-.8 2.5-.8.8-2.5Z"/></svg>`,
+  chatTranscribe: `<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M12.5 3A8.5 8.5 0 0 0 4.6 14.7L3 20.5a.5.5 0 0 0 .64.62l5.76-1.82A8.5 8.5 0 1 0 12.5 3ZM9 10.5a1 1 0 1 1 2 0v2a1 1 0 1 1-2 0v-2Zm3-2a1 1 0 1 1 2 0v6a1 1 0 1 1-2 0v-6Zm3 2a1 1 0 1 1 2 0v2a1 1 0 1 1-2 0v-2Z"/></svg>`,
   moreHorizontal: `<svg class="icon" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>`,
-  menu: `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`
+  menu: `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="sidebar-icon-pane" d="M5 3h4v18H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" fill="transparent" stroke="none"/><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`
 };
 
 const maximizeAppButton = document.querySelector("#maximizeAppButton");
@@ -1281,7 +1282,7 @@ function renderUsersRail() {
 let sidebarAiSphereRenderers = [];
 function syncSidebarAiSpheres() {
   sidebarAiSphereRenderers.forEach(r => {
-    try { r.stop(); } catch (_) {}
+    try { r.stop(); } catch (_) { }
   });
   sidebarAiSphereRenderers = [];
   document.querySelectorAll(".sidebar-ai-sphere").forEach(canvas => {
@@ -1894,8 +1895,8 @@ function renderNodes() {
             <input class="card-media-ask-input" type="text" placeholder="${cardMediaInfo.kind === "audio" ? "Pergunte à IA sobre este áudio..." : "Pergunte à IA sobre este vídeo ou áudio..."}" autocomplete="off"${cardAnalyzingState?.targetNodeId === node.id ? " disabled" : ""} />
             <button class="card-media-ask-send${cardAnalyzingState?.targetNodeId === node.id ? " is-stop" : ""}" type="${cardAnalyzingState?.targetNodeId === node.id ? "button" : "submit"}" title="${cardAnalyzingState?.targetNodeId === node.id ? "Parar requisição" : "Enviar pergunta (Enter)"}" aria-label="${cardAnalyzingState?.targetNodeId === node.id ? "Parar requisição" : "Enviar pergunta"}"${cardAnalyzingState?.targetNodeId === node.id ? "" : " disabled"}>
               ${cardAnalyzingState?.targetNodeId === node.id
-                ? `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none" /></svg>`
-                : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>`}
+          ? `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none" /></svg>`
+          : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>`}
             </button>
           </form>
         ` : ""}
@@ -2060,7 +2061,10 @@ function renderNodes() {
 
         card.classList.remove(`status-${currentStatus}`, "done");
         card.classList.add(`status-${newStatus}`);
-        if (newStatus === "complete") card.classList.add("done");
+        if (newStatus === "complete") {
+          card.classList.add("done");
+          setAiIconMood("happy", { durationMs: 2800 });
+        }
         card.dataset.status = newStatus;
         event.currentTarget.innerHTML = icons.check;
 
@@ -2070,6 +2074,7 @@ function renderNodes() {
 
       card.querySelector(".card-action")?.addEventListener("click", event => {
         event.stopPropagation();
+        setAiIconMood("angry", { durationMs: 2200 });
         removeNode(node.id);
       });
 
@@ -3168,7 +3173,7 @@ function bindSidebarHoverExpand({
   applyCollapsed,
   shouldKeepOpen = () => false
 }) {
-  if (!element) return { suppressUntilLeave: () => {} };
+  if (!element) return { suppressUntilLeave: () => { } };
   let openTimer = 0;
   let closeTimer = 0;
   let suppressed = false;
@@ -8414,7 +8419,7 @@ async function startAudioTranscription(targetNodeId) {
         try {
           const level = Number(await invoke("ai_audio_capture_level")) || 0;
           updateCardAudioMeterLevel(tState.targetNodeId, level);
-        } catch (_) {}
+        } catch (_) { }
       }, 85);
     }
 
@@ -8525,7 +8530,7 @@ async function stopAudioTranscription() {
       if (tState.activeRecorder.state !== "inactive") {
         try {
           tState.activeRecorder.stop();
-        } catch (_) {}
+        } catch (_) { }
       }
       const recorded = tState.recordedBlobPromise ? await tState.recordedBlobPromise : null;
       if (recorded?.blob && recorded.blob.size >= 512) {
@@ -8780,6 +8785,13 @@ function updateTranscribeUi(active, targetNodeId = null, analyzing = false, star
         : "Gravar áudio (PC e microfone) para análise e transcrição com IA";
   });
   syncCardAnalyzingIndicator(analyzing ? targetNodeId : null);
+  if (analyzing) {
+    setAiIconMood("thinking");
+  } else if (active) {
+    setAiIconMood("listening");
+  } else {
+    setAiIconMood("normal");
+  }
 }
 
 let dropOverActive = false;
@@ -10411,7 +10423,7 @@ function initAiTranslatorPanel() {
         renderSessionsList();
         renderChatMessages();
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   function getActiveSession() {
@@ -10454,7 +10466,7 @@ function initAiTranslatorPanel() {
         alwaysSeeScreen = dbMap[AI_CHAT_ALWAYS_SEE_SCREEN_KEY] === "true";
         syncScreenVisionBtn();
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   const AI_CHAT_MODEL_KEY = "todocompanion.settings.aiChatModel";
@@ -10634,7 +10646,7 @@ function initAiTranslatorPanel() {
         selectedChatModel = saved;
         syncChatModelLabel();
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   if (toneSlider) {
@@ -12503,7 +12515,7 @@ function initAiTranslatorPanel() {
     return String(n);
   }
 
-  function updateChatTokenCounter() {}
+  function updateChatTokenCounter() { }
 
   async function sendChatMessage(rawText) {
     const text = String(rawText || "").trim();
@@ -12548,6 +12560,7 @@ function initAiTranslatorPanel() {
     });
     const reqId = ++activeChatRequestId;
     chatBusy = true;
+    setAiIconMood("thinking");
     chatHasUnread = false;
     syncChatSendButtonState();
     updateChatTopbarIndicator();
@@ -12726,9 +12739,15 @@ function initAiTranslatorPanel() {
         completionTokens,
         totalTokens
       });
+      if (proposal && proposalRequiresPermission(proposal)) {
+        setAiIconMood("alert", { durationMs: 5000 });
+      } else {
+        setAiIconMood("happy", { durationMs: 3800 });
+      }
     } catch (err) {
       if (reqId !== activeChatRequestId) return;
       const errMsg = String(err?.message || err);
+      setAiIconMood("angry", { durationMs: 5000 });
       persistenceService.logAiActivity({
         kind: "chat",
         model: "",
@@ -12835,7 +12854,7 @@ function initAiTranslatorPanel() {
                     colorRgb: null
                   });
                 }
-              } catch (_) {}
+              } catch (_) { }
             }, 100);
           }
         } else if (!active) {
@@ -13468,8 +13487,8 @@ async function runSingleAiAppAction(action, ctx) {
       const rawParentRef = explicitParent ? resolveCardIdRef(action.parentCardId, ctx) : null;
       const parentId = shouldConnectParent
         ? (rawParentRef && board.nodes.some(n => n.id === rawParentRef)
-            ? rawParentRef
-            : board.nodes[0]?.id || null)
+          ? rawParentRef
+          : board.nodes[0]?.id || null)
         : null;
       const id = makeId("action");
       const { w: cardW, h: cardH } = estimateActionCardSize(bodyText);
@@ -13959,6 +13978,7 @@ function openTaskReminderModal(userId, taskId, anchorEl = null) {
 }
 
 async function showInAppReminderAlert({ user, task, reminder }) {
+  setAiIconMood("alert", { durationMs: 6000 });
   if (!reminderAlertStack) return;
   const isAlarm = reminder.mode === "alarm";
   const alertId = `alert-${task.id}-${Date.now()}`;
@@ -13987,7 +14007,7 @@ async function showInAppReminderAlert({ user, task, reminder }) {
         reminderAlertStack.innerHTML = "";
         return;
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   reminderAlertStack.innerHTML = "";
@@ -14012,7 +14032,7 @@ async function showInAppReminderAlert({ user, task, reminder }) {
     card.classList.add("is-closing");
     setTimeout(() => card.remove(), 180);
     if (typeof invoke === "function") {
-      invoke("close_reminder_overlay").catch(() => {});
+      invoke("close_reminder_overlay").catch(() => { });
     }
   };
 
@@ -14212,5 +14232,5 @@ if (window.__TAURI__?.event?.listen) {
         renderUserTasks();
       }
     }
-  }).catch(() => {});
+  }).catch(() => { });
 }
