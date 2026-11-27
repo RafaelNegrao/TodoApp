@@ -72,15 +72,15 @@ const globalPointer = {
 function ensureGlobalPointerTracking() {
   if (globalPointer.bound || typeof window === "undefined") return;
   globalPointer.bound = true;
-  window.addEventListener(
-    "mousemove",
-    event => {
+  const updateFromPointer = event => {
+    if (typeof event.clientX === "number" && typeof event.clientY === "number") {
       globalPointer.x = event.clientX;
       globalPointer.y = event.clientY;
       globalPointer.lastMoveAt = Date.now();
-    },
-    { passive: true }
-  );
+    }
+  };
+  window.addEventListener("pointermove", updateFromPointer, { passive: true, capture: true });
+  window.addEventListener("mousemove", updateFromPointer, { passive: true, capture: true });
   window.addEventListener(
     "touchmove",
     event => {
@@ -90,12 +90,12 @@ function ensureGlobalPointerTracking() {
         globalPointer.lastMoveAt = Date.now();
       }
     },
-    { passive: true }
+    { passive: true, capture: true }
   );
 }
 
 class FlatEyesSphereAnimator {
-  constructor() {
+  constructor(initialMood = "normal") {
     const initAngle = Math.random() * Math.PI * 2;
     const initRadius = 0.2 + Math.random() * 0.55;
     this.posAtual = {
@@ -103,7 +103,9 @@ class FlatEyesSphereAnimator {
       y: Math.sin(initAngle) * initRadius
     };
     this.posAlvo = { ...this.posAtual };
-    this.currentRgb = hexToRgb(getSelectedAiIconColor());
+    this.localMood = initialMood || "normal";
+    this.moodRevertTimer = 0;
+    this.currentRgb = hexToRgb(MOOD_COLORS[this.localMood] || getSelectedAiIconColor());
     this.lerpBase = 0.10 + Math.random() * 0.06;
     this.autoMoveIntervalMs = 1050 + Math.random() * 1150;
     this.mouseRadiusPx = 220 + Math.random() * 130;
@@ -119,26 +121,76 @@ class FlatEyesSphereAnimator {
     this.pendingDoubleBlinkAt = 0;
     this.curiousEyeBias = 0;
     this.elapsedSec = Math.random() * 12;
-    this.happyBlend = 0;
-    this.angryBlend = 0;
+    this.happyBlend = this.localMood === "happy" ? 1 : 0;
+    this.angryBlend = this.localMood === "angry" ? 1 : 0;
+    this.waveBlend = this.localMood === "listening" ? 1 : 0;
+    this.arrowBlend = 0;
+    this.arrowTarget = 0;
+    this.stopBlend = 0;
+    this.stopTarget = 0;
+    this.typingUntil = 0;
+    this.typingReadStep = 0;
     this.eyeAnim = [
       { xScale: 1, yScale: 1, yShift: 0 },
       { xScale: 1, yScale: 1, yShift: 0 }
     ];
   }
 
+  setMood(mood = "normal", { durationMs = 0 } = {}) {
+    const validMoods = ["normal", "thinking", "listening", "happy", "angry", "alert", "speaking"];
+    const next = validMoods.includes(mood) ? mood : "normal";
+    if (this.moodRevertTimer) {
+      clearTimeout(this.moodRevertTimer);
+      this.moodRevertTimer = 0;
+    }
+    this.localMood = next;
+    if (durationMs > 0 && next !== "normal") {
+      this.moodRevertTimer = setTimeout(() => {
+        this.moodRevertTimer = 0;
+        this.localMood = "normal";
+      }, durationMs);
+    }
+  }
+
+  setArrowMorph(active) {
+    this.arrowTarget = active ? 1 : 0;
+  }
+
+  setStopMorph(active) {
+    this.stopTarget = active ? 1 : 0;
+  }
+
+  triggerTypingPulse() {
+    this.typingUntil = Date.now() + 1100;
+    this.typingReadStep = (this.typingReadStep + 1) % 14;
+  }
+
   _resolveEffectiveMood(isThinking) {
-    const globalMood = getAiIconMood();
-    if (globalMood !== "normal") return globalMood;
+    if (this.localMood !== "normal") return this.localMood;
     return isThinking ? "thinking" : "normal";
   }
 
   _resolveTargetRgb(mood) {
+    if (this.stopTarget > 0.5) {
+      return hexToRgb("#ef4444");
+    }
     const hex = MOOD_COLORS[mood] || getSelectedAiIconColor();
     return hexToRgb(hex);
   }
 
   _updateTarget(canvas, nowMs, mood) {
+    if (this.arrowTarget > 0.5 || this.stopTarget > 0.5) {
+      this.posAlvo.x = 0;
+      this.posAlvo.y = 0;
+      return;
+    }
+    if (nowMs < this.typingUntil) {
+      // Acompanha suavemente a leitura do texto da esquerda para a direita
+      const progress = this.typingReadStep / 13;
+      this.posAlvo.x = -0.58 + progress * 0.68;
+      this.posAlvo.y = 0.14;
+      return;
+    }
     if (mood === "thinking") {
       // Movimento orbital em figura-8 suave enquanto pensa
       this.posAlvo.x = Math.cos(this.elapsedSec * 2.4 * this.thinkingDir) * 0.52;
@@ -162,7 +214,7 @@ class FlatEyesSphereAnimator {
     }
 
     const idleMs = nowMs - globalPointer.lastMoveAt;
-    if (globalPointer.lastMoveAt > 0 && idleMs <= 1800 && canvas) {
+    if (globalPointer.lastMoveAt > 0 && idleMs <= 3500 && canvas) {
       const rect = canvas.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
         const cx = rect.left + rect.width / 2;
@@ -269,10 +321,17 @@ class FlatEyesSphereAnimator {
     const ringColor = `rgb(${Math.round(this.currentRgb[0])}, ${Math.round(this.currentRgb[1])}, ${Math.round(this.currentRgb[2])})`;
 
     const exprLerp = 1 - Math.pow(1 - 0.11, frameScale);
-    this.happyBlend += ((mood === "happy" ? 1 : 0) - this.happyBlend) * exprLerp;
-    this.angryBlend += ((mood === "angry" ? 1 : 0) - this.angryBlend) * exprLerp;
+    const arrowLerp = 1 - Math.pow(1 - 0.20, frameScale);
+    this.arrowBlend += (this.arrowTarget - this.arrowBlend) * arrowLerp;
+    this.stopBlend += (this.stopTarget - this.stopBlend) * arrowLerp;
+    const morphBlend = Math.min(1, Math.max(this.arrowBlend, this.stopBlend));
+    const isTypingNow = nowMs < this.typingUntil && morphBlend < 0.25;
+    const suppression = 1 - morphBlend;
+    this.happyBlend += ((mood === "happy" && this.arrowTarget < 0.5 && this.stopTarget < 0.5 ? 1 : 0) - this.happyBlend) * exprLerp;
+    this.angryBlend += ((mood === "angry" && this.arrowTarget < 0.5 && this.stopTarget < 0.5 ? 1 : 0) - this.angryBlend) * exprLerp;
+    this.waveBlend += ((mood === "listening" && this.arrowTarget < 0.5 && this.stopTarget < 0.5 ? 1 : 0) - this.waveBlend) * exprLerp;
 
-    const canBlink = mood === "normal" || mood === "listening";
+    const canBlink = mood === "normal" && morphBlend < 0.15 && this.waveBlend < 0.15;
     if (canBlink) {
       if (this.pendingDoubleBlinkAt > 0 && nowMs >= this.pendingDoubleBlinkAt) {
         this.blinkUntil = nowMs + 120;
@@ -289,7 +348,7 @@ class FlatEyesSphereAnimator {
 
     const half = size / 2;
     const breathWave = Math.sin(this.elapsedSec * this.breathFreq);
-    const idleFloatY = breathWave * (size * 0.022);
+    const idleFloatY = breathWave * (size * 0.022) * suppression;
 
     ctx.clearRect(0, 0, size, size);
     ctx.save();
@@ -303,11 +362,11 @@ class FlatEyesSphereAnimator {
 
     // 2. Visor interno escuro (#09090b, 78% do tamanho) com rotacao geometrica 3D + respiracao
     const visorRadius = (size * 0.78) / 2;
-    const angryShakeX = Math.sin(this.elapsedSec * 42) * (size * 0.018) * this.angryBlend;
-    const vx = this.posAtual.x * size * 0.16 + angryShakeX;
-    const vy = this.posAtual.y * size * 0.16 + idleFloatY;
-    const rotYRad = this.posAtual.x * 26 * RAD;
-    const rotXRad = -this.posAtual.y * 26 * RAD;
+    const angryShakeX = Math.sin(this.elapsedSec * 42) * (size * 0.018) * this.angryBlend * suppression;
+    const vx = (this.posAtual.x * size * 0.16 + angryShakeX) * suppression;
+    const vy = (this.posAtual.y * size * 0.16 + idleFloatY) * suppression;
+    const rotYRad = this.posAtual.x * 26 * RAD * suppression;
+    const rotXRad = -this.posAtual.y * 26 * RAD * suppression;
     const scaleX = Math.cos(rotYRad);
     const scaleY = Math.cos(rotXRad);
 
@@ -320,24 +379,62 @@ class FlatEyesSphereAnimator {
     ctx.fill();
     ctx.restore();
 
-    // 3. Olhos brancos expressivos com paralaxe 3D extra e transicao suave entre humores
-    const ox = this.posAtual.x * size * 0.08;
-    const oy = this.posAtual.y * size * 0.08 + idleFloatY * 0.5;
+    // 3. Olhos brancos expressivos que tambem se transformam geometricamente em seta (↑) no hover
+    const ox = this.posAtual.x * size * 0.08 * suppression;
+    const oy = (this.posAtual.y * size * 0.08 + idleFloatY * 0.5) * suppression;
     const eyeW = Math.max(1.7, size * 0.088);
     const eyeH = Math.max(3.8, size * 0.22);
     const eyeGap = size * 0.14;
     const centerOffsetX = (eyeW + eyeGap) / 2;
-    const eyeMorphLerp = 1 - Math.pow(1 - (isBlinking ? 0.38 : 0.14), frameScale);
+    const eyeMorphLerp = 1 - Math.pow(1 - (isBlinking ? 0.38 : 0.16), frameScale);
+
+    // Haste central da seta (emerge suavemente entre os dois olhos quando arrowBlend -> 1)
+    if (this.arrowBlend > 0.02) {
+      const shaftW = Math.max(1.8, size * 0.085);
+      const shaftH = size * 0.38 * this.arrowBlend;
+      const shaftCy = half + size * 0.04 + (1 - this.arrowBlend) * (size * 0.12);
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, this.arrowBlend * 1.15);
+      ctx.fillStyle = "#ffffff";
+      this._drawPill(ctx, half, shaftCy, shaftW, Math.max(1.5, shaftH));
+      ctx.restore();
+    }
+
+    // Barra central das 3 ondas de som (emerge entre os dois olhos no estado listening)
+    const activeWaveBlend = this.waveBlend * suppression;
+    if (activeWaveBlend > 0.02) {
+      const midPulse = 0.5 + 0.5 * Math.sin(this.elapsedSec * 9.5);
+      const barW = Math.max(1.5, size * 0.072);
+      const midH = size * (0.20 + 0.22 * midPulse) * activeWaveBlend;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, activeWaveBlend * 1.15);
+      ctx.fillStyle = "#ffffff";
+      this._drawPill(ctx, half + vx + ox, half + vy + oy, barW, Math.max(1.4, midH));
+      ctx.restore();
+    }
+
+    const wingLen = size * 0.24;
+    const arrowTipY = half - size * 0.19;
+    const wingDelta = wingLen * 0.3535;
+    const waveSideSpacing = size * 0.145;
 
     for (let idx = 0; idx < 2; idx += 1) {
-      const ex = half + vx + ox + (idx === 0 ? -centerOffsetX : centerOffsetX);
-      const ey = half + vy + oy;
+      const eyeOffsetX = idx === 0 ? -centerOffsetX : centerOffsetX;
+      const waveOffsetX = idx === 0 ? -waveSideSpacing : waveSideSpacing;
+      const blendedOffsetX = eyeOffsetX + (waveOffsetX - eyeOffsetX) * activeWaveBlend;
+      const baseEx = half + vx + ox + blendedOffsetX;
+      const baseEy = half + vy + oy;
 
       let targetShift = 0;
       let targetXScale = 1;
       let targetYScale = isBlinking ? 0.08 : 1 + breathWave * 0.055;
 
-      if (mood === "normal") {
+      if (isTypingNow) {
+        // Olhos calmos, focados e levemente atentos enquanto le o que voce digita
+        targetShift = size * 0.012;
+        targetXScale = 1.04;
+        targetYScale = isBlinking ? 0.08 : 0.90;
+      } else if (mood === "normal") {
         const bias = idx === 0 ? -this.curiousEyeBias : this.curiousEyeBias;
         if (!isBlinking) {
           targetYScale = Math.max(0.75, Math.min(1.22, targetYScale + bias));
@@ -349,9 +446,10 @@ class FlatEyesSphereAnimator {
         targetXScale = 1 + wave * 0.1;
         targetYScale = 1 - wave * 0.28;
       } else if (mood === "listening") {
-        const pulse = 0.5 + 0.5 * Math.sin(this.elapsedSec * 5.2);
-        targetXScale = 1.1 + pulse * 0.14;
-        targetYScale = isBlinking ? 0.08 : 1.14 + pulse * 0.16;
+        // Barras laterais das 3 ondas de som pulsando fora de fase com a barra central
+        const sidePulse = 0.5 + 0.5 * Math.sin(this.elapsedSec * 9.5 + (idx === 0 ? 1.7 : 3.4));
+        targetXScale = 0.82;
+        targetYScale = 0.52 + sidePulse * 0.78;
       } else if (mood === "speaking") {
         const wave = 0.5 + 0.5 * Math.sin(this.elapsedSec * 20 - idx * 1.1);
         targetXScale = 1.14 - wave * 0.2;
@@ -373,26 +471,64 @@ class FlatEyesSphereAnimator {
       st.yScale += (targetYScale - st.yScale) * eyeMorphLerp;
       st.yShift += (targetShift - st.yShift) * eyeMorphLerp;
 
-      const pillAlpha = Math.max(0, 1 - this.happyBlend * 1.25);
-      const drawW = Math.max(1.4, eyeW * st.xScale);
-      const drawH = Math.max(1.1, eyeH * st.yScale);
+      // Posicao e rotacao alvo para a asa da seta (arrowBlend) ou fusao no quadrado Stop (stopBlend)
+      const arrowX = idx === 0 ? half - wingDelta : half + wingDelta;
+      const arrowY = arrowTipY + wingDelta;
+      const eyeY = baseEy + st.yShift * suppression;
+      let ex = baseEx + (arrowX - baseEx) * this.arrowBlend;
+      let ey = eyeY + (arrowY - eyeY) * this.arrowBlend;
+      ex = ex + (half - ex) * this.stopBlend;
+      ey = ey + (half - ey) * this.stopBlend;
+      const rotAngle = (idx === 0 ? Math.PI / 4 : -Math.PI / 4) * this.arrowBlend * (1 - this.stopBlend);
+
+      const pillAlpha = Math.max(0, 1 - this.happyBlend * 1.25 * suppression) * Math.max(0, 1 - this.stopBlend * 1.35);
+      const drawW = Math.max(1.4, eyeW * (st.xScale * suppression + 1.0 * this.arrowBlend));
+      const drawH = Math.max(1.1, eyeH * st.yScale * suppression + wingLen * this.arrowBlend);
 
       if (pillAlpha > 0.01) {
         ctx.save();
+        ctx.translate(ex, ey);
+        if (Math.abs(rotAngle) > 0.001) {
+          ctx.rotate(rotAngle);
+        }
         ctx.globalAlpha = pillAlpha;
         ctx.fillStyle = "#ffffff";
-        this._drawPill(ctx, ex, ey + st.yShift, drawW, drawH);
+        this._drawPill(ctx, 0, 0, drawW, drawH);
         ctx.restore();
 
-        if (this.angryBlend > 0.01) {
-          this._drawAngryBrowCut(ctx, ex, ey + st.yShift, drawW, drawH, idx === 1, this.angryBlend);
+        if (this.angryBlend > 0.01 && suppression > 0.05) {
+          this._drawAngryBrowCut(ctx, ex, ey, drawW, drawH, idx === 1, this.angryBlend * suppression);
         }
       }
 
-      if (this.happyBlend > 0.01) {
+      if (this.happyBlend > 0.01 && suppression > 0.05) {
         const bounce = -Math.abs(Math.sin(this.elapsedSec * 6.5)) * (size * 0.042);
-        this._drawHappyEye(ctx, ex, ey, eyeW * 1.5, eyeH, bounce, this.happyBlend);
+        this._drawHappyEye(ctx, ex, ey, eyeW * 1.5, eyeH, bounce, this.happyBlend * suppression);
       }
+    }
+
+    // Quadrado arredondado central de Stop (emerge quando stopBlend -> 1 no hover durante chatBusy)
+    if (this.stopBlend > 0.02) {
+      const sqSize = size * (0.16 + 0.14 * this.stopBlend);
+      const r = Math.max(1.5, sqSize * 0.24);
+      const sx = half - sqSize / 2;
+      const sy = half - sqSize / 2;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, this.stopBlend * 1.15);
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.moveTo(sx + r, sy);
+      ctx.lineTo(sx + sqSize - r, sy);
+      ctx.quadraticCurveTo(sx + sqSize, sy, sx + sqSize, sy + r);
+      ctx.lineTo(sx + sqSize, sy + sqSize - r);
+      ctx.quadraticCurveTo(sx + sqSize, sy + sqSize, sx + sqSize - r, sy + sqSize);
+      ctx.lineTo(sx + r, sy + sqSize);
+      ctx.quadraticCurveTo(sx, sy + sqSize, sx, sy + sqSize - r);
+      ctx.lineTo(sx, sy + r);
+      ctx.quadraticCurveTo(sx, sy, sx + r, sy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
     }
 
     ctx.restore();
@@ -507,7 +643,7 @@ function isInsideActiveButton(canvas) {
 }
 
 export class GrokDodecahedronRenderer {
-  constructor(canvas, { size = 20, speed = 1, intensity = 1, colorRgb = null, config = {} } = {}) {
+  constructor(canvas, { size = 20, speed = 1, intensity = 1, colorRgb = null, mood = "normal", config = {} } = {}) {
     this.canvas = canvas;
     this.size = size;
     this.speed = speed;
@@ -520,7 +656,7 @@ export class GrokDodecahedronRenderer {
     this.running = false;
     this.reducedMotion = typeof window !== "undefined"
       && window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-    this._flatEyes = new FlatEyesSphereAnimator();
+    this._flatEyes = new FlatEyesSphereAnimator(mood);
 
     this._resetSimulation();
     this._configureCanvas();
@@ -772,6 +908,22 @@ export class GrokDodecahedronRenderer {
     }
     this._renderSphere();
     this.rafId = requestAnimationFrame(ts => this._drawFrame(ts));
+  }
+
+  setMood(mood, opts) {
+    this._flatEyes?.setMood(mood, opts);
+  }
+
+  setArrowMorph(active) {
+    this._flatEyes?.setArrowMorph(active);
+  }
+
+  setStopMorph(active) {
+    this._flatEyes?.setStopMorph(active);
+  }
+
+  triggerTypingPulse() {
+    this._flatEyes?.triggerTypingPulse();
   }
 
   start() {
