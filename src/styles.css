@@ -106,6 +106,9 @@
   --card: #21222c;
   --card-inner: rgba(255, 255, 255, 0.032);
   --card-border: rgba(255, 255, 255, 0.1);
+  --card-complete-bg: #047857;
+  --card-complete-border: #34d399;
+  --card-complete-fg: #ffffff;
   --card-text: #f4f5f8;
   --card-muted: #8e929f;
   --card-ongoing: #818cf8;
@@ -118,6 +121,20 @@
   --card-divider: rgba(255, 255, 255, 0.08);
   --btn-active-bg: #38bdf8;
   --btn-active-color: #0c1427;
+  --nav-active-bg: #0284c7;
+  --nav-active-hover-bg: #0369a1;
+  --nav-active-fg: #ffffff;
+  --nav-active-muted: rgba(255, 255, 255, 0.85);
+  --nav-active-chip-bg: rgba(255, 255, 255, 0.18);
+  --nav-active-danger: #fecaca;
+  --nav-active-danger-bg: rgba(239, 68, 68, 0.32);
+  --nav-active-reminder: #fde047;
+  --nav-active-alarm: #fecaca;
+  --task-complete-active-bg: #059669;
+  --task-complete-active-hover-bg: #047857;
+  --task-complete-active-fg: #ffffff;
+  --task-complete-active-muted: rgba(255, 255, 255, 0.85);
+  --task-complete-active-chip-bg: rgba(255, 255, 255, 0.2);
   --card-font-size: 14px;
   --card-line-height: 1.45;
   --card-title-size: var(--card-font-size, 14px);
@@ -160,6 +177,9 @@
   --card: #242634;
   --card-inner: rgba(248, 248, 242, 0.035);
   --card-border: rgba(248, 248, 242, 0.11);
+  --card-complete-bg: #047857;
+  --card-complete-border: #50fa7b;
+  --card-complete-fg: #ffffff;
   --card-text: #f8f8f2;
   --card-muted: #9aa0c4;
   --card-ongoing: #bd93f9;
@@ -172,6 +192,20 @@
   --card-divider: rgba(248, 248, 242, 0.1);
   --btn-active-bg: #8be9fd;
   --btn-active-color: #21222c;
+  --nav-active-bg: #bd93f9;
+  --nav-active-hover-bg: #a97af7;
+  --nav-active-fg: #1e1f29;
+  --nav-active-muted: rgba(30, 31, 41, 0.78);
+  --nav-active-chip-bg: rgba(30, 31, 41, 0.14);
+  --nav-active-danger: #991b1b;
+  --nav-active-danger-bg: rgba(239, 68, 68, 0.24);
+  --nav-active-reminder: #92400e;
+  --nav-active-alarm: #991b1b;
+  --task-complete-active-bg: #15803d;
+  --task-complete-active-hover-bg: #166534;
+  --task-complete-active-fg: #ffffff;
+  --task-complete-active-muted: rgba(255, 255, 255, 0.86);
+  --task-complete-active-chip-bg: rgba(255, 255, 255, 0.2);
   --card-icon: #9aa0c4;
   --card-icon-rgb: 154, 160, 196;
   --card-icon-hover: #ffffff;
@@ -203,9 +237,12 @@
   --green: #3d8b63;
   --green-rgb: 61, 139, 99;
   --warn: #c87f28;
-  --card: #fcfbf7;
+  --card: #fed7aa;
   --card-inner: rgba(61, 52, 43, 0.036);
-  --card-border: rgba(61, 52, 43, 0.13);
+  --card-border: #f97316;
+  --card-complete-bg: #a7f3d0;
+  --card-complete-border: #10b981;
+  --card-complete-fg: #0f172a;
   --card-text: #26231e;
   --card-muted: #7a7165;
   --card-ongoing: #c96442;
@@ -218,6 +255,20 @@
   --card-divider: rgba(61, 52, 43, 0.11);
   --btn-active-bg: #c96442;
   --btn-active-color: #ffffff;
+  --nav-active-bg: #c96442;
+  --nav-active-hover-bg: #b55232;
+  --nav-active-fg: #ffffff;
+  --nav-active-muted: rgba(255, 255, 255, 0.86);
+  --nav-active-chip-bg: rgba(255, 255, 255, 0.2);
+  --nav-active-danger: #fee2e2;
+  --nav-active-danger-bg: rgba(153, 27, 27, 0.32);
+  --nav-active-reminder: #fef08a;
+  --nav-active-alarm: #fee2e2;
+  --task-complete-active-bg: #2f7d57;
+  --task-complete-active-hover-bg: #256847;
+  --task-complete-active-fg: #ffffff;
+  --task-complete-active-muted: rgba(255, 255, 255, 0.86);
+  --task-complete-active-chip-bg: rgba(255, 255, 255, 0.2);
   --card-icon: #786f63;
   --card-icon-rgb: 120, 111, 99;
   --card-icon-hover: #1f1c18;
@@ -635,17 +686,12 @@ button {
 /* Selecao marcada so pelo preenchimento: a borda transparente fica apenas para
    o item nao "pular" 1px ao alternar. */
 .user-rail-item.active {
-  color: #ffffff;
-  background: #0284c7;
+  color: var(--nav-active-fg);
+  background: var(--nav-active-bg);
 }
 
 .user-rail-item.active:hover {
-  background: #0369a1;
-}
-
-:root[data-theme="light-claude"] .user-rail-item.active {
-  color: #ffffff;
-  background: #0284c7;
+  background: var(--nav-active-hover-bg);
 }
 
 .user-rail-item:not(.active) {
@@ -677,8 +723,8 @@ button {
 }
 
 .user-rail-item.active .user-rail-avatar {
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.16);
+  color: var(--nav-active-fg);
+  background: var(--nav-active-chip-bg);
   font-weight: 700;
 }
 
@@ -709,8 +755,8 @@ button {
 }
 
 .user-rail-item.active .user-rail-count {
-  color: var(--text-strong);
-  background: rgba(var(--hi-rgb), 0.14);
+  color: var(--nav-active-fg);
+  background: var(--nav-active-chip-bg);
 }
 
 .user-rail-actions {
@@ -755,6 +801,20 @@ button {
 .user-rail-action.user-rail-action-danger:hover {
   color: var(--danger);
   background: rgba(var(--accent-rgb), 0.18);
+}
+
+.user-rail-item.active .user-rail-action {
+  color: var(--nav-active-muted);
+}
+
+.user-rail-item.active .user-rail-action:hover {
+  color: var(--nav-active-fg);
+  background: var(--nav-active-chip-bg);
+}
+
+.user-rail-item.active .user-rail-action.user-rail-action-danger:hover {
+  color: var(--nav-active-danger);
+  background: var(--nav-active-danger-bg);
 }
 
 .user-rail-drag-ghost {
@@ -2355,6 +2415,32 @@ body.translator-floating-mode .attachments-popup {
 .task-card.status-complete {
   --status-color: var(--card-complete);
   --status-rgb: var(--card-complete-rgb);
+}
+
+.task-card.status-complete:not([data-card-color]):not(.image-card) {
+  --task-card-bg: var(--card-complete-bg);
+  border-color: var(--card-complete-border);
+  color: var(--card-complete-fg);
+}
+
+.task-card.status-complete:not([data-card-color]):not(.image-card) .card-body,
+.task-card.status-complete:not([data-card-color]):not(.image-card) .root-card-title,
+.task-card.status-complete:not([data-card-color]):not(.image-card) .card-created-at {
+  color: var(--card-complete-fg);
+}
+
+.task-card.status-complete:not([data-card-color]):not(.image-card) .card-format-btn,
+.task-card.status-complete:not([data-card-color]):not(.image-card) .card-action,
+.task-card.status-complete:not([data-card-color]):not(.image-card) .card-ai-btn,
+.task-card.status-complete:not([data-card-color]):not(.image-card) .root-card-edit {
+  color: color-mix(in srgb, var(--card-complete-fg) 84%, transparent);
+}
+
+.task-card.status-complete:not([data-card-color]):not(.image-card) .card-format-btn:hover,
+.task-card.status-complete:not([data-card-color]):not(.image-card) .card-ai-btn:hover,
+.task-card.status-complete:not([data-card-color]):not(.image-card) .root-card-edit:hover {
+  color: var(--card-complete-fg);
+  background: color-mix(in srgb, var(--card-complete-fg) 14%, transparent);
 }
 
 .card-bento-inner {
@@ -3994,32 +4080,35 @@ body.translator-floating-mode .attachments-popup {
 }
 
 .user-task-card.active {
-  background: #0284c7;
-  color: #ffffff;
+  background: var(--nav-active-bg);
+  color: var(--nav-active-fg);
   border-color: transparent;
   box-shadow: none;
 }
 
 .user-task-card.active .user-task-id,
 .user-task-card.active .user-task-title {
-  color: #ffffff;
+  color: var(--nav-active-fg);
   font-weight: 700;
 }
 
 .user-task-card.active:hover {
-  background: #0369a1;
+  background: var(--nav-active-hover-bg);
 }
 
-:root[data-theme="light-claude"] .user-task-card.active {
-  background: #0284c7;
-  color: #ffffff;
-  border-color: transparent;
-  box-shadow: none;
+.user-task-card.status-complete.active {
+  background: var(--task-complete-active-bg);
+  color: var(--task-complete-active-fg);
 }
 
-:root[data-theme="light-claude"] .user-task-card.active .user-task-id,
-:root[data-theme="light-claude"] .user-task-card.active .user-task-title {
-  color: #ffffff;
+.user-task-card.status-complete.active:hover {
+  background: var(--task-complete-active-hover-bg);
+}
+
+.user-task-card.status-complete.active .user-task-id,
+.user-task-card.status-complete.active .user-task-title {
+  color: var(--task-complete-active-fg);
+  text-decoration-color: rgba(255, 255, 255, 0.55);
 }
 
 /* Cartões não selecionados ficam mais discretos para o ativo saltar aos olhos sem precisar de bordas. */
@@ -4136,6 +4225,40 @@ body.translator-floating-mode .attachments-popup {
 .user-task-remove:hover {
   color: #f87171;
   background: rgba(239, 68, 68, 0.15);
+}
+
+.user-task-card.active .user-task-reminder,
+.user-task-card.active .user-task-info,
+.user-task-card.active .user-task-remove {
+  color: var(--nav-active-muted);
+}
+
+.user-task-card.active .user-task-reminder:hover,
+.user-task-card.active .user-task-info:hover {
+  color: var(--nav-active-fg);
+  background: var(--nav-active-chip-bg);
+}
+
+.user-task-card.active .user-task-remove:hover {
+  color: var(--nav-active-danger);
+  background: var(--nav-active-danger-bg);
+}
+
+.user-task-card.status-complete.active .user-task-reminder,
+.user-task-card.status-complete.active .user-task-info,
+.user-task-card.status-complete.active .user-task-remove {
+  color: var(--task-complete-active-muted);
+}
+
+.user-task-card.status-complete.active .user-task-reminder:hover,
+.user-task-card.status-complete.active .user-task-info:hover {
+  color: var(--task-complete-active-fg);
+  background: var(--task-complete-active-chip-bg);
+}
+
+.user-task-card.status-complete.active .user-task-remove:hover {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.32);
 }
 
 
@@ -10478,6 +10601,22 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
 
 .user-task-reminder.has-reminder.is-alarm {
   color: #ef4444;
+}
+
+.user-task-card.active .user-task-reminder.has-reminder {
+  color: var(--nav-active-reminder);
+}
+
+.user-task-card.active .user-task-reminder.has-reminder.is-alarm {
+  color: var(--nav-active-alarm);
+}
+
+.user-task-card.status-complete.active .user-task-reminder.has-reminder {
+  color: #fde047;
+}
+
+.user-task-card.status-complete.active .user-task-reminder.has-reminder.is-alarm {
+  color: #fecaca;
 }
 
 .user-task-card.has-reminder .user-task-actions {
