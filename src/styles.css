@@ -4179,7 +4179,7 @@ button {
 .modal-backdrop {
   position: absolute;
   inset: 0;
-  z-index: 30;
+  z-index: 200;
   display: grid;
   place-items: center;
   padding: 24px;
