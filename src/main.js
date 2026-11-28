@@ -363,6 +363,7 @@ async function init() {
   maximizeAppButton?.addEventListener("click", toggleMaximizeWindow);
   minimizeAppButton?.addEventListener("click", minimizeWindow);
   document.querySelector("#closeAppButton")?.addEventListener("click", () => {
+    closeAllOpenModals();
     const iconColor = getSelectedAiIconColor?.() || null;
     const iconStyle = getSelectedAiIconStyle?.() || null;
     invoke?.("hide_window", { iconColor, iconStyle }).catch(err =>
@@ -612,6 +613,13 @@ function initSettingsModule() {
   import("./settings/index.js")
     .then(({ initSettings }) => initSettings())
     .catch(error => console.warn("[settings] failed to load", error));
+}
+
+function closeAllOpenModals() {
+  document.querySelectorAll(".modal-backdrop:not([hidden])").forEach(el => {
+    el.hidden = true;
+  });
+  closeFloatingMediaAskBar?.();
 }
 
 function minimizeWindow() {
@@ -11156,6 +11164,7 @@ function initAiTranslatorPanel() {
 
   window.toggleAiTranslatorPanel = togglePanel;
   window.openFloatingAiChatOnly = () => {
+    closeAllOpenModals();
     currentMode = "chat";
     panel.hidden = false;
     if (translateView) translateView.hidden = true;
