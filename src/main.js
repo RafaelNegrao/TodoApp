@@ -14596,6 +14596,9 @@ const taskReminderService = new TaskReminderService({
 taskReminderService.start();
 
 if (window.__TAURI__?.event?.listen) {
+  window.__TAURI__.event.listen("reminder-heartbeat", () => {
+    taskReminderService.checkDueReminders();
+  });
   window.__TAURI__.event.listen("open-floating-ai-chat", () => {
     window.openFloatingAiChatOnly?.();
   });

@@ -859,6 +859,30 @@ fn url_encode_query_value(input: &str) -> String {
     out
 }
 
+#[cfg(target_os = "windows")]
+fn promote_overlay_topmost(window: &tauri::WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+        SWP_SHOWWINDOW, SW_SHOWNOACTIVATE,
+    };
+    if let Ok(raw_hwnd) = window.hwnd() {
+        let hwnd = HWND(raw_hwnd.0);
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            );
+        }
+    }
+}
+
 #[tauri::command]
 async fn show_reminder_overlay(
     app: tauri::AppHandle,
@@ -889,7 +913,10 @@ async fn show_reminder_overlay(
                 "taskId": task_id.unwrap_or_default(),
             }),
         );
+        let _ = existing.set_always_on_top(true);
         let _ = existing.show();
+        #[cfg(target_os = "windows")]
+        promote_overlay_topmost(&existing);
         return Ok(true);
     }
 
@@ -916,7 +943,7 @@ async fn show_reminder_overlay(
         pos_y = logical_y + 18.0;
     }
 
-    tauri::WebviewWindowBuilder::new(&app, "reminder-overlay", tauri::WebviewUrl::App(query.into()))
+    let overlay = tauri::WebviewWindowBuilder::new(&app, "reminder-overlay", tauri::WebviewUrl::App(query.into()))
         .title("TODOCompanion Alert")
         .inner_size(win_w, win_h)
         .position(pos_x, pos_y)
@@ -930,6 +957,19 @@ async fn show_reminder_overlay(
         .visible(true)
         .build()
         .map_err(|e| format!("Falha ao abrir alerta flutuante: {e}"))?;
+
+    #[cfg(target_os = "windows")]
+    {
+        promote_overlay_topmost(&overlay);
+        let app_clone = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if let Some(win) = app_clone.get_webview_window("reminder-overlay") {
+                let _ = win.set_always_on_top(true);
+                promote_overlay_topmost(&win);
+            }
+        });
+    }
 
     Ok(true)
 }
@@ -950,7 +990,9 @@ async fn reminder_overlay_action(
     task_id: Option<String>,
 ) -> Result<(), String> {
     if action == "open" {
+        set_ai_tray_mode(&app, false, None, None);
         if let Some(main_win) = app.get_webview_window("main") {
+            let _ = main_win.set_skip_taskbar(false);
             let _ = main_win.unminimize();
             let _ = main_win.show();
             let _ = main_win.set_focus();
@@ -7580,6 +7622,13 @@ fn main() {
             if let Err(err) = build_tray(app.handle()) {
                 eprintln!("Failed to build system tray: {err}");
             }
+
+            // Heartbeat nativo para garantir disparo pontual de alarmes mesmo com WebView2 oculto na bandeja
+            let heartbeat_handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                let _ = heartbeat_handle.emit("reminder-heartbeat", ());
+            });
 
             Ok(())
         })
