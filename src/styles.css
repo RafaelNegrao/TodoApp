@@ -1289,10 +1289,10 @@ button {
   gap: 3px;
   flex: 0 0 auto;
   margin-left: auto;
-  padding: 2px 4px;
+  padding: 3px;
   background: rgba(var(--hi-rgb), 0.035);
   border: 1px solid rgba(var(--hi-rgb), 0.08);
-  border-radius: 7px;
+  border-radius: 8px;
 }
 
 .canvas-center-button,
@@ -1304,10 +1304,14 @@ button {
   flex: 0 0 auto;
   width: 26px;
   height: 26px;
+  padding: 0;
+  font-size: 0;
+  line-height: 0;
   box-sizing: border-box;
-  display: grid;
-  place-items: center;
-  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
   color: var(--muted);
   background: transparent;
   border: 1px solid transparent;
@@ -1326,15 +1330,12 @@ button {
 
 .canvas-center-button .icon,
 .canvas-organize-button .icon,
+.canvas-record-button .icon,
 .canvas-transcribe-button .icon,
 .canvas-attach-button .icon {
   width: 14px;
   height: 14px;
-}
-
-.canvas-record-button .icon {
-  width: 15px;
-  height: 15px;
+  display: block;
 }
 
 .canvas-record-button.recording,
@@ -2558,12 +2559,15 @@ button {
 .card-ai-btn {
   width: 22px;
   height: 22px;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0;
+  line-height: 0;
   color: var(--card-icon);
   opacity: 0.78;
   border: 0;
-  border-radius: 6px;
+  border-radius: 50%;
   background: transparent;
   cursor: pointer;
   padding: 0;
@@ -2579,14 +2583,19 @@ button {
 
 .card-action:hover {
   opacity: 1;
-  color: var(--danger, #ef4444);
-  background: rgba(239, 68, 68, 0.14);
+  color: #ffffff;
+  background: #e04040;
 }
 
-.card-action .icon,
+.card-action .icon {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
 .card-ai-btn .icon {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   display: block;
 }
 
@@ -3060,12 +3069,15 @@ button {
   position: absolute;
   top: 6px;
   right: 6px;
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0;
+  line-height: 0;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 0;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.65);
   color: #fff;
@@ -3157,18 +3169,22 @@ button {
 .card-inline-video-del,
 .card-inline-audio-del {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
-  border: 1px solid transparent;
+  margin: 0;
+  font-size: 0;
+  line-height: 0;
+  border: 0;
   border-radius: 50%;
   background: transparent;
   color: currentColor;
   cursor: pointer;
   opacity: 0.55;
-  transition: opacity 0.14s ease, transform 0.14s ease, background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  transition: opacity 0.14s ease, transform 0.14s ease, background 0.14s ease, color 0.14s ease;
 }
 
 .card-inline-video-wrap:hover .card-inline-video-del,
@@ -3181,7 +3197,6 @@ button {
 .card-inline-video-del:hover,
 .card-inline-audio-del:hover {
   background: #e04040;
-  border-color: #e04040;
   color: #fff;
 }
 
@@ -3192,8 +3207,9 @@ button {
 
 .card-inline-video-del .icon,
 .card-inline-audio-del .icon {
-  width: 11px;
-  height: 11px;
+  width: 12px;
+  height: 12px;
+  display: block;
 }
 
 .card-inline-audio-wrap {
@@ -8648,20 +8664,37 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   width: 22px;
   height: 22px;
   padding: 0;
+  font-size: 0;
+  line-height: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 50%;
   background: transparent;
   color: var(--muted);
-  display: inline-grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: color 140ms ease, background 140ms ease;
+  transition: transform 140ms ease, opacity 140ms ease;
 }
 
 .card-inline-media-ai:hover {
-  color: var(--text-strong);
-  background: rgba(var(--hi-rgb), 0.1);
+  background: transparent;
+  transform: scale(1.12);
+}
+
+.card-inline-media-ai:active {
+  transform: scale(0.94);
+}
+
+.card-inline-media-ai.is-analyzing,
+.card-inline-media-ai.is-analyzing:hover {
+  background: transparent;
+  cursor: pointer;
+}
+
+.card-inline-img-wrap:has(.card-inline-media-ai.is-analyzing) .card-inline-img-actions {
+  opacity: 1;
 }
 
 .card-inline-media-ai .icon {
@@ -8697,14 +8730,21 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
   opacity: 1;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
-  background: rgba(12, 13, 18, 0.72);
+  border-radius: 50%;
+  background: transparent;
   color: #ffffff;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
 }
 
 .card-inline-img-actions .card-inline-img-ai:hover {
-  background: rgba(124, 58, 237, 0.88);
+  background: transparent;
+  transform: scale(1.12);
+}
+
+.card-inline-img-actions .card-inline-img-del:hover {
+  background: #e04040;
   color: #ffffff;
+  filter: none;
 }
 
 .card-media-mode-btn {
@@ -10596,7 +10636,11 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
 }
 
 .task-card[data-card-color] .card-format-btn:hover,
-.task-card[data-card-color] .card-action:hover,
+.task-card[data-card-color] .card-action:hover {
+  color: #ffffff !important;
+  background: #e04040 !important;
+}
+
 .task-card[data-card-color] .card-ai-btn:hover,
 .task-card[data-card-color] .root-card-edit:hover {
   color: #ffffff !important;
@@ -10720,7 +10764,11 @@ body.translator-floating-mode .ai-translate-boxes-wrap {
 }
 
 :root[data-theme="light-claude"] .task-card[data-card-color] .card-format-btn:hover,
-:root[data-theme="light-claude"] .task-card[data-card-color] .card-action:hover,
+:root[data-theme="light-claude"] .task-card[data-card-color] .card-action:hover {
+  color: #ffffff !important;
+  background: #e04040 !important;
+}
+
 :root[data-theme="light-claude"] .task-card[data-card-color] .card-ai-btn:hover,
 :root[data-theme="light-claude"] .task-card[data-card-color] .root-card-edit:hover {
   color: #0f172a !important;

@@ -142,34 +142,34 @@ const THINKING_EYE_MODES = Object.freeze([
   "elastic-squash"
 ]);
 
-const THINKING_FX_MODES = Object.freeze([
-  "comet-arc",
-  "dual-orbit-arcs",
-  "orbit-dots",
-  "sonar-ripple",
-  "radar-sweep",
-  "sparkle-stars",
-  "dna-helix",
-  "loading-segments",
-  "color-prism",
-  "neural-links",
-  "equalizer-halo",
-  "ellipsis-bounce",
-  "orbit-satellites",
-  "scanline-beam",
-  "magnetic-ring",
-  "firefly-swarm"
+const THINKING_EYE_SHAPES = Object.freeze([
+  "pill",
+  "circle",
+  "diamond",
+  "star",
+  "happy-arc",
+  "chevron-in",
+  "chevron-out",
+  "heart",
+  "bar",
+  "triangle",
+  "plus",
+  "ring",
+  "crescent",
+  "hourglass",
+  "drop",
+  "rounded-square"
 ]);
 
 /**
- * Generates 256 (16 eye choreographies × 16 ring/visor FX) non-repeating
- * thinking/loading micro-interactions using a shuffled deck.
+ * Generates 256 (16 eye motions × 16 eye shapes) non-repeating pure-eye
+ * thinking/loading transformations using a shuffled deck (no extra particles).
  */
 class ThinkingInteractionEngine {
   constructor() {
     this.deck = [];
     this.eyeMode = THINKING_EYE_MODES[0];
-    this.fxMode = THINKING_FX_MODES[0];
+    this.eyeShape = THINKING_EYE_SHAPES[0];
     this.wasThinking = false;
     this.nextSwitchAt = 0;
     this.seed = Math.random() * 100;
@@ -178,7 +178,7 @@ class ThinkingInteractionEngine {
   }
 
   _refillDeck() {
-    const total = THINKING_EYE_MODES.length * THINKING_FX_MODES.length;
+    const total = THINKING_EYE_MODES.length * THINKING_EYE_SHAPES.length;
     const arr = new Array(total);
     for (let i = 0; i < total; i += 1) arr[i] = i;
     for (let i = arr.length - 1; i > 0; i -= 1) {
@@ -193,18 +193,18 @@ class ThinkingInteractionEngine {
   _pickNext(nowMs) {
     if (this.deck.length === 0) this._refillDeck();
     const prevEye = this.eyeMode;
-    const prevFx = this.fxMode;
+    const prevShape = this.eyeShape;
     let chosen = this.deck.pop();
     for (let tries = 0; tries < 6 && this.deck.length > 0; tries += 1) {
-      const e = THINKING_EYE_MODES[Math.floor(chosen / THINKING_FX_MODES.length)];
-      const f = THINKING_FX_MODES[chosen % THINKING_FX_MODES.length];
-      if (e !== prevEye && f !== prevFx) break;
+      const e = THINKING_EYE_MODES[Math.floor(chosen / THINKING_EYE_SHAPES.length)];
+      const s = THINKING_EYE_SHAPES[chosen % THINKING_EYE_SHAPES.length];
+      if (e !== prevEye && s !== prevShape) break;
       this.deck.unshift(chosen);
       chosen = this.deck.pop();
     }
-    this.eyeMode = THINKING_EYE_MODES[Math.floor(chosen / THINKING_FX_MODES.length)];
-    this.fxMode = THINKING_FX_MODES[chosen % THINKING_FX_MODES.length];
-    this.nextSwitchAt = nowMs + 2400 + Math.random() * 1500;
+    this.eyeMode = THINKING_EYE_MODES[Math.floor(chosen / THINKING_EYE_SHAPES.length)];
+    this.eyeShape = THINKING_EYE_SHAPES[chosen % THINKING_EYE_SHAPES.length];
+    this.nextSwitchAt = nowMs + 2200 + Math.random() * 1500;
   }
 
   update(nowMs, isThinking) {
@@ -214,6 +214,177 @@ class ThinkingInteractionEngine {
       this._pickNext(nowMs);
     }
     this.wasThinking = isThinking;
+  }
+
+  drawEyeShape(ctx, idx, drawW, drawH) {
+    const r = Math.max(drawW, drawH) * 0.5;
+    const hw = drawW * 0.5;
+    const hh = drawH * 0.5;
+    const lw = Math.max(1.2, Math.min(drawW, drawH) * 0.42);
+
+    switch (this.eyeShape) {
+      case "circle": {
+        const cr = (drawW + drawH) * 0.28;
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(1.1, cr), 0, Math.PI * 2);
+        ctx.fill();
+        return true;
+      }
+      case "diamond": {
+        ctx.beginPath();
+        ctx.moveTo(0, -hh * 1.05);
+        ctx.lineTo(hw * 1.25, 0);
+        ctx.lineTo(0, hh * 1.05);
+        ctx.lineTo(-hw * 1.25, 0);
+        ctx.closePath();
+        ctx.fill();
+        return true;
+      }
+      case "star": {
+        const outer = r * 1.15;
+        const inner = outer * 0.36;
+        ctx.beginPath();
+        ctx.moveTo(0, -outer);
+        ctx.lineTo(inner, -inner);
+        ctx.lineTo(outer, 0);
+        ctx.lineTo(inner, inner);
+        ctx.lineTo(0, outer);
+        ctx.lineTo(-inner, inner);
+        ctx.lineTo(-outer, 0);
+        ctx.lineTo(-inner, -inner);
+        ctx.closePath();
+        ctx.fill();
+        return true;
+      }
+      case "happy-arc": {
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = lw;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.arc(0, r * 0.25, Math.max(1.3, r * 0.72), Math.PI * 1.15, Math.PI * 1.85, false);
+        ctx.stroke();
+        return true;
+      }
+      case "chevron-in": {
+        const dir = idx === 0 ? 1 : -1;
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = lw;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(-dir * hw * 0.75, -hh * 0.65);
+        ctx.lineTo(dir * hw * 0.65, 0);
+        ctx.lineTo(-dir * hw * 0.75, hh * 0.65);
+        ctx.stroke();
+        return true;
+      }
+      case "chevron-out": {
+        const dir = idx === 0 ? -1 : 1;
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = lw;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(-dir * hw * 0.75, -hh * 0.65);
+        ctx.lineTo(dir * hw * 0.65, 0);
+        ctx.lineTo(-dir * hw * 0.75, hh * 0.65);
+        ctx.stroke();
+        return true;
+      }
+      case "heart": {
+        const s = Math.max(1.4, r * 0.85);
+        ctx.beginPath();
+        ctx.moveTo(0, s * 0.85);
+        ctx.bezierCurveTo(-s * 1.35, s * 0.05, -s * 0.95, -s * 1.05, 0, -s * 0.3);
+        ctx.bezierCurveTo(s * 0.95, -s * 1.05, s * 1.35, s * 0.05, 0, s * 0.85);
+        ctx.closePath();
+        ctx.fill();
+        return true;
+      }
+      case "bar": {
+        const bw = Math.max(drawW, drawH) * 0.95;
+        const bh = Math.max(1.2, Math.min(drawW, drawH) * 0.58);
+        const br = bh * 0.5;
+        ctx.beginPath();
+        ctx.roundRect(-bw * 0.5, -bh * 0.5, bw, bh, br);
+        ctx.fill();
+        return true;
+      }
+      case "triangle": {
+        ctx.beginPath();
+        ctx.moveTo(0, -hh * 0.95);
+        ctx.lineTo(hw * 1.25, hh * 0.8);
+        ctx.lineTo(-hw * 1.25, hh * 0.8);
+        ctx.closePath();
+        ctx.fill();
+        return true;
+      }
+      case "plus": {
+        const arm = Math.max(1.6, r * 0.85);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = lw;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(-arm, 0);
+        ctx.lineTo(arm, 0);
+        ctx.moveTo(0, -arm);
+        ctx.lineTo(0, arm);
+        ctx.stroke();
+        return true;
+      }
+      case "ring": {
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = Math.max(1.0, lw * 0.85);
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(1.2, r * 0.68), 0, Math.PI * 2);
+        ctx.stroke();
+        return true;
+      }
+      case "crescent": {
+        const cr = Math.max(1.4, r * 0.78);
+        const shift = (idx === 0 ? 1 : -1) * cr * 0.45;
+        ctx.beginPath();
+        ctx.arc(0, 0, cr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#09090b";
+        ctx.beginPath();
+        ctx.arc(shift, -cr * 0.12, cr * 0.78, 0, Math.PI * 2);
+        ctx.fill();
+        return true;
+      }
+      case "hourglass": {
+        const s = Math.max(1.5, r * 0.88);
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.75, -s * 0.85);
+        ctx.lineTo(s * 0.75, -s * 0.85);
+        ctx.lineTo(0, 0);
+        ctx.lineTo(s * 0.75, s * 0.85);
+        ctx.lineTo(-s * 0.75, s * 0.85);
+        ctx.lineTo(0, 0);
+        ctx.closePath();
+        ctx.fill();
+        return true;
+      }
+      case "drop": {
+        const s = Math.max(1.5, r * 0.92);
+        ctx.beginPath();
+        ctx.moveTo(0, -s);
+        ctx.quadraticCurveTo(s * 0.95, s * 0.15, 0, s * 0.85);
+        ctx.quadraticCurveTo(-s * 0.95, s * 0.15, 0, -s);
+        ctx.closePath();
+        ctx.fill();
+        return true;
+      }
+      case "rounded-square": {
+        const s = Math.max(2.2, (drawW + drawH) * 0.56);
+        ctx.beginPath();
+        ctx.roundRect(-s * 0.5, -s * 0.5, s, s, s * 0.26);
+        ctx.fill();
+        return true;
+      }
+      default:
+        return false;
+    }
   }
 
   computeEyeMotion(idx, t, size) {
@@ -341,205 +512,6 @@ class ThinkingInteractionEngine {
     }
 
     return { shiftX, shiftY, xScale, yScale, rot };
-  }
-
-  drawRingEffect(ctx, half, size, t, blend) {
-    if (blend <= 0.02) return;
-    const p = t + this.seed;
-    const ringR = half * 0.89;
-    const lw = Math.max(1.2, size * 0.09);
-
-    ctx.save();
-    ctx.globalAlpha = blend * 0.85;
-    ctx.lineCap = "round";
-
-    if (this.fxMode === "comet-arc") {
-      const a = p * 3.8;
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
-      ctx.lineWidth = lw;
-      ctx.beginPath();
-      ctx.arc(half, half, ringR, a, a + 1.15);
-      ctx.stroke();
-    } else if (this.fxMode === "dual-orbit-arcs") {
-      const a = p * 3.2;
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.86)";
-      ctx.lineWidth = lw * 0.85;
-      ctx.beginPath();
-      ctx.arc(half, half, ringR, a, a + 0.85);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(half, half, ringR, a + Math.PI, a + Math.PI + 0.85);
-      ctx.stroke();
-    } else if (this.fxMode === "color-prism") {
-      const hue = (p * 110) % 360;
-      ctx.strokeStyle = `hsla(${hue.toFixed(0)}, 92%, 68%, 0.9)`;
-      ctx.lineWidth = lw * 1.15;
-      ctx.beginPath();
-      ctx.arc(half, half, ringR, 0, Math.PI * 2);
-      ctx.stroke();
-    } else if (this.fxMode === "magnetic-ring") {
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.78)";
-      ctx.lineWidth = lw * 0.75;
-      ctx.setLineDash([Math.max(2, size * 0.14), Math.max(2, size * 0.11)]);
-      ctx.lineDashOffset = -p * size * 0.6;
-      ctx.beginPath();
-      ctx.arc(half, half, ringR, 0, Math.PI * 2);
-      ctx.stroke();
-    } else if (this.fxMode === "loading-segments") {
-      const count = 8;
-      const active = Math.floor((p * 7) % count);
-      ctx.lineWidth = lw * 0.85;
-      for (let i = 0; i < count; i += 1) {
-        const dist = (i - active + count) % count;
-        const segAlpha = dist === 0 ? 1 : dist === 1 ? 0.55 : dist === 2 ? 0.25 : 0.08;
-        ctx.strokeStyle = `rgba(255, 255, 255, ${segAlpha})`;
-        const a0 = (i / count) * Math.PI * 2;
-        ctx.beginPath();
-        ctx.arc(half, half, ringR, a0, a0 + 0.42);
-        ctx.stroke();
-      }
-    }
-
-    ctx.restore();
-  }
-
-  drawVisorEffect(ctx, cx, cy, visorRadius, size, t, blend) {
-    if (blend <= 0.02) return;
-    const p = t + this.seed;
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, visorRadius, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.globalAlpha = blend;
-
-    if (this.fxMode === "orbit-dots" || this.fxMode === "orbit-satellites") {
-      const count = this.fxMode === "orbit-dots" ? 3 : 2;
-      for (let i = 0; i < count; i += 1) {
-        const speed = this.fxMode === "orbit-satellites" ? (i === 0 ? 4.8 : -2.6) : 3.6;
-        const r = visorRadius * (this.fxMode === "orbit-satellites" ? (i === 0 ? 0.76 : 0.56) : 0.78);
-        const a = p * speed + (i * Math.PI * 2) / count;
-        ctx.fillStyle = i % 2 === 0 ? "rgba(196, 181, 253, 0.92)" : "rgba(103, 232, 249, 0.92)";
-        ctx.beginPath();
-        ctx.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, Math.max(0.9, size * 0.045), 0, Math.PI * 2);
-        ctx.fill();
-      }
-    } else if (this.fxMode === "sonar-ripple") {
-      for (let i = 0; i < 2; i += 1) {
-        const cycle = ((p * 0.9 + i * 0.5) % 1 + 1) % 1;
-        ctx.strokeStyle = `rgba(167, 139, 250, ${(1 - cycle) * 0.65})`;
-        ctx.lineWidth = Math.max(0.8, size * 0.035);
-        ctx.beginPath();
-        ctx.arc(cx, cy, visorRadius * (0.2 + cycle * 0.85), 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    } else if (this.fxMode === "radar-sweep") {
-      const a = p * 3.4;
-      ctx.fillStyle = "rgba(56, 189, 248, 0.24)";
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, visorRadius, a, a + 0.95);
-      ctx.closePath();
-      ctx.fill();
-    } else if (this.fxMode === "sparkle-stars") {
-      for (let i = 0; i < 4; i += 1) {
-        const phase = 0.5 + 0.5 * Math.sin(p * 5.2 + i * 1.7);
-        const a = i * 1.57 + 0.6 + Math.sin(p * 0.7 + i) * 0.2;
-        const sx = cx + Math.cos(a) * visorRadius * 0.72;
-        const sy = cy + Math.sin(a) * visorRadius * 0.72;
-        const sr = Math.max(0.9, size * 0.05 * phase);
-        ctx.fillStyle = `rgba(255, 255, 255, ${0.25 + phase * 0.75})`;
-        ctx.beginPath();
-        ctx.moveTo(sx, sy - sr * 1.4);
-        ctx.lineTo(sx + sr * 0.45, sy - sr * 0.45);
-        ctx.lineTo(sx + sr * 1.4, sy);
-        ctx.lineTo(sx + sr * 0.45, sy + sr * 0.45);
-        ctx.lineTo(sx, sy + sr * 1.4);
-        ctx.lineTo(sx - sr * 0.45, sy + sr * 0.45);
-        ctx.lineTo(sx - sr * 1.4, sy);
-        ctx.lineTo(sx - sr * 0.45, sy - sr * 0.45);
-        ctx.closePath();
-        ctx.fill();
-      }
-    } else if (this.fxMode === "dna-helix") {
-      for (let i = 0; i < 5; i += 1) {
-        const frac = (i / 4) * 2 - 1;
-        const dx = frac * visorRadius * 0.72;
-        const dy = Math.sin(p * 4.5 + i * 1.1) * visorRadius * 0.32;
-        ctx.fillStyle = "rgba(167, 139, 250, 0.72)";
-        ctx.beginPath();
-        ctx.arc(cx + dx, cy + dy + visorRadius * 0.45, Math.max(0.8, size * 0.036), 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "rgba(56, 189, 248, 0.72)";
-        ctx.beginPath();
-        ctx.arc(cx + dx, cy - dy + visorRadius * 0.45, Math.max(0.8, size * 0.036), 0, Math.PI * 2);
-        ctx.fill();
-      }
-    } else if (this.fxMode === "neural-links") {
-      const pts = [];
-      for (let i = 0; i < 4; i += 1) {
-        const a = p * 1.4 + i * 1.57;
-        pts.push([cx + Math.cos(a) * visorRadius * 0.72, cy + Math.sin(a) * visorRadius * 0.72]);
-      }
-      ctx.strokeStyle = "rgba(168, 85, 247, 0.48)";
-      ctx.lineWidth = Math.max(0.7, size * 0.028);
-      ctx.beginPath();
-      for (let i = 0; i < pts.length; i += 1) {
-        const next = pts[(i + 1) % pts.length];
-        ctx.moveTo(pts[i][0], pts[i][1]);
-        ctx.lineTo(next[0], next[1]);
-      }
-      ctx.stroke();
-      ctx.fillStyle = "rgba(216, 180, 254, 0.9)";
-      pts.forEach(([x, y]) => {
-        ctx.beginPath();
-        ctx.arc(x, y, Math.max(0.8, size * 0.036), 0, Math.PI * 2);
-        ctx.fill();
-      });
-    } else if (this.fxMode === "equalizer-halo") {
-      const bars = 12;
-      ctx.strokeStyle = "rgba(129, 140, 248, 0.75)";
-      ctx.lineWidth = Math.max(0.9, size * 0.034);
-      ctx.lineCap = "round";
-      for (let i = 0; i < bars; i += 1) {
-        const a = (i / bars) * Math.PI * 2 + p * 0.8;
-        const h = (0.12 + 0.16 * (0.5 + 0.5 * Math.sin(p * 7 + i * 1.3))) * visorRadius;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(a) * (visorRadius - h), cy + Math.sin(a) * (visorRadius - h));
-        ctx.lineTo(cx + Math.cos(a) * visorRadius, cy + Math.sin(a) * visorRadius);
-        ctx.stroke();
-      }
-    } else if (this.fxMode === "ellipsis-bounce") {
-      const dotR = Math.max(0.9, size * 0.04);
-      const spacing = size * 0.12;
-      for (let i = 0; i < 3; i += 1) {
-        const hop = Math.max(0, Math.sin(p * 6.5 - i * 0.85));
-        ctx.fillStyle = `rgba(255, 255, 255, ${0.45 + hop * 0.55})`;
-        ctx.beginPath();
-        ctx.arc(cx + (i - 1) * spacing, cy + visorRadius * 0.56 - hop * size * 0.055, dotR, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    } else if (this.fxMode === "scanline-beam") {
-      const sy = cy + Math.sin(p * 3.6) * visorRadius * 0.82;
-      ctx.strokeStyle = "rgba(56, 189, 248, 0.45)";
-      ctx.lineWidth = Math.max(1.0, size * 0.042);
-      ctx.beginPath();
-      ctx.moveTo(cx - visorRadius, sy);
-      ctx.lineTo(cx + visorRadius, sy);
-      ctx.stroke();
-    } else if (this.fxMode === "firefly-swarm") {
-      for (let i = 0; i < 5; i += 1) {
-        const a = p * (1.8 + i * 0.35) + i * 1.3;
-        const rad = visorRadius * (0.45 + 0.35 * Math.sin(p * 2.1 + i));
-        const alpha = 0.35 + 0.6 * (0.5 + 0.5 * Math.sin(p * 6 + i * 2));
-        ctx.fillStyle = `rgba(250, 204, 21, ${alpha})`;
-        ctx.beginPath();
-        ctx.arc(cx + Math.cos(a) * rad, cy + Math.sin(a) * rad, Math.max(0.75, size * 0.032), 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    ctx.restore();
   }
 }
 
@@ -940,10 +912,6 @@ class FlatEyesSphereAnimator {
     ctx.fillStyle = ringColor;
     ctx.fillRect(0, 0, size, size);
 
-    if (this.thinkingBlend * suppression > 0.02) {
-      this.thinkingEngine.drawRingEffect(ctx, half, size, this.elapsedSec, this.thinkingBlend * suppression);
-    }
-
     // 2. Visor interno escuro (#09090b, 78% do tamanho) com rotacao geometrica 3D + respiracao
     const visorRadius = (size * 0.78) / 2;
     const angryShakeX = Math.sin(this.elapsedSec * 42) * (size * 0.018) * this.angryBlend * suppression;
@@ -962,18 +930,6 @@ class FlatEyesSphereAnimator {
     ctx.fillStyle = "#09090b";
     ctx.fill();
     ctx.restore();
-
-    if (this.thinkingBlend * suppression > 0.02) {
-      this.thinkingEngine.drawVisorEffect(
-        ctx,
-        half + vx,
-        half + vy,
-        visorRadius,
-        size,
-        this.elapsedSec,
-        this.thinkingBlend * suppression
-      );
-    }
 
     // 3. Olhos brancos expressivos que tambem se transformam geometricamente em seta (↑) no hover
     const ox = this.posAtual.x * size * 0.08 * suppression * motionScale;
@@ -1135,7 +1091,10 @@ class FlatEyesSphereAnimator {
         }
         ctx.globalAlpha = pillAlpha;
         ctx.fillStyle = "#ffffff";
-        this._drawPill(ctx, 0, 0, drawW, drawH);
+        const useThinkingShape = this.thinkingBlend > 0.5 && suppression > 0.65 && this.arrowBlend < 0.1;
+        if (!useThinkingShape || !this.thinkingEngine.drawEyeShape(ctx, idx, drawW, drawH)) {
+          this._drawPill(ctx, 0, 0, drawW, drawH);
+        }
         ctx.restore();
 
         if (this.angryBlend > 0.01 && suppression > 0.05) {

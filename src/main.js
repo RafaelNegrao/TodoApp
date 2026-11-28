@@ -1864,7 +1864,7 @@ function renderNodes() {
                 </div>
                 <input class="crit-range" type="range" min="0" max="2" step="1" value="${node.criticality ?? 0}" title="Criticality" />
               </div>
-              <button class="card-ai-btn card-transcribe-btn${transcribeState?.targetNodeId === node.id ? " recording" : ""}${cardAnalyzingState?.targetNodeId === node.id ? " analyzing" : ""}" type="button" aria-label="Gravar e analisar áudio com IA" title="${cardAnalyzingState?.targetNodeId === node.id ? "Parar análise da IA" : transcribeState?.targetNodeId === node.id ? "Finalizar gravação e analisar com IA" : "Gravar áudio (PC e microfone) para análise e transcrição com IA"}">
+              <button class="card-ai-btn card-transcribe-btn${transcribeState?.targetNodeId === node.id ? " recording" : ""}${cardAnalyzingState?.targetNodeId === node.id && !cardAnalyzingState?.mediaKey ? " analyzing" : ""}" type="button" aria-label="Gravar e analisar áudio com IA" title="${cardAnalyzingState?.targetNodeId === node.id ? "Parar análise da IA" : transcribeState?.targetNodeId === node.id ? "Finalizar gravação e analisar com IA" : "Gravar áudio (PC e microfone) para análise e transcrição com IA"}">
                 <span class="card-transcribe-icon">${icons.micAi}</span>
                 <span class="card-transcribe-live" aria-hidden="true">
                   <canvas class="card-recording-sphere" aria-hidden="true"></canvas>
@@ -2018,11 +2018,11 @@ function renderNodes() {
         const src = mediaAiBtn.dataset.mediaSrc || "";
         let mediaTarget = null;
         if (kind === "image" && src) {
-          mediaTarget = { kind: "image", imageDataUrl: src, userId: "", file: "" };
+          mediaTarget = { kind: "image", imageDataUrl: src, userId: "", file: "", mediaKey: src };
         } else if (ref) {
           const slash = ref.indexOf("/");
           if (slash > 0) {
-            mediaTarget = { kind, userId: ref.slice(0, slash), file: ref.slice(slash + 1) };
+            mediaTarget = { kind, userId: ref.slice(0, slash), file: ref.slice(slash + 1), mediaKey: ref };
           }
         }
         if (mediaTarget) {
@@ -8349,7 +8349,7 @@ function stopActiveCardMediaAsk(nodeId) {
   if (!cardAnalyzingState || cardAnalyzingState.targetNodeId !== nodeId) return;
   cardMediaAskSeq += 1;
   cardAnalyzingState = null;
-  updateTranscribeUi(false, nodeId, false);
+  syncCardMediaAiSpheres();
   syncCardMediaAskBarUi(nodeId, false);
   renderUsersRail();
   renderUserTasks();
@@ -8362,13 +8362,19 @@ async function askAiAboutCardMedia(node, mediaInfo, question, { audioOnly = fals
   if (!user || !task) return;
 
   const requestId = ++cardMediaAskSeq;
+  const mediaKey =
+    mediaInfo.mediaKey ||
+    (mediaInfo.kind === "image"
+      ? mediaInfo.imageDataUrl || ""
+      : `${mediaInfo.userId || ""}/${mediaInfo.file || ""}`);
   cardAnalyzingState = {
     userId: user.id,
     taskId: task.id,
     targetNodeId: node.id,
+    mediaKey,
     requestId
   };
-  updateTranscribeUi(false, node.id, true);
+  syncCardMediaAiSpheres();
   syncCardMediaAskBarUi(node.id, true);
   renderUsersRail();
   renderUserTasks();
@@ -8412,7 +8418,7 @@ async function askAiAboutCardMedia(node, mediaInfo, question, { audioOnly = fals
       if (cardAnalyzingState?.targetNodeId === node.id) {
         cardAnalyzingState = null;
       }
-      updateTranscribeUi(false, node.id, false);
+      syncCardMediaAiSpheres();
       syncCardMediaAskBarUi(node.id, false);
       renderUsersRail();
       renderUserTasks();
@@ -8965,13 +8971,54 @@ function syncCardMediaAiSpheres() {
   cardMediaAiSphereRenderers = [];
   if (!nodesLayer) return;
   nodesLayer.querySelectorAll(".card-media-ai-sphere").forEach(canvas => {
-    const renderer = new GrokDodecahedronRenderer(canvas, {
-      size: 16,
-      speed: 0.45,
-      intensity: 0.78,
-      monochrome: true,
-      subtle: true
-    });
+    const btn = canvas.closest(".card-inline-media-ai");
+    const cardEl = canvas.closest(".task-card");
+    const cardId = cardEl?.dataset?.id || "";
+    const btnKey = btn?.dataset?.mediaRef || btn?.dataset?.mediaSrc || "";
+    const isThisAnalyzing = Boolean(
+      cardAnalyzingState &&
+      cardAnalyzingState.targetNodeId === cardId &&
+      cardAnalyzingState.mediaKey &&
+      cardAnalyzingState.mediaKey === btnKey
+    );
+
+    if (btn) {
+      btn.classList.toggle("is-analyzing", isThisAnalyzing);
+      if (isThisAnalyzing) {
+        if (!btn.dataset.idleTitle) btn.dataset.idleTitle = btn.title || "";
+        btn.title = "Analisando... (clique para parar)";
+      } else if (btn.dataset.idleTitle) {
+        btn.title = btn.dataset.idleTitle;
+      }
+    }
+
+    const renderer = isThisAnalyzing
+      ? new GrokDodecahedronRenderer(canvas, {
+        size: 16,
+        speed: 1.75,
+        intensity: 1,
+        mood: "thinking",
+        monochrome: false,
+        subtle: false
+      })
+      : new GrokDodecahedronRenderer(canvas, {
+        size: 16,
+        speed: 0.45,
+        intensity: 0.78,
+        monochrome: true,
+        subtle: true
+      });
+
+    if (isThisAnalyzing && btn) {
+      if (btn._analyzingEnter) btn.removeEventListener("pointerenter", btn._analyzingEnter);
+      if (btn._analyzingLeave) btn.removeEventListener("pointerleave", btn._analyzingLeave);
+      btn._analyzingEnter = () => renderer.setStopMorph(true);
+      btn._analyzingLeave = () => renderer.setStopMorph(false);
+      btn.addEventListener("pointerenter", btn._analyzingEnter);
+      btn.addEventListener("pointerleave", btn._analyzingLeave);
+      renderer.setStopMorph(btn.matches(":hover"));
+    }
+
     renderer.start();
     cardMediaAiSphereRenderers.push(renderer);
   });
