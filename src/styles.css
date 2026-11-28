@@ -130,6 +130,8 @@
   --nav-active-danger-bg: rgba(239, 68, 68, 0.32);
   --nav-active-reminder: #fde047;
   --nav-active-alarm: #fecaca;
+  --task-complete-bg: rgba(16, 185, 129, 0.34);
+  --task-complete-hover-bg: rgba(16, 185, 129, 0.48);
   --task-complete-active-bg: #059669;
   --task-complete-active-hover-bg: #047857;
   --task-complete-active-fg: #ffffff;
@@ -201,8 +203,10 @@
   --nav-active-danger-bg: rgba(239, 68, 68, 0.24);
   --nav-active-reminder: #92400e;
   --nav-active-alarm: #991b1b;
-  --task-complete-active-bg: #15803d;
-  --task-complete-active-hover-bg: #166534;
+  --task-complete-bg: rgba(80, 250, 123, 0.24);
+  --task-complete-hover-bg: rgba(80, 250, 123, 0.36);
+  --task-complete-active-bg: #16a34a;
+  --task-complete-active-hover-bg: #15803d;
   --task-complete-active-fg: #ffffff;
   --task-complete-active-muted: rgba(255, 255, 255, 0.86);
   --task-complete-active-chip-bg: rgba(255, 255, 255, 0.2);
@@ -264,8 +268,10 @@
   --nav-active-danger-bg: rgba(153, 27, 27, 0.32);
   --nav-active-reminder: #fef08a;
   --nav-active-alarm: #fee2e2;
-  --task-complete-active-bg: #2f7d57;
-  --task-complete-active-hover-bg: #256847;
+  --task-complete-bg: rgba(16, 185, 129, 0.26);
+  --task-complete-hover-bg: rgba(16, 185, 129, 0.38);
+  --task-complete-active-bg: #16a34a;
+  --task-complete-active-hover-bg: #15803d;
   --task-complete-active-fg: #ffffff;
   --task-complete-active-muted: rgba(255, 255, 255, 0.86);
   --task-complete-active-chip-bg: rgba(255, 255, 255, 0.2);
@@ -4067,10 +4073,10 @@ body.translator-floating-mode .attachments-popup {
 }
 
 .user-task-card.status-complete {
-  --user-task-bg: rgba(var(--green-rgb), 0.24);
-  --user-task-hover-bg: rgba(var(--green-rgb), 0.31);
-  --user-task-active-bg: rgba(var(--green-rgb), 0.38);
-  --user-task-active-hover-bg: rgba(var(--green-rgb), 0.44);
+  --user-task-bg: var(--task-complete-bg);
+  --user-task-hover-bg: var(--task-complete-hover-bg);
+  --user-task-active-bg: var(--task-complete-active-bg);
+  --user-task-active-hover-bg: var(--task-complete-active-hover-bg);
 }
 
 .user-task-card:hover {
@@ -4097,12 +4103,13 @@ body.translator-floating-mode .attachments-popup {
 }
 
 .user-task-card.status-complete.active {
-  background: var(--task-complete-active-bg);
+  background: var(--task-complete-active-bg) !important;
+  border-color: transparent !important;
   color: var(--task-complete-active-fg);
 }
 
 .user-task-card.status-complete.active:hover {
-  background: var(--task-complete-active-hover-bg);
+  background: var(--task-complete-active-hover-bg) !important;
 }
 
 .user-task-card.status-complete.active .user-task-id,
@@ -4124,14 +4131,20 @@ body.translator-floating-mode .attachments-popup {
   opacity: 0.95;
 }
 
-.user-task-card.status-complete:not(.active),
 .user-task-card.status-stopped:not(.active) {
   opacity: 0.72;
 }
 
-.user-task-card.status-complete:not(.active):hover,
 .user-task-card.status-stopped:not(.active):hover {
   opacity: 0.92;
+}
+
+.user-task-card.status-complete:not(.active) {
+  opacity: 0.9;
+}
+
+.user-task-card.status-complete:not(.active):hover {
+  opacity: 1;
 }
 
 .user-task-card.status-complete .user-task-title {
