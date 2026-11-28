@@ -423,8 +423,6 @@ export function initSettings() {
     syncAiIconSettingsUi();
   }).catch(() => {});
 
-  closeButton?.addEventListener("click", hideApp);
-
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !modal.hidden) {
       close();

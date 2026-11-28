@@ -222,6 +222,7 @@
           </div>
           <input class="canvas-attach-input" id="canvasAttachInput" type="file" multiple hidden />
           <div class="recording-indicator" id="recordingIndicator" hidden>
+            <canvas class="recording-indicator-ai-sphere" id="recordingIndicatorAiSphere" aria-hidden="true"></canvas>
             <span id="recordingIndicatorText"></span>
             <button class="recording-indicator-target" id="recordingIndicatorTarget" type="button"
               title="Ir para a task em gravação" hidden></button>
@@ -343,9 +344,9 @@
               <button class="ai-head-icon-btn" id="aiDetachTranslatorBtn" type="button"
                 title="Detach translator on top of all apps (or drag header)" aria-label="Detach translator">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M15 3h6v6" />
-                  <path d="M10 14 21 3" />
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                  <path d="M9 21H3v-6" />
+                  <path d="M14 10 3 21" />
+                  <path d="M6 11V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-6" />
                 </svg>
               </button>
               <button class="ai-head-icon-btn ai-panel-close" id="closeAiTranslatorButton" type="button"

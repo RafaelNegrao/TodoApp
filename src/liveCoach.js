@@ -26,13 +26,13 @@ export function parseLiveCoachAdvice(rawText) {
 
     const suggestions = Array.isArray(parsed.suggestions)
       ? parsed.suggestions
-          .filter(s => s && String(s.en || "").trim())
-          .slice(0, 3)
-          .map(s => ({
-            tone: String(s.tone || "Natural").trim(),
-            en: String(s.en || "").trim(),
-            pt: String(s.pt || "").trim()
-          }))
+        .filter(s => s && String(s.en || "").trim())
+        .slice(0, 3)
+        .map(s => ({
+          tone: String(s.tone || "Natural").trim(),
+          en: String(s.en || "").trim(),
+          pt: String(s.pt || "").trim()
+        }))
       : [];
 
     if (!heardSummary && !translation && !suggestions.length && !tip) {
@@ -46,7 +46,7 @@ export function parseLiveCoachAdvice(rawText) {
 }
 
 export class LiveEnglishCoachController {
-  constructor({ invoke, getApiKey, getOutputMode, onAdvice, onUsage, onStatusChange, onError, intervalMs = 2500 }) {
+  constructor({ invoke, getApiKey, getOutputMode, onAdvice, onUsage, onStatusChange, onError, intervalMs = 9000 }) {
     this.invoke = invoke;
     this.getApiKey = getApiKey;
     this.getOutputMode = getOutputMode;

@@ -5,7 +5,8 @@ import {
   AI_CHAT_THINKING_PHRASES,
   AI_TRANSLATOR_THINKING_PHRASES,
   setAiIconMood,
-  getSelectedAiIconStyle
+  getSelectedAiIconStyle,
+  getSelectedAiIconColor
 } from "./grokDodecahedronLoader.js";
 import { LiveEnglishCoachController } from "./liveCoach.js";
 import {
@@ -361,6 +362,10 @@ async function init() {
 
   maximizeAppButton?.addEventListener("click", toggleMaximizeWindow);
   minimizeAppButton?.addEventListener("click", minimizeWindow);
+  document.querySelector("#closeAppButton")?.addEventListener("click", () => {
+    const iconColor = getSelectedAiIconColor?.() || null;
+    invoke?.("hide_window", { iconColor }).catch(err => console.warn("Could not hide window", err));
+  });
   openSearchButton?.addEventListener("click", openSearchModal);
   searchCloseIcon?.addEventListener("click", closeSearchModal);
   searchInput?.addEventListener("input", renderSearchResults);
@@ -608,7 +613,9 @@ function initSettingsModule() {
 
 function minimizeWindow() {
   if (!invoke) return;
-  invoke("minimize_window").catch(error => console.warn("Could not minimize window", error));
+  invoke("minimize_window").catch(error =>
+    console.warn("Could not minimize window", error)
+  );
 }
 
 function toggleMaximizeWindow() {
@@ -1197,7 +1204,8 @@ function renderUsersRail() {
 
     const recDot = isRecordingThisUser ? document.createElement("span") : null;
     if (recDot) {
-      recDot.className = "user-recording-dot";
+      recDot.className = "user-transcribing-badge is-recording";
+      recDot.innerHTML = `<canvas class="sidebar-ai-sphere" data-mood="listening" aria-hidden="true"></canvas>`;
       recDot.title = "Gravando agora";
       recDot.setAttribute("aria-label", "Gravando agora");
     }
@@ -1207,9 +1215,7 @@ function renderUsersRail() {
       const isAnalyzing = cardAnalyzingState?.userId === item.id;
       transcribeBadge.className = `user-transcribing-badge${isAnalyzing ? " is-analyzing" : ""}`;
       if (isAnalyzing) tab.classList.add("is-analyzing");
-      transcribeBadge.innerHTML = isAnalyzing
-        ? `<canvas class="sidebar-ai-sphere" aria-hidden="true"></canvas>`
-        : `<span class="mini-wave" aria-hidden="true"><span></span><span></span><span></span></span>`;
+      transcribeBadge.innerHTML = `<canvas class="sidebar-ai-sphere" data-mood="${isAnalyzing ? "thinking" : "listening"}" aria-hidden="true"></canvas>`;
       transcribeBadge.title = isAnalyzing ? "Analisando e transcrevendo áudio..." : "Gravando áudio para transcrever...";
       transcribeBadge.setAttribute("aria-label", transcribeBadge.title);
     }
@@ -1289,10 +1295,12 @@ function syncSidebarAiSpheres() {
   document.querySelectorAll(".sidebar-ai-sphere").forEach(canvas => {
     const isActiveItem = Boolean(canvas.closest(".active"));
     const isCollapsed = Boolean(canvas.closest(".collapsed"));
+    const mood = canvas.dataset.mood || "thinking";
     const renderer = new GrokDodecahedronRenderer(canvas, {
       size: isCollapsed ? 22 : 18,
-      speed: 1.75,
+      speed: mood === "listening" ? 1 : 1.75,
       intensity: 1,
+      mood,
       colorRgb: isActiveItem ? "255, 255, 255" : null
     });
     renderer.start();
@@ -1853,9 +1861,8 @@ function renderNodes() {
                 </div>
                 <input class="crit-range" type="range" min="0" max="2" step="1" value="${node.criticality ?? 0}" title="Criticality" />
               </div>
-              ${node.aiTranscribeTokens > 0 && transcribeState?.targetNodeId !== node.id && cardAnalyzingState?.targetNodeId !== node.id ? `<span class="card-ai-tokens-badge" title="Tokens usados na análise/transcrição: ${node.aiTranscribeTokens}">${node.aiTranscribeTokens >= 1000 ? `${(node.aiTranscribeTokens / 1000).toFixed(1)}k` : node.aiTranscribeTokens} tok</span>` : ""}
-              <button class="card-ai-btn card-transcribe-btn${transcribeState?.targetNodeId === node.id ? " recording" : ""}${cardAnalyzingState?.targetNodeId === node.id ? " analyzing" : ""}" type="button" aria-label="${isMediaCard ? (cardMediaInfo.kind === "audio" ? "Perguntar à IA sobre este áudio" : "Perguntar à IA sobre este vídeo/áudio") : "Gravar e analisar áudio com IA"}" title="${cardAnalyzingState?.targetNodeId === node.id ? "Analisando mídia com IA..." : isMediaCard ? (cardMediaInfo.kind === "audio" ? "Perguntar à IA sobre este áudio" : "Perguntar à IA sobre este vídeo ou áudio") : transcribeState?.targetNodeId === node.id ? "Finalizar gravação e analisar com IA" : "Gravar áudio (PC e microfone) para análise e transcrição com IA"}">
-                <span class="card-transcribe-icon">${isMediaCard ? icons.aiSparkle : icons.micAi}</span>
+              <button class="card-ai-btn card-transcribe-btn${transcribeState?.targetNodeId === node.id ? " recording" : ""}${cardAnalyzingState?.targetNodeId === node.id ? " analyzing" : ""}" type="button" aria-label="Gravar e analisar áudio com IA" title="${cardAnalyzingState?.targetNodeId === node.id ? "Parar análise da IA" : transcribeState?.targetNodeId === node.id ? "Finalizar gravação e analisar com IA" : "Gravar áudio (PC e microfone) para análise e transcrição com IA"}">
+                <span class="card-transcribe-icon">${icons.micAi}</span>
                 <span class="card-transcribe-live" aria-hidden="true">
                   <canvas class="card-recording-sphere" aria-hidden="true"></canvas>
                   <span class="card-audio-meter">
@@ -1870,6 +1877,9 @@ function renderNodes() {
                 </span>
                 <span class="card-transcribe-analyzing" aria-hidden="true">
                   <canvas class="card-analyzing-sphere" aria-hidden="true"></canvas>
+                  <span class="card-analyzing-stop">
+                    <svg class="icon" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/></svg>
+                  </span>
                   <span class="card-analyzing-text grok-shimmer-text">${AI_CARD_ANALYZING_PHRASES[0]}</span>
                 </span>
               </button>
@@ -1880,7 +1890,7 @@ function renderNodes() {
         <div class="card-body-wrap">
           ${rootCard
         ? `<div class="root-card-header">
-                 ${recordingState && recordingState.taskId === board.id ? `<span class="card-recording-dot" title="Gravando agora" aria-label="Gravando agora"></span>` : ""}
+                 ${recordingState && recordingState.taskId === board.id ? `<canvas class="sidebar-ai-sphere" data-mood="listening" aria-hidden="true"></canvas>` : ""}
                  <strong class="root-card-title" contenteditable="true" spellcheck="false" role="textbox" aria-label="Board Title">${escapeHtml(board.title)}</strong>
                  <button class="root-card-edit" type="button" aria-label="Edit" title="Edit">${icons.edit}</button>
                </div>`
@@ -1892,18 +1902,9 @@ function renderNodes() {
             ? `<div class="card-body table-card-body" contenteditable="false" aria-label="Table card">${renderBodyHtml(getNodeContent(node))}</div>`
             : `<div class="card-body" contenteditable="true" role="textbox" aria-label="Card content">${renderBodyHtml(getNodeContent(node))}</div>`}
         </div>
-        ${isMediaCard ? `
-          <form class="card-media-ask-bar" contenteditable="false"${cardAnalyzingState?.targetNodeId === node.id ? "" : " hidden"}>
-            <input class="card-media-ask-input" type="text" placeholder="${cardMediaInfo.kind === "audio" ? "Pergunte à IA sobre este áudio..." : "Pergunte à IA sobre este vídeo ou áudio..."}" autocomplete="off"${cardAnalyzingState?.targetNodeId === node.id ? " disabled" : ""} />
-            <button class="card-media-ask-send${cardAnalyzingState?.targetNodeId === node.id ? " is-stop" : ""}" type="${cardAnalyzingState?.targetNodeId === node.id ? "button" : "submit"}" title="${cardAnalyzingState?.targetNodeId === node.id ? "Parar requisição" : "Enviar pergunta (Enter)"}" aria-label="${cardAnalyzingState?.targetNodeId === node.id ? "Parar requisição" : "Enviar pergunta"}"${cardAnalyzingState?.targetNodeId === node.id ? "" : " disabled"}>
-              ${cardAnalyzingState?.targetNodeId === node.id
-          ? `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none" /></svg>`
-          : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>`}
-            </button>
-          </form>
-        ` : ""}
-        ${rootCard || isTableCard || isMediaCard ? "" : node.type === "image" && node.imageUrl ? `
+        ${rootCard || isTableCard ? "" : node.type === "image" && node.imageUrl ? `
           <div class="image-card-bottom" contenteditable="false">
+            <button class="image-card-btn card-inline-media-ai" type="button" data-media-kind="image" data-media-src="${escapeAttr(node.imageUrl)}" title="Perguntar à IA sobre esta imagem"><canvas class="card-media-ai-sphere" aria-hidden="true"></canvas></button>
             <button class="image-card-btn" type="button" data-command="changeImage" title="Change Image">${icons.image}</button>
             <button class="image-card-btn" type="button" data-command="clearImage" title="Remove Image">${icons.close}</button>
           </div>
@@ -1993,18 +1994,37 @@ function renderNodes() {
       card.querySelector(".card-ai-btn")?.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
-        if (isMediaCard) {
-          const askBar = card.querySelector(".card-media-ask-bar");
-          if (askBar) {
-            askBar.hidden = !askBar.hidden;
-            if (!askBar.hidden) {
-              const inputEl = askBar.querySelector(".card-media-ask-input");
-              inputEl?.focus();
-            }
-          }
+        if (cardAnalyzingState?.targetNodeId === node.id) {
+          stopActiveCardMediaAsk(node.id);
           return;
         }
         handleTranscribeTriggerClick(event, node.id, event.currentTarget);
+      });
+
+      card.addEventListener("click", event => {
+        const mediaAiBtn = event.target.closest(".card-inline-media-ai");
+        if (!mediaAiBtn) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (cardAnalyzingState?.targetNodeId === node.id) {
+          stopActiveCardMediaAsk(node.id);
+          return;
+        }
+        const kind = mediaAiBtn.dataset.mediaKind || "video";
+        const ref = mediaAiBtn.dataset.mediaRef || "";
+        const src = mediaAiBtn.dataset.mediaSrc || "";
+        let mediaTarget = null;
+        if (kind === "image" && src) {
+          mediaTarget = { kind: "image", imageDataUrl: src, userId: "", file: "" };
+        } else if (ref) {
+          const slash = ref.indexOf("/");
+          if (slash > 0) {
+            mediaTarget = { kind, userId: ref.slice(0, slash), file: ref.slice(slash + 1) };
+          }
+        }
+        if (mediaTarget) {
+          openFloatingMediaAskBar(mediaAiBtn, node, mediaTarget);
+        }
       });
 
       const mediaAskForm = card.querySelector(".card-media-ask-bar");
@@ -2014,6 +2034,24 @@ function renderNodes() {
         });
         const mediaAskInput = mediaAskForm.querySelector(".card-media-ask-input");
         const mediaAskSendBtn = mediaAskForm.querySelector(".card-media-ask-send");
+        const mediaModeBtn = mediaAskForm.querySelector(".card-media-mode-btn");
+        mediaModeBtn?.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const nextAudioOnly = mediaModeBtn.dataset.audioOnly !== "true";
+          mediaModeBtn.dataset.audioOnly = nextAudioOnly ? "true" : "false";
+          mediaModeBtn.classList.toggle("is-audio-only", nextAudioOnly);
+          mediaModeBtn.textContent = nextAudioOnly ? "Só áudio" : "Vídeo";
+          mediaModeBtn.title = nextAudioOnly
+            ? "Modo atual: Apenas áudio (~9x menos tokens · clique para incluir vídeo)"
+            : "Modo atual: Vídeo + áudio (clique para analisar apenas o áudio e economizar ~9x tokens)";
+          if (mediaAskInput) {
+            mediaAskInput.placeholder = nextAudioOnly
+              ? "Pergunte à IA sobre o áudio deste vídeo..."
+              : "Pergunte à IA sobre este vídeo ou áudio...";
+            mediaAskInput.focus();
+          }
+        });
         const syncMediaAskSendBtn = () => {
           if (!mediaAskSendBtn) return;
           const busyHere = cardAnalyzingState?.targetNodeId === node.id;
@@ -2049,7 +2087,8 @@ function renderNodes() {
           const q = String(mediaAskInput?.value || "").trim();
           if (!q || cardAnalyzingState) return;
           mediaAskInput.value = "";
-          await askAiAboutCardMedia(node, cardMediaInfo, q);
+          const audioOnly = mediaModeBtn?.dataset.audioOnly === "true";
+          await askAiAboutCardMedia(node, cardMediaInfo, q, { audioOnly });
         });
         syncMediaAskSendBtn();
       }
@@ -2109,7 +2148,7 @@ function renderNodes() {
 
     if (bodyEditor) {
       bodyEditor.addEventListener("pointerdown", event => {
-        if (event.target.closest(".card-todo-btn, .card-todo-wrap, .card-inline-img-del, .card-inline-video-wrap, .card-inline-video-del, .card-inline-audio-wrap, .card-inline-audio-del, .card-table-wrap")) {
+        if (event.target.closest(".card-todo-btn, .card-todo-wrap, .card-inline-media-ai, .card-inline-img-del, .card-inline-video-wrap, .card-inline-video-del, .card-inline-audio-wrap, .card-inline-audio-del, .card-table-wrap")) {
           event.stopPropagation();
         }
       });
@@ -2521,6 +2560,7 @@ function renderNodes() {
 
   syncCardRecordingIndicator(transcribeState?.targetNodeId || null);
   syncCardAnalyzingIndicator(cardAnalyzingState?.targetNodeId || null);
+  syncCardMediaAiSpheres();
 
   // Segunda passada: com todos os cards no DOM, ler offsetHeight de uma vez
   // (um unico reflow) para cachear a altura real de cada um.
@@ -3095,8 +3135,8 @@ function renderUserTasks() {
           ? `${task.title} · ${reminderTooltip}`
           : task.title;
     card.innerHTML = `
-      ${isRecordingThisTask ? `<span class="task-recording-dot" title="Gravando agora" aria-label="Gravando agora"></span>` : ""}
-      ${!isRecordingThisTask && isTranscribingThisTask ? `<span class="task-transcribing-badge${isAnalyzingThisTask ? " is-analyzing" : ""}" title="${isAnalyzingThisTask ? "Analisando e transcrevendo áudio..." : "Gravando áudio para transcrever..."}" aria-label="Transcrevendo áudio">${isAnalyzingThisTask ? `<canvas class="sidebar-ai-sphere" aria-hidden="true"></canvas>` : `<span class="mini-wave" aria-hidden="true"><span></span><span></span><span></span></span>`}</span>` : ""}
+      ${isRecordingThisTask ? `<span class="task-transcribing-badge is-recording" title="Gravando agora" aria-label="Gravando agora"><canvas class="sidebar-ai-sphere" data-mood="listening" aria-hidden="true"></canvas></span>` : ""}
+      ${!isRecordingThisTask && isTranscribingThisTask ? `<span class="task-transcribing-badge${isAnalyzingThisTask ? " is-analyzing" : ""}" title="${isAnalyzingThisTask ? "Analisando e transcrevendo áudio..." : "Gravando áudio para transcrever..."}" aria-label="Transcrevendo áudio"><canvas class="sidebar-ai-sphere" data-mood="${isAnalyzingThisTask ? "thinking" : "listening"}" aria-hidden="true"></canvas></span>` : ""}
       <span class="user-task-id">#${task.number || ""}</span>
       <span class="user-task-title">${escapeHtml(task.title)}</span>
       <div class="user-task-actions">
@@ -6130,7 +6170,7 @@ function renderBodyHtml(text) {
     if (match[1] !== undefined) {
       html += renderCardTableHtml(decodeTableData(match[1]));
     } else if (match[0].startsWith("![image](")) {
-      html += `<span class="card-inline-img-wrap" contenteditable="false"><img src="${escapeAttr(match[2])}" alt="Card image" draggable="false" /><button type="button" class="card-inline-img-del" title="Apagar imagem" aria-label="Apagar imagem">${icons.close}</button></span>`;
+      html += `<span class="card-inline-img-wrap" contenteditable="false"><img src="${escapeAttr(match[2])}" alt="Card image" draggable="false" /><span class="card-inline-img-actions"><button type="button" class="card-inline-media-ai card-inline-img-ai" data-media-kind="image" data-media-src="${escapeAttr(match[2])}" title="Perguntar à IA sobre esta imagem" aria-label="Perguntar à IA sobre esta imagem"><canvas class="card-media-ai-sphere" aria-hidden="true"></canvas></button><button type="button" class="card-inline-img-del" title="Apagar imagem" aria-label="Apagar imagem">${icons.close}</button></span></span>`;
     } else if (match[4]) {
       html += renderAttachmentReferenceHtml(match[3], match[4], match[0]);
     } else if (match[5] !== undefined) {
@@ -6140,12 +6180,12 @@ function renderBodyHtml(text) {
       const mediaRef = match[6];
       const videoUrl = buildLocalMediaUrl(mediaRef);
       const mediaName = resolveMediaDisplayName(mediaRef, "Vídeo");
-      html += `<span class="card-inline-video-wrap" contenteditable="false" data-video-src="${escapeAttr(mediaRef)}"><span class="card-inline-media-header">${icons.video}<span class="card-inline-media-name" title="${escapeAttr(mediaName)}">${escapeHtml(mediaName)}</span><button type="button" class="card-inline-video-del" title="Remover vídeo" aria-label="Remover vídeo">${icons.close}</button></span><video controls playsinline preload="metadata" src="${escapeAttr(videoUrl)}"></video></span>`;
+      html += `<span class="card-inline-video-wrap" contenteditable="false" data-video-src="${escapeAttr(mediaRef)}"><span class="card-inline-media-header">${icons.video}<span class="card-inline-media-name" title="${escapeAttr(mediaName)}">${escapeHtml(mediaName)}</span><button type="button" class="card-inline-media-ai" data-media-kind="video" data-media-ref="${escapeAttr(mediaRef)}" title="Perguntar à IA sobre este vídeo" aria-label="Perguntar à IA sobre este vídeo"><canvas class="card-media-ai-sphere" aria-hidden="true"></canvas></button><button type="button" class="card-inline-video-del" title="Remover vídeo" aria-label="Remover vídeo">${icons.close}</button></span><video controls playsinline preload="metadata" src="${escapeAttr(videoUrl)}"></video></span>`;
     } else if (match[7] !== undefined) {
       const mediaRef = match[7];
       const audioUrl = buildLocalMediaUrl(mediaRef);
       const mediaName = resolveMediaDisplayName(mediaRef, "Áudio");
-      html += `<span class="card-inline-audio-wrap" contenteditable="false" data-audio-src="${escapeAttr(mediaRef)}"><span class="card-inline-media-header">${icons.audio}<span class="card-inline-media-name" title="${escapeAttr(mediaName)}">${escapeHtml(mediaName)}</span></span><audio controls preload="metadata" src="${escapeAttr(audioUrl)}"></audio></span>`;
+      html += `<span class="card-inline-audio-wrap" contenteditable="false" data-audio-src="${escapeAttr(mediaRef)}"><span class="card-inline-media-header">${icons.audio}<span class="card-inline-media-name" title="${escapeAttr(mediaName)}">${escapeHtml(mediaName)}</span><button type="button" class="card-inline-media-ai" data-media-kind="audio" data-media-ref="${escapeAttr(mediaRef)}" title="Perguntar à IA sobre este áudio" aria-label="Perguntar à IA sobre este áudio"><canvas class="card-media-ai-sphere" aria-hidden="true"></canvas></button><button type="button" class="card-inline-audio-del" title="Remover áudio" aria-label="Remover áudio">${icons.close}</button></span><audio controls preload="metadata" src="${escapeAttr(audioUrl)}"></audio></span>`;
     } else {
       const url = match[0];
       html += `<a class="card-body-link" href="${escapeAttr(toAbsoluteUrl(url))}">${escapeHtml(url)}</a>`;
@@ -8069,6 +8109,32 @@ function updateRecordingUi(active) {
   renderUsersRail();
   renderUserTasks();
   renderNodes();
+  syncSidebarAiSpheres();
+}
+
+let recordingIndicatorAiLoader = null;
+
+function syncRecordingIndicatorAiIcon(mood = "listening") {
+  const canvas = document.getElementById("recordingIndicatorAiSphere");
+  if (!canvas) return;
+  if (!recordingIndicatorAiLoader) {
+    recordingIndicatorAiLoader = new GrokDodecahedronRenderer(canvas, {
+      size: 18,
+      speed: mood === "thinking" ? 1.6 : 1,
+      intensity: 1,
+      mood
+    });
+  } else {
+    recordingIndicatorAiLoader.setSpeed(mood === "thinking" ? 1.6 : 1);
+    recordingIndicatorAiLoader.setMood(mood);
+  }
+  recordingIndicatorAiLoader.start();
+}
+
+function stopRecordingIndicatorAiIcon() {
+  if (recordingIndicatorAiLoader) {
+    recordingIndicatorAiLoader.stop();
+  }
 }
 
 function setRecordingIndicatorText(text) {
@@ -8084,6 +8150,7 @@ function setRecordingIndicatorText(text) {
 function startRecordingTimer() {
   if (!recordingIndicator) return;
   recordingIndicator.hidden = false;
+  syncRecordingIndicatorAiIcon("listening");
   const tick = () => {
     if (!recordingState) return;
     const elapsed = Math.max(0, Math.floor((Date.now() - recordingState.startedAt) / 1000));
@@ -8110,6 +8177,7 @@ function showRecordingSavingState() {
   if (!recordingIndicator) return;
   recordingIndicator.hidden = false;
   recordingIndicator.classList.add("saving");
+  syncRecordingIndicatorAiIcon("thinking");
   const stopBtn = document.getElementById("recordingIndicatorStop");
   if (stopBtn) stopBtn.hidden = true;
   setRecordingIndicatorText("Saving recording...");
@@ -8117,6 +8185,7 @@ function showRecordingSavingState() {
 
 function hideRecordingIndicator() {
   stopRecordingTimer();
+  stopRecordingIndicatorAiIcon();
   if (!recordingIndicator) return;
   recordingIndicator.classList.remove("saving");
   const stopBtn = document.getElementById("recordingIndicatorStop");
@@ -8155,31 +8224,130 @@ function extractCardMediaInfo(node) {
 }
 
 let cardMediaAskSeq = 0;
+let activeFloatingMediaAskBar = null;
 
-function syncCardMediaAskBarUi(nodeId, busy) {
-  const cardEl = nodesLayer.querySelector(`.task-card[data-id="${nodeId}"]`);
-  const askForm = cardEl?.querySelector(".card-media-ask-bar");
-  if (!askForm) return;
-  const inputEl = askForm.querySelector(".card-media-ask-input");
-  const sendBtn = askForm.querySelector(".card-media-ask-send");
-  if (busy) {
-    askForm.hidden = false;
-  } else {
-    askForm.hidden = true;
+function closeFloatingMediaAskBar() {
+  if (activeFloatingMediaAskBar) {
+    activeFloatingMediaAskBar.remove();
+    activeFloatingMediaAskBar = null;
   }
-  if (inputEl) {
-    inputEl.disabled = busy;
+}
+
+document.addEventListener("pointerdown", ev => {
+  if (
+    activeFloatingMediaAskBar &&
+    !activeFloatingMediaAskBar.contains(ev.target) &&
+    !ev.target.closest?.(".card-inline-media-ai")
+  ) {
+    closeFloatingMediaAskBar();
   }
-  if (sendBtn) {
-    sendBtn.classList.toggle("is-stop", busy);
-    sendBtn.type = busy ? "button" : "submit";
-    sendBtn.title = busy ? "Parar requisição" : "Enviar pergunta (Enter)";
-    sendBtn.setAttribute("aria-label", busy ? "Parar requisição" : "Enviar pergunta");
-    sendBtn.innerHTML = busy
-      ? `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none" /></svg>`
-      : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>`;
-    sendBtn.disabled = busy ? false : !String(inputEl?.value || "").trim();
+});
+
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Escape" && activeFloatingMediaAskBar) {
+    closeFloatingMediaAskBar();
   }
+});
+
+function openFloatingMediaAskBar(anchorBtn, node, mediaInfo) {
+  const prevAnchor = activeFloatingMediaAskBar?._anchorBtn || null;
+  closeFloatingMediaAskBar();
+  if (prevAnchor === anchorBtn) return;
+
+  const isVideo = mediaInfo.kind === "video";
+  const placeholder =
+    mediaInfo.kind === "image"
+      ? "Pergunte à IA sobre esta imagem..."
+      : mediaInfo.kind === "audio"
+        ? "Pergunte à IA sobre este áudio..."
+        : "Pergunte à IA sobre este vídeo ou áudio...";
+
+  const form = document.createElement("form");
+  form.className = "card-media-ask-bar floating-media-ask-bar";
+  form._anchorBtn = anchorBtn;
+  form.innerHTML = `
+    ${isVideo ? `<button class="card-media-mode-btn" type="button" data-audio-only="false" title="Modo atual: Vídeo + áudio (clique para analisar apenas o áudio e economizar ~9x tokens)">Vídeo</button>` : ""}
+    <textarea class="card-media-ask-input" rows="1" placeholder="${escapeAttr(placeholder)}" autocomplete="off"></textarea>
+    <button class="card-media-ask-send" type="submit" title="Enviar pergunta (Enter · Shift+Enter nova linha)" aria-label="Enviar pergunta" disabled>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>
+    </button>
+  `;
+
+  document.body.appendChild(form);
+  activeFloatingMediaAskBar = form;
+
+  const rect = anchorBtn.getBoundingClientRect();
+  const barWidth = Math.min(340, window.innerWidth - 24);
+  form.style.width = `${barWidth}px`;
+  const left = Math.max(12, Math.min(rect.right - barWidth, window.innerWidth - barWidth - 12));
+  const positionBar = () => {
+    const barHeight = form.offsetHeight || 44;
+    const top = rect.bottom + 8 + barHeight > window.innerHeight
+      ? Math.max(12, rect.top - barHeight - 8)
+      : rect.bottom + 8;
+    form.style.left = `${Math.round(left)}px`;
+    form.style.top = `${Math.round(top)}px`;
+  };
+  positionBar();
+
+  const inputEl = form.querySelector(".card-media-ask-input");
+  const sendBtn = form.querySelector(".card-media-ask-send");
+  const modeBtn = form.querySelector(".card-media-mode-btn");
+
+  const autoResizeInput = () => {
+    if (!inputEl) return;
+    inputEl.style.height = "auto";
+    inputEl.style.height = `${Math.min(120, Math.max(28, inputEl.scrollHeight))}px`;
+    positionBar();
+  };
+
+  modeBtn?.addEventListener("click", ev => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const nextAudioOnly = modeBtn.dataset.audioOnly !== "true";
+    modeBtn.dataset.audioOnly = nextAudioOnly ? "true" : "false";
+    modeBtn.classList.toggle("is-audio-only", nextAudioOnly);
+    modeBtn.textContent = nextAudioOnly ? "Só áudio" : "Vídeo";
+    modeBtn.title = nextAudioOnly
+      ? "Modo atual: Apenas áudio (~9x menos tokens · clique para incluir vídeo)"
+      : "Modo atual: Vídeo + áudio (clique para analisar apenas o áudio e economizar ~9x tokens)";
+    if (inputEl) {
+      inputEl.placeholder = nextAudioOnly
+        ? "Pergunte à IA sobre o áudio deste vídeo..."
+        : "Pergunte à IA sobre este vídeo ou áudio...";
+      inputEl.focus();
+    }
+  });
+
+  inputEl?.addEventListener("input", () => {
+    if (sendBtn) sendBtn.disabled = !String(inputEl.value || "").trim();
+    autoResizeInput();
+  });
+
+  inputEl?.addEventListener("keydown", ev => {
+    if (ev.key === "Enter" && !ev.shiftKey) {
+      ev.preventDefault();
+      if (String(inputEl.value || "").trim()) {
+        form.requestSubmit();
+      }
+    }
+  });
+
+  form.addEventListener("submit", async ev => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const q = String(inputEl?.value || "").trim();
+    if (!q || cardAnalyzingState) return;
+    const audioOnly = modeBtn?.dataset.audioOnly === "true";
+    closeFloatingMediaAskBar();
+    await askAiAboutCardMedia(node, mediaInfo, q, { audioOnly });
+  });
+
+  inputEl?.focus();
+}
+
+function syncCardMediaAskBarUi() {
+  closeFloatingMediaAskBar();
 }
 
 function stopActiveCardMediaAsk(nodeId) {
@@ -8192,7 +8360,7 @@ function stopActiveCardMediaAsk(nodeId) {
   renderUserTasks();
 }
 
-async function askAiAboutCardMedia(node, mediaInfo, question) {
+async function askAiAboutCardMedia(node, mediaInfo, question, { audioOnly = false } = {}) {
   if (!invoke || !node || !mediaInfo || !question) return;
   const user = activeUser();
   const task = activeMainTask();
@@ -8216,12 +8384,14 @@ async function askAiAboutCardMedia(node, mediaInfo, question) {
       .replace(/<[^>]+>/g, " ")
       .trim();
     const res = await invoke("ask_ai_about_media", {
-      userId: mediaInfo.userId,
-      file: mediaInfo.file,
+      userId: mediaInfo.userId || "",
+      file: mediaInfo.file || "",
       question,
       mediaKind: mediaInfo.kind || null,
       cardContext: cardContext || null,
-      apiKey: getGeminiApiKey() || null
+      apiKey: getGeminiApiKey() || null,
+      audioOnly: Boolean(audioOnly),
+      imageDataUrl: mediaInfo.imageDataUrl || null
     });
     if (requestId !== cardMediaAskSeq) return;
     const answerText = String(res?.text || "").trim();
@@ -8670,7 +8840,12 @@ function insertTranscriptionIntoBoard(tState, transcriptText, usedTokens = 0) {
   }
 
   const existing = String(getNodeContent(node) || "").trim();
-  const combined = existing ? `${existing}\n${transcriptText}` : transcriptText;
+  const tokCount = Number(usedTokens) || 0;
+  const tokLabel = tokCount > 0
+    ? `\n<i>· ${tokCount >= 1000 ? `${(tokCount / 1000).toFixed(1)}k` : tokCount} tok</i>`
+    : "";
+  const entryText = `${transcriptText}${tokLabel}`;
+  const combined = existing ? `${existing}\n${entryText}` : entryText;
   setNodeContent(node, combined);
   if (usedTokens > 0) {
     node.aiTranscribeTokens = (Number(node.aiTranscribeTokens) || 0) + usedTokens;
@@ -8741,10 +8916,11 @@ function syncCardAnalyzingIndicator(targetNodeId = null) {
   }
 
   const cardEl = nodesLayer.querySelector(`.task-card[data-id="${activeId}"]`);
-  const canvas = cardEl?.querySelector(".card-transcribe-btn.analyzing .card-analyzing-sphere") || null;
-  const textEl = cardEl?.querySelector(".card-transcribe-btn.analyzing .card-analyzing-text") || null;
+  const btn = cardEl?.querySelector(".card-transcribe-btn.analyzing") || null;
+  const canvas = btn?.querySelector(".card-analyzing-sphere") || null;
+  const textEl = btn?.querySelector(".card-analyzing-text") || null;
 
-  if (!canvas) {
+  if (!canvas || !btn) {
     if (cardAnalyzingSphereLoader) {
       cardAnalyzingSphereLoader.stop();
       cardAnalyzingSphereLoader = null;
@@ -8754,19 +8930,56 @@ function syncCardAnalyzingIndicator(targetNodeId = null) {
     return;
   }
 
+  const useEyes = getSelectedAiIconStyle() === "flat-eyes";
+  btn.classList.toggle("has-ai-eyes", useEyes);
+
   if (cardAnalyzingCanvasRef !== canvas) {
     cardAnalyzingSphereLoader?.stop();
     cardAnalyzingCanvasRef = canvas;
     cardAnalyzingSphereLoader = new GrokDodecahedronRenderer(canvas, {
-      size: 20,
+      size: 15,
       speed: 1.65,
-      intensity: 1
+      intensity: 1,
+      mood: "thinking"
     });
     cardAnalyzingSphereLoader.start();
     if (textEl) {
       cardAnalyzingPhraseCycler.start(textEl, AI_CARD_ANALYZING_PHRASES);
     }
+    if (!btn.dataset.analyzingStopHoverBound) {
+      btn.dataset.analyzingStopHoverBound = "1";
+      btn.addEventListener("mouseenter", () => {
+        if (cardAnalyzingCanvasRef === canvas) {
+          cardAnalyzingSphereLoader?.setStopMorph(true);
+        }
+      });
+      btn.addEventListener("mouseleave", () => {
+        if (cardAnalyzingCanvasRef === canvas) {
+          cardAnalyzingSphereLoader?.setStopMorph(false);
+        }
+      });
+    }
   }
+  cardAnalyzingSphereLoader?.setStopMorph(btn.matches(":hover"));
+}
+
+let cardMediaAiSphereRenderers = [];
+
+function syncCardMediaAiSpheres() {
+  cardMediaAiSphereRenderers.forEach(r => r.stop());
+  cardMediaAiSphereRenderers = [];
+  if (!nodesLayer) return;
+  nodesLayer.querySelectorAll(".card-media-ai-sphere").forEach(canvas => {
+    const renderer = new GrokDodecahedronRenderer(canvas, {
+      size: 16,
+      speed: 0.45,
+      intensity: 0.78,
+      monochrome: true,
+      subtle: true
+    });
+    renderer.start();
+    cardMediaAiSphereRenderers.push(renderer);
+  });
 }
 
 let cardRecordingSphereLoader = null;
@@ -8807,7 +9020,7 @@ function syncCardRecordingIndicator(targetNodeId = null) {
     cardRecordingCanvasRef = canvas;
     cardRecordingBtnRef = btn;
     cardRecordingSphereLoader = new GrokDodecahedronRenderer(canvas, {
-      size: 18,
+      size: 15,
       speed: 1,
       intensity: 1,
       mood: "listening"
@@ -8845,7 +9058,7 @@ function updateTranscribeUi(active, targetNodeId = null, analyzing = false, star
       tokEl.textContent = isRec && startedAt ? formatEstimatedAudioTokens(Date.now() - startedAt) : "";
     }
     btn.title = isAna
-      ? "Analyzing media with AI..."
+      ? "Parar análise da IA"
       : isRec
         ? "Finalizar gravação e enviar para análise da IA"
         : "Gravar áudio (PC e microfone) para análise e transcrição com IA";
@@ -10363,9 +10576,29 @@ function initAiTranslatorPanel() {
     panel.style.width = `${AI_PANEL_DEFAULT_WIDTH}px`;
   }
 
+  function evaluateCanvasCompanionMood() {
+    const user = activeUser();
+    const tasks = user?.tasks || [];
+    if (!tasks.length) return "normal";
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const hasOverdue = tasks.some(
+      t => (t.status || "ongoing") !== "complete" && t.endDate && String(t.endDate) < todayIso
+    );
+    if (hasOverdue) return "worried";
+    const allComplete = tasks.every(t => (t.status || "ongoing") === "complete");
+    if (allComplete) return "happy";
+    return "normal";
+  }
+
   const topbarGrokCanvas = document.getElementById("topbarGrokDodecahedron");
   const topbarGrokLoader = topbarGrokCanvas
-    ? new GrokDodecahedronRenderer(topbarGrokCanvas, { size: 30, speed: 1, intensity: 0.85 })
+    ? new GrokDodecahedronRenderer(topbarGrokCanvas, {
+        size: 30,
+        speed: 1,
+        intensity: 0.85,
+        autonomousMoods: true,
+        getAmbientMood: evaluateCanvasCompanionMood
+      })
     : null;
   topbarGrokLoader?.start();
   let chatGrokLoader = null;
@@ -10771,8 +11004,8 @@ function initAiTranslatorPanel() {
         : `Soltar ${label} em janela flutuante sobre todos os apps (ou arraste o topo)`;
       detachTranslatorBtn.setAttribute("aria-label", detachTranslatorBtn.title);
       detachTranslatorBtn.innerHTML = isTranslatorFloating
-        ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H3v-6"/><path d="M14 10 3 21"/><path d="M6 11V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-6"/></svg>`
-        : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
+        ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`
+        : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H3v-6"/><path d="M14 10 3 21"/><path d="M6 11V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-6"/></svg>`;
     }
     if (panelTitleEl) {
       if (isChat) {
@@ -10880,6 +11113,20 @@ function initAiTranslatorPanel() {
   }
 
   window.toggleAiTranslatorPanel = togglePanel;
+  window.openFloatingAiChatOnly = () => {
+    currentMode = "chat";
+    panel.hidden = false;
+    if (translateView) translateView.hidden = true;
+    if (chatView) chatView.hidden = false;
+    isTranslatorFloating = true;
+    document.body.classList.add("translator-floating-mode", "chat-floating-mode");
+    syncTopbarActiveButtons();
+    requestAnimationFrame(() => {
+      renderSessionsList();
+      renderChatMessages();
+      chatInput?.focus();
+    });
+  };
 
   openTranslateBtn?.addEventListener("click", () => togglePanel(null, "translate"));
   openChatBtn?.addEventListener("click", () => togglePanel(null, "chat"));
@@ -10896,6 +11143,14 @@ function initAiTranslatorPanel() {
   });
 
   minimizeFloatingBtn?.addEventListener("click", () => {
+    if (!invoke) return;
+    if (isTranslatorFloating) {
+      const iconColor = getSelectedAiIconColor?.() || null;
+      invoke("hide_window", { iconColor }).catch(err =>
+        console.warn("Could not hide floating chat to tray", err)
+      );
+      return;
+    }
     minimizeWindow();
   });
 
@@ -14298,6 +14553,9 @@ const taskReminderService = new TaskReminderService({
 taskReminderService.start();
 
 if (window.__TAURI__?.event?.listen) {
+  window.__TAURI__.event.listen("open-floating-ai-chat", () => {
+    window.openFloatingAiChatOnly?.();
+  });
   window.__TAURI__.event.listen("reminder-overlay-action", ev => {
     const payload = ev?.payload || {};
     const action = payload.action;

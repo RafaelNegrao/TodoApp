@@ -61,6 +61,19 @@ struct SavedMainWindowBounds {
 #[derive(Default)]
 struct FloatingTranslatorState(Mutex<Option<SavedMainWindowBounds>>);
 
+#[derive(Default, Clone)]
+struct DesktopAiFabInfo {
+    pre_minimize_bounds: Option<SavedMainWindowBounds>,
+    minimized_to_ai: bool,
+    icon_color: Option<String>,
+    anim_gen: u64,
+}
+
+#[derive(Default)]
+struct DesktopAiFabState(Mutex<DesktopAiFabInfo>);
+
+const MAIN_TRAY_ID: &str = "main-tray";
+
 const MAIN_WINDOW_MIN_WIDTH: f64 = 820.0;
 const MAIN_WINDOW_MIN_HEIGHT: f64 = 540.0;
 const MAIN_WINDOW_DEFAULT_WIDTH: f64 = 1180.0;
@@ -133,6 +146,8 @@ fn set_translator_floating_mode(
         let _ = window.set_focus();
     } else {
         let _ = window.set_always_on_top(false);
+        let _ = window.set_skip_taskbar(false);
+        set_ai_tray_mode(&app, false, None);
         let _ = window.set_min_size(Some(tauri::LogicalSize::new(
             MAIN_WINDOW_MIN_WIDTH,
             MAIN_WINDOW_MIN_HEIGHT,
@@ -172,11 +187,263 @@ fn set_translator_floating_mode(
     Ok(())
 }
 
+fn parse_hex_rgb(hex: Option<&str>) -> (u8, u8, u8) {
+    let clean = hex.unwrap_or("#6366f1").trim().trim_start_matches('#');
+    if clean.len() == 6 {
+        if let (Ok(r), Ok(g), Ok(b)) = (
+            u8::from_str_radix(&clean[0..2], 16),
+            u8::from_str_radix(&clean[2..4], 16),
+            u8::from_str_radix(&clean[4..6], 16),
+        ) {
+            return (r, g, b);
+        }
+    }
+    (99, 102, 241)
+}
+
+#[derive(Clone, Copy)]
+struct AiTrayAnimFrame {
+    gaze_x: f32,
+    gaze_y: f32,
+    blink: f32,
+    happy: bool,
+    curious: bool,
+    ring_pulse: f32,
+    ring_rgb: (u8, u8, u8),
+}
+
+fn compute_ai_tray_frame(t: f32, base_rgb: (u8, u8, u8)) -> AiTrayAnimFrame {
+    // Periodic blink every ~3.4s
+    let blink_phase = t % 3.4;
+    let blink = if blink_phase < 0.09 {
+        blink_phase / 0.09
+    } else if blink_phase < 0.18 {
+        1.0 - (blink_phase - 0.09) / 0.09
+    } else {
+        0.0
+    };
+
+    // Smooth look-around gaze
+    let gaze_x = (t * 0.65).sin() * 1.45 + (t * 0.27).cos() * 0.55;
+    let gaze_y = (t * 0.42).sin() * 0.85;
+
+    // Occasional expressive moods (happy or curious for ~2.6s every ~15s)
+    let mood_cycle = t % 30.0;
+    let happy = mood_cycle > 12.0 && mood_cycle < 14.6;
+    let curious = mood_cycle > 26.5 && mood_cycle < 29.0;
+
+    let ring_rgb = if happy {
+        (34, 197, 94)
+    } else if curious {
+        (6, 182, 212)
+    } else {
+        base_rgb
+    };
+
+    let ring_pulse = (t * 2.2).sin() * 0.22;
+
+    AiTrayAnimFrame {
+        gaze_x,
+        gaze_y,
+        blink,
+        happy,
+        curious,
+        ring_pulse,
+        ring_rgb,
+    }
+}
+
+fn build_ai_tray_icon_frame(frame: AiTrayAnimFrame) -> tauri::image::Image<'static> {
+    let size: u32 = 32;
+    let (rr, rg, rb) = frame.ring_rgb;
+    let mut rgba = vec![0u8; (size * size * 4) as usize];
+    let center = (size as f32) / 2.0;
+    let outer_r = (15.5_f32 + frame.ring_pulse).min(15.85);
+    let inner_r = 11.3_f32;
+    let eye_scale_y = (1.0 - frame.blink * 0.84).max(0.16);
+
+    for y in 0..size {
+        for x in 0..size {
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            let dx = px - center;
+            let dy = py - center;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            let outer_alpha = (outer_r + 0.65 - dist).clamp(0.0, 1.0);
+            if outer_alpha <= 0.0 {
+                continue;
+            }
+
+            let inner_t = (inner_r + 0.6 - dist).clamp(0.0, 1.0);
+            let mut r = (rr as f32) * (1.0 - inner_t) + 10.0 * inner_t;
+            let mut g = (rg as f32) * (1.0 - inner_t) + 12.0 * inner_t;
+            let mut b = (rb as f32) * (1.0 - inner_t) + 16.0 * inner_t;
+
+            let mut eye_alpha = 0.0_f32;
+            let base_y = center + frame.gaze_y;
+            for (idx_eye, offset_x) in [-3.7_f32, 3.7_f32].iter().enumerate() {
+                let eye_cx = center + offset_x + frame.gaze_x;
+                if frame.happy {
+                    // Upward smiling arc eye
+                    let ex = px - eye_cx;
+                    let ey = py - (base_y + 0.7);
+                    let arc_r = 2.4_f32;
+                    let arc_dist = (ex * ex + ey * ey).sqrt();
+                    if ey <= 0.4 {
+                        let ring_d = (arc_dist - arc_r).abs();
+                        let a = (1.25 - ring_d).clamp(0.0, 1.0);
+                        if a > eye_alpha {
+                            eye_alpha = a;
+                        }
+                    }
+                } else {
+                    let curious_boost = if frame.curious && idx_eye == 1 { 1.18 } else { 1.0 };
+                    let eye_r = 1.9_f32 * curious_boost;
+                    let eye_half_h = (3.75_f32 * curious_boost * eye_scale_y).max(eye_r * 0.45);
+                    let ex = (px - eye_cx).abs();
+                    let ey = (py - base_y).abs();
+                    let clamped_y = (ey - (eye_half_h - eye_r).max(0.0)).max(0.0);
+                    let eye_dist = (ex * ex + clamped_y * clamped_y).sqrt();
+                    let a = (eye_r + 0.55 - eye_dist).clamp(0.0, 1.0);
+                    if a > eye_alpha {
+                        eye_alpha = a;
+                    }
+                }
+            }
+
+            if eye_alpha > 0.0 {
+                r = r * (1.0 - eye_alpha) + 255.0 * eye_alpha;
+                g = g * (1.0 - eye_alpha) + 255.0 * eye_alpha;
+                b = b * (1.0 - eye_alpha) + 255.0 * eye_alpha;
+            }
+
+            let idx = ((y * size + x) * 4) as usize;
+            rgba[idx] = r.round().clamp(0.0, 255.0) as u8;
+            rgba[idx + 1] = g.round().clamp(0.0, 255.0) as u8;
+            rgba[idx + 2] = b.round().clamp(0.0, 255.0) as u8;
+            rgba[idx + 3] = (outer_alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+
+    tauri::image::Image::new_owned(rgba, size, size)
+}
+
+fn set_ai_tray_mode(app: &tauri::AppHandle, ai_mode: bool, hex_color: Option<&str>) {
+    let (generation, effective_color) = {
+        let state = app.state::<DesktopAiFabState>();
+        let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(c) = hex_color {
+            guard.icon_color = Some(c.to_string());
+        }
+        guard.minimized_to_ai = ai_mode;
+        guard.anim_gen = guard.anim_gen.wrapping_add(1);
+        (guard.anim_gen, guard.icon_color.clone())
+    };
+
+    if let Some(tray) = app.tray_by_id(MAIN_TRAY_ID) {
+        if ai_mode {
+            let base_rgb = parse_hex_rgb(effective_color.as_deref());
+            let _ = tray.set_icon(Some(build_ai_tray_icon_frame(compute_ai_tray_frame(
+                0.0, base_rgb,
+            ))));
+            let _ = tray.set_tooltip(Some("TODOCompanion · Chat da IA"));
+
+            let app_clone = app.clone();
+            std::thread::spawn(move || {
+                let start = std::time::Instant::now();
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(85));
+                    let active_gen = app_clone
+                        .state::<DesktopAiFabState>()
+                        .0
+                        .lock()
+                        .map(|g| (g.minimized_to_ai, g.anim_gen, g.icon_color.clone()))
+                        .unwrap_or((false, 0, None));
+                    if !active_gen.0 || active_gen.1 != generation {
+                        break;
+                    }
+                    let rgb = parse_hex_rgb(active_gen.2.as_deref());
+                    let t = start.elapsed().as_secs_f32();
+                    let frame = compute_ai_tray_frame(t, rgb);
+                    if let Some(t_icon) = app_clone.tray_by_id(MAIN_TRAY_ID) {
+                        let _ = t_icon.set_icon(Some(build_ai_tray_icon_frame(frame)));
+                    } else {
+                        break;
+                    }
+                }
+            });
+        } else {
+            if let Some(default_icon) =
+                tray_icon_image().or_else(|| app.default_window_icon().cloned())
+            {
+                let _ = tray.set_icon(Some(default_icon));
+            }
+            let _ = tray.set_tooltip(Some("TODOCompanion"));
+        }
+    }
+}
+
+fn open_floating_chat_from_tray(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    let fab_info = app
+        .state::<DesktopAiFabState>()
+        .0
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default();
+
+    if let Ok(mut guard) = app.state::<FloatingTranslatorState>().0.lock() {
+        if guard.is_none() {
+            *guard = fab_info.pre_minimize_bounds.or_else(|| {
+                Some(SavedMainWindowBounds {
+                    was_maximized: window.is_maximized().unwrap_or(false),
+                    position: window.outer_position().ok(),
+                    size: window.inner_size().ok(),
+                })
+            });
+        }
+    }
+
+    let _ = app.emit("open-floating-ai-chat", ());
+
+    let _ = window.set_skip_taskbar(true);
+    let _ = window.unminimize();
+    if window.is_maximized().unwrap_or(false) {
+        let _ = window.unmaximize();
+    }
+
+    let width = 400.0_f64;
+    let height = 560.0_f64;
+    let _ = window.set_min_size(Some(tauri::LogicalSize::new(300.0, 340.0)));
+    let _ = window.set_size(tauri::LogicalSize::new(width, height));
+
+    if let Ok(Some(monitor)) = window.current_monitor().or_else(|_| app.primary_monitor()) {
+        let scale = monitor.scale_factor().max(0.5);
+        let mon_x = monitor.position().x as f64 / scale;
+        let mon_y = monitor.position().y as f64 / scale;
+        let mon_w = monitor.size().width as f64 / scale;
+        let mon_h = monitor.size().height as f64 / scale;
+        let target_x = (mon_x + mon_w - width - 16.0).max(mon_x + 12.0);
+        let target_y = (mon_y + mon_h - height - 56.0).max(mon_y + 12.0);
+        let _ = window.set_position(tauri::LogicalPosition::new(target_x, target_y));
+    }
+
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_resizable(true);
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
 #[tauri::command]
-fn minimize_window(app: tauri::AppHandle) {
+async fn minimize_window(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.minimize();
     }
+    Ok(())
 }
 
 #[tauri::command]
@@ -5283,6 +5550,186 @@ fn payload_contains_audio_or_video(payload: &serde_json::Value) -> bool {
     false
 }
 
+#[cfg(target_os = "windows")]
+fn extract_audio_only_m4a_from_video(video_path: &Path) -> Result<PathBuf, String> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Media::MediaFoundation::{
+        IMFMediaType, IMFSinkWriter, IMFSourceReader, MFAudioFormat_AAC,
+        MFAudioFormat_PCM, MFCreateMediaType, MFCreateSinkWriterFromURL,
+        MFCreateSourceReaderFromURL, MFMediaType_Audio, MFShutdown, MFStartup, MFSTARTUP_NOSOCKET,
+        MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, MF_MT_AAC_PAYLOAD_TYPE,
+        MF_MT_AUDIO_AVG_BYTES_PER_SECOND, MF_MT_AUDIO_BITS_PER_SAMPLE,
+        MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND,
+        MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_SOURCE_READER_ALL_STREAMS,
+        MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_VERSION,
+    };
+    use windows::Win32::System::Com::{
+        CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED,
+    };
+
+    const SAMPLE_RATE: u32 = 44_100;
+    const CHANNELS: u32 = 1;
+    const BITS: u32 = 16;
+    const AAC_AVG_BYTES: u32 = 8_000; // 64 kbps mono AAC-LC (otimo para fala e ultra leve)
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let out_path = std::env::temp_dir().join(format!("todocompanion_audio_{stamp}.m4a"));
+
+    let to_wide = |p: &Path| -> Vec<u16> {
+        OsStr::new(p).encode_wide().chain(std::iter::once(0)).collect()
+    };
+
+    let src_wide = to_wide(video_path);
+    let dst_wide = to_wide(&out_path);
+
+    unsafe {
+        let com_hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let com_inited = com_hr.is_ok();
+        let mf_started = MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET).is_ok();
+        if !mf_started {
+            if com_inited {
+                CoUninitialize();
+            }
+            return Err("Falha ao inicializar Media Foundation".to_string());
+        }
+
+        let run_result: Result<(), String> = (|| {
+            let reader: IMFSourceReader =
+                MFCreateSourceReaderFromURL(PCWSTR(src_wide.as_ptr()), None)
+                    .map_err(|e| format!("Falha ao abrir vídeo para extrair áudio: {e}"))?;
+
+            reader
+                .SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS.0 as u32, false)
+                .map_err(|e| format!("Falha ao desmarcar streams: {e}"))?;
+            reader
+                .SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32, true)
+                .map_err(|e| format!("Vídeo não possui faixa de áudio: {e}"))?;
+
+            let pcm_type: IMFMediaType = MFCreateMediaType().map_err(|e| format!("{e}"))?;
+            pcm_type.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).map_err(|e| format!("{e}"))?;
+            pcm_type.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_PCM).map_err(|e| format!("{e}"))?;
+            pcm_type.SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, CHANNELS).map_err(|e| format!("{e}"))?;
+            pcm_type.SetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND, SAMPLE_RATE).map_err(|e| format!("{e}"))?;
+            pcm_type.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, BITS).map_err(|e| format!("{e}"))?;
+            let block_align = CHANNELS * (BITS / 8);
+            pcm_type.SetUINT32(&MF_MT_AUDIO_BLOCK_ALIGNMENT, block_align).map_err(|e| format!("{e}"))?;
+            pcm_type
+                .SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, SAMPLE_RATE * block_align)
+                .map_err(|e| format!("{e}"))?;
+
+            reader
+                .SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32, None, &pcm_type)
+                .map_err(|e| format!("Falha ao configurar decodificador PCM: {e}"))?;
+
+            let writer: IMFSinkWriter =
+                MFCreateSinkWriterFromURL(PCWSTR(dst_wide.as_ptr()), None, None)
+                    .map_err(|e| format!("Falha ao criar arquivo .m4a temporário: {e}"))?;
+
+            let aac_type: IMFMediaType = MFCreateMediaType().map_err(|e| format!("{e}"))?;
+            aac_type.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).map_err(|e| format!("{e}"))?;
+            aac_type.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_AAC).map_err(|e| format!("{e}"))?;
+            aac_type.SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, CHANNELS).map_err(|e| format!("{e}"))?;
+            aac_type.SetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND, SAMPLE_RATE).map_err(|e| format!("{e}"))?;
+            aac_type.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, BITS).map_err(|e| format!("{e}"))?;
+            aac_type.SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, AAC_AVG_BYTES).map_err(|e| format!("{e}"))?;
+            aac_type.SetUINT32(&MF_MT_AAC_PAYLOAD_TYPE, 0).map_err(|e| format!("{e}"))?;
+            aac_type.SetUINT32(&MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29).map_err(|e| format!("{e}"))?;
+
+            let out_stream = writer
+                .AddStream(&aac_type)
+                .map_err(|e| format!("Falha ao adicionar stream AAC: {e}"))?;
+            writer
+                .SetInputMediaType(out_stream, &pcm_type, None)
+                .map_err(|e| format!("Falha ao configurar entrada PCM do writer: {e}"))?;
+            writer
+                .BeginWriting()
+                .map_err(|e| format!("Falha ao iniciar escrita do áudio: {e}"))?;
+
+            let mut wrote_any = false;
+            loop {
+                let mut flags: u32 = 0;
+                let mut sample = None;
+                reader
+                    .ReadSample(
+                        MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32,
+                        0,
+                        None,
+                        Some(&mut flags),
+                        None,
+                        Some(&mut sample),
+                    )
+                    .map_err(|e| format!("Falha ao ler amostras de áudio: {e}"))?;
+
+                // MF_SOURCE_READERF_ENDOFSTREAM = 0x00000002
+                if (flags & 0x0000_0002) != 0 {
+                    break;
+                }
+                if let Some(s) = sample {
+                    writer
+                        .WriteSample(out_stream, &s)
+                        .map_err(|e| format!("Falha ao gravar amostra AAC: {e}"))?;
+                    wrote_any = true;
+                }
+            }
+
+            writer
+                .Finalize()
+                .map_err(|e| format!("Falha ao finalizar .m4a: {e}"))?;
+
+            if !wrote_any {
+                return Err("Nenhuma amostra de áudio encontrada no vídeo".to_string());
+            }
+            Ok(())
+        })();
+
+        let _ = MFShutdown();
+        if com_inited {
+            CoUninitialize();
+        }
+
+        match run_result {
+            Ok(()) => Ok(out_path),
+            Err(e) => {
+                let _ = fs::remove_file(&out_path);
+                Err(e)
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn extract_audio_only_m4a_from_video(_video_path: &Path) -> Result<PathBuf, String> {
+    Err("Extração nativa de áudio disponível apenas no Windows".to_string())
+}
+
+fn question_requests_audio_only(question: &str) -> bool {
+    let lower = question.to_lowercase();
+    let audio_hints = [
+        "só o áudio",
+        "so o audio",
+        "apenas o áudio",
+        "apenas o audio",
+        "somente o áudio",
+        "somente o audio",
+        "só áudio",
+        "so audio",
+        "apenas áudio",
+        "apenas audio",
+        "não visual",
+        "nao visual",
+        "sem vídeo",
+        "sem video",
+        "sem imagem",
+        "audio only",
+    ];
+    audio_hints.iter().any(|h| lower.contains(h))
+}
+
 #[tauri::command]
 async fn ask_ai_about_media(
     app: tauri::AppHandle,
@@ -5292,13 +5739,19 @@ async fn ask_ai_about_media(
     media_kind: Option<String>,
     card_context: Option<String>,
     api_key: Option<String>,
+    audio_only: Option<bool>,
+    image_data_url: Option<String>,
 ) -> Result<AiTranscribeReply, String> {
     let trimmed_q = question.trim().to_string();
     if trimmed_q.is_empty() {
-        return Err("Digite uma pergunta sobre o vídeo ou áudio.".to_string());
+        return Err("Digite uma pergunta sobre a mídia.".to_string());
     }
+    let has_inline_image = image_data_url
+        .as_deref()
+        .map(|s| s.trim().starts_with("data:image/"))
+        .unwrap_or(false);
     let path = app_root(&app)?.join(&user_id).join(&file);
-    if !path.exists() {
+    if !has_inline_image && !path.exists() {
         return Err("Arquivo de mídia não encontrado".to_string());
     }
     let (key, all_models) = resolve_gemini_key_and_models(api_key)?;
@@ -5323,32 +5776,86 @@ async fn ask_ai_about_media(
 
     tauri::async_runtime::spawn_blocking(move || {
         let kind_ref = media_kind.as_deref();
-        let mime = infer_media_mime_with_kind(&path, kind_ref);
-        let is_audio = matches!(kind_ref, Some("audio")) || mime.starts_with("audio/");
-        let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        if size == 0 {
-            return Err("Arquivo de mídia vazio".to_string());
-        }
-
         let mut uploaded_file_name: Option<String> = None;
-        let media_part = if size <= 15 * 1024 * 1024 {
-            let bytes = fs::read(&path).map_err(|e| format!("Falha ao ler arquivo: {e}"))?;
-            serde_json::json!({
-                "inlineData": {
-                    "mimeType": mime,
-                    "data": encode_base64(&bytes)
+        let is_image: bool;
+        let is_audio: bool;
+        let media_part: serde_json::Value;
+
+        if let Some(ref data_url) = image_data_url {
+            let trimmed_url = data_url.trim();
+            if let Some(rest) = trimmed_url.strip_prefix("data:") {
+                if let Some((meta, b64)) = rest.split_once(",") {
+                    let img_mime = meta.split(';').next().unwrap_or("image/png").trim();
+                    is_image = true;
+                    is_audio = false;
+                    media_part = serde_json::json!({
+                        "inlineData": {
+                            "mimeType": img_mime,
+                            "data": b64.trim()
+                        }
+                    });
+                } else {
+                    return Err("Imagem em formato inválido".to_string());
                 }
-            })
+            } else {
+                return Err("Imagem em formato inválido".to_string());
+            }
         } else {
-            let (fname, furi) = upload_gemini_media_file(&key, &path, mime)?;
-            uploaded_file_name = Some(fname);
-            serde_json::json!({
-                "fileData": {
-                    "mimeType": mime,
-                    "fileUri": furi
+            let orig_mime = infer_media_mime_with_kind(&path, kind_ref);
+            is_image = matches!(kind_ref, Some("image")) || orig_mime.starts_with("image/");
+            let orig_is_audio = matches!(kind_ref, Some("audio")) || orig_mime.starts_with("audio/");
+            let wants_audio_only = audio_only.unwrap_or(false) || question_requests_audio_only(&trimmed_q);
+
+            let mut temp_audio_path: Option<PathBuf> = None;
+            let (effective_path, mime, eff_is_audio) = if !orig_is_audio && !is_image && wants_audio_only {
+                match extract_audio_only_m4a_from_video(&path) {
+                    Ok(m4a_path) => {
+                        temp_audio_path = Some(m4a_path.clone());
+                        (m4a_path, "audio/mp4", true)
+                    }
+                    Err(_) => (path.clone(), orig_mime, orig_is_audio),
                 }
-            })
-        };
+            } else {
+                (path.clone(), orig_mime, orig_is_audio)
+            };
+            is_audio = eff_is_audio;
+
+            let size = fs::metadata(&effective_path).map(|m| m.len()).unwrap_or(0);
+            if size == 0 {
+                if let Some(ref tmp) = temp_audio_path {
+                    let _ = fs::remove_file(tmp);
+                }
+                return Err("Arquivo de mídia vazio".to_string());
+            }
+
+            let media_part_res: Result<serde_json::Value, String> = if size <= 15 * 1024 * 1024 {
+                fs::read(&effective_path)
+                    .map_err(|e| format!("Falha ao ler arquivo: {e}"))
+                    .map(|bytes| {
+                        serde_json::json!({
+                            "inlineData": {
+                                "mimeType": mime,
+                                "data": encode_base64(&bytes)
+                            }
+                        })
+                    })
+            } else {
+                upload_gemini_media_file(&key, &effective_path, mime).map(|(fname, furi)| {
+                    uploaded_file_name = Some(fname);
+                    serde_json::json!({
+                        "fileData": {
+                            "mimeType": mime,
+                            "fileUri": furi
+                        }
+                    })
+                })
+            };
+
+            if let Some(ref tmp) = temp_audio_path {
+                let _ = fs::remove_file(tmp);
+            }
+            media_part = media_part_res?;
+        }
 
         let context_block = card_context
             .as_deref()
@@ -5360,16 +5867,36 @@ async fn ask_ai_about_media(
             })
             .unwrap_or_default();
 
-        let media_label = if is_audio { "áudio" } else { "vídeo/áudio" };
-        let prompt = format!(
-            "Você recebeu um arquivo de {media_label} anexado acima. Ouça atentamente TODO o conteúdo falado do início ao fim, prestando atenção em nomes, números, datas, tarefas, decisões e detalhes mencionados.\n\
-             Responda diretamente à pergunta do usuário abaixo no mesmo idioma da pergunta, baseando-se fielmente no que é dito na mídia.\n\
-             Regras:\n\
-             - Responda de forma clara, precisa e objetiva, citando os fatos/trechos relevantes ouvidos.\n\
-             - Use apenas texto limpo e <b>...</b> para destaques/títulos se necessário (NÃO use markdown com # ou **).\n\
-             - Só diga que a informação não aparece se realmente não for mencionada em nenhum momento da gravação.{context_block}\n\n\
-             Pergunta do usuário: {trimmed_q}"
-        );
+        let prompt = if is_image {
+            format!(
+                "Você recebeu uma imagem anexada acima. Analise cuidadosamente todos os elementos visuais, textos, código, números e detalhes presentes na imagem.\n\
+                 Responda diretamente à pergunta do usuário abaixo no mesmo idioma da pergunta, baseando-se fielmente no que é visível.\n\
+                 Regras:\n\
+                 - Responda de forma clara, precisa e objetiva.\n\
+                 - Use apenas texto limpo e <b>...</b> para destaques/títulos se necessário (NÃO use markdown com # ou **).{context_block}\n\n\
+                 Pergunta do usuário: {trimmed_q}"
+            )
+        } else if is_audio {
+            format!(
+                "Você recebeu um arquivo de áudio anexado acima. Ouça atentamente TODO o conteúdo falado do início ao fim, prestando atenção em nomes, números, datas, tarefas, decisões e detalhes mencionados.\n\
+                 Responda diretamente à pergunta do usuário abaixo no mesmo idioma da pergunta, baseando-se fielmente no que é dito na mídia.\n\
+                 Regras:\n\
+                 - Responda de forma clara, precisa e objetiva, citando os fatos/trechos relevantes ouvidos.\n\
+                 - Use apenas texto limpo e <b>...</b> para destaques/títulos se necessário (NÃO use markdown com # ou **).\n\
+                 - Só diga que a informação não aparece se realmente não for mencionada em nenhum momento da gravação.{context_block}\n\n\
+                 Pergunta do usuário: {trimmed_q}"
+            )
+        } else {
+            format!(
+                "Você recebeu um vídeo anexado acima. Analise cuidadosamente TANTO o conteúdo VISUAL (telas, textos, código, ações e elementos mostrados) QUANTO o ÁUDIO falado do início ao fim.\n\
+                 Responda diretamente à pergunta do usuário abaixo no mesmo idioma da pergunta, baseando-se fielmente no que é visto e ouvido no vídeo.\n\
+                 Regras:\n\
+                 - Responda de forma clara, precisa e objetiva, citando os detalhes visuais e/ou falados relevantes.\n\
+                 - Use apenas texto limpo e <b>...</b> para destaques/títulos se necessário (NÃO use markdown com # ou **).\n\
+                 - Só diga que a informação não aparece se realmente não for vista nem mencionada no vídeo.{context_block}\n\n\
+                 Pergunta do usuário: {trimmed_q}"
+            )
+        };
 
         let payload = serde_json::json!({
             "contents": [{
@@ -6053,9 +6580,28 @@ fn quit_app(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
-fn hide_window(app: tauri::AppHandle) {
+fn hide_window(
+    app: tauri::AppHandle,
+    fab_state: State<'_, DesktopAiFabState>,
+    floating_state: State<'_, FloatingTranslatorState>,
+    icon_color: Option<String>,
+) {
     if let Some(window) = app.get_webview_window("main") {
+        let is_floating = floating_state
+            .0
+            .lock()
+            .map(|g| g.is_some())
+            .unwrap_or(false);
+        if !is_floating {
+            let mut guard = fab_state.0.lock().unwrap_or_else(|e| e.into_inner());
+            guard.pre_minimize_bounds = Some(SavedMainWindowBounds {
+                was_maximized: window.is_maximized().unwrap_or(false),
+                position: window.outer_position().ok(),
+                size: window.inner_size().ok(),
+            });
+        }
         let _ = window.hide();
+        set_ai_tray_mode(&app, true, icon_color.as_deref());
     }
 }
 
@@ -6502,12 +7048,64 @@ fn tray_icon_image() -> Option<tauri::image::Image<'static>> {
         .map(|(rgba, w, h)| tauri::image::Image::new(rgba.as_slice(), *w, *h))
 }
 
+#[cfg(target_os = "windows")]
+fn promote_windows_tray_icon() -> bool {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok(settings_key) = hkcu.open_subkey("Control Panel\\NotifyIconSettings") else {
+        return false;
+    };
+
+    let current_exe_name = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_lowercase()))
+        .unwrap_or_else(|| "todoapp.exe".to_string());
+
+    let mut newly_promoted = false;
+    for sub_name in settings_key.enum_keys().flatten() {
+        let subpath = format!("Control Panel\\NotifyIconSettings\\{sub_name}");
+        let Ok(subkey) = hkcu.open_subkey_with_flags(&subpath, KEY_READ | KEY_WRITE) else {
+            continue;
+        };
+        let exe_path = subkey
+            .get_value::<String, _>("ExecutablePath")
+            .unwrap_or_default()
+            .to_lowercase();
+        let tooltip = subkey
+            .get_value::<String, _>("InitialTooltip")
+            .unwrap_or_default();
+
+        let matches_app = exe_path.contains(&current_exe_name)
+            || exe_path.contains("todocompanion")
+            || exe_path.contains("todoapp")
+            || tooltip.starts_with("TODOCompanion");
+
+        if matches_app {
+            let current_val = subkey.get_value::<u32, _>("IsPromoted").unwrap_or(0);
+            if current_val != 1 {
+                if subkey.set_value("IsPromoted", &1u32).is_ok() {
+                    newly_promoted = true;
+                }
+            }
+        }
+    }
+    newly_promoted
+}
+
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = promote_windows_tray_icon();
+    }
     let show_item = MenuItemBuilder::with_id("tray_show", "Mostrar").build(app)?;
+    let chat_item = MenuItemBuilder::with_id("tray_ai_chat", "Chat da IA").build(app)?;
     let hide_item = MenuItemBuilder::with_id("tray_hide", "Ocultar").build(app)?;
     let quit_item = MenuItemBuilder::with_id("tray_quit", "Sair").build(app)?;
     let menu = MenuBuilder::new(app)
         .item(&show_item)
+        .item(&chat_item)
         .item(&hide_item)
         .separator()
         .item(&quit_item)
@@ -6517,22 +7115,37 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .or_else(|| app.default_window_icon().cloned())
         .expect("Tray icon could not be loaded from assets/icon.ico");
 
-    TrayIconBuilder::with_id("main-tray")
+    TrayIconBuilder::with_id(MAIN_TRAY_ID)
         .tooltip("TODOCompanion")
         .icon(icon)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "tray_show" => {
+                set_ai_tray_mode(app, false, None);
                 if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_skip_taskbar(false);
                     let _ = window.unminimize();
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
             }
+            "tray_ai_chat" => {
+                open_floating_chat_from_tray(app);
+            }
             "tray_hide" => {
                 if let Some(window) = app.get_webview_window("main") {
+                    {
+                        let state = app.state::<DesktopAiFabState>();
+                        let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+                        guard.pre_minimize_bounds = Some(SavedMainWindowBounds {
+                            was_maximized: window.is_maximized().unwrap_or(false),
+                            position: window.outer_position().ok(),
+                            size: window.inner_size().ok(),
+                        });
+                    }
                     let _ = window.hide();
+                    set_ai_tray_mode(app, true, None);
                 }
             }
             "tray_quit" => {
@@ -6547,14 +7160,52 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 ..
             } = event
             {
-                if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    let _ = window.unminimize();
-                    let _ = window.show();
-                    let _ = window.set_focus();
+                let app = tray.app_handle();
+                let is_ai_mode = app
+                    .state::<DesktopAiFabState>()
+                    .0
+                    .lock()
+                    .map(|g| g.minimized_to_ai)
+                    .unwrap_or(false);
+                if is_ai_mode {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let visible_and_open = window.is_visible().unwrap_or(false)
+                            && !window.is_minimized().unwrap_or(false);
+                        if visible_and_open {
+                            let _ = window.hide();
+                        } else {
+                            open_floating_chat_from_tray(app);
+                        }
+                    }
+                } else {
+                    set_ai_tray_mode(app, false, None);
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.set_skip_taskbar(false);
+                        let _ = window.unminimize();
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
                 }
             }
         })
         .build(app)?;
+
+    #[cfg(target_os = "windows")]
+    {
+        let app_clone = app.clone();
+        std::thread::spawn(move || {
+            for delay_ms in [350u64, 1100u64] {
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                if promote_windows_tray_icon() {
+                    if let Some(tray) = app_clone.tray_by_id(MAIN_TRAY_ID) {
+                        let _ = tray.set_visible(false);
+                        std::thread::sleep(std::time::Duration::from_millis(45));
+                        let _ = tray.set_visible(true);
+                    }
+                }
+            }
+        });
+    }
 
     Ok(())
 }
@@ -6805,16 +7456,28 @@ fn main() {
             app.manage(AiAudioCaptureState::default());
             app.manage(NativeScreenRecorderState::default());
             app.manage(FloatingTranslatorState::default());
+            app.manage(DesktopAiFabState::default());
 
             if let Some(window) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                window.on_window_event(move |event| match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
                         if let Some(w) = app_handle.get_webview_window("main") {
+                            {
+                                let state = app_handle.state::<DesktopAiFabState>();
+                                let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+                                guard.pre_minimize_bounds = Some(SavedMainWindowBounds {
+                                    was_maximized: w.is_maximized().unwrap_or(false),
+                                    position: w.outer_position().ok(),
+                                    size: w.inner_size().ok(),
+                                });
+                            }
                             let _ = w.hide();
+                            set_ai_tray_mode(&app_handle, true, None);
                         }
                     }
+                    _ => {}
                 });
             }
 
