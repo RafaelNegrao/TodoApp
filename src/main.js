@@ -2026,7 +2026,18 @@ function renderNodes() {
         const src = mediaAiBtn.dataset.mediaSrc || "";
         let mediaTarget = null;
         if (kind === "image" && src) {
-          mediaTarget = { kind: "image", imageDataUrl: src, userId: "", file: "", mediaKey: src };
+          const localMatch = src.match(/^(?:https?:\/\/todomedia\.localhost|todomedia:\/\/localhost)\/([^/]+)\/(.+)$/i);
+          if (localMatch) {
+            mediaTarget = {
+              kind: "image",
+              imageDataUrl: null,
+              userId: decodeURIComponent(localMatch[1]),
+              file: decodeURIComponent(localMatch[2]),
+              mediaKey: src
+            };
+          } else {
+            mediaTarget = { kind: "image", imageDataUrl: src, userId: "", file: "", mediaKey: src };
+          }
         } else if (ref) {
           const slash = ref.indexOf("/");
           if (slash > 0) {
@@ -5829,10 +5840,11 @@ function buildLocalMediaUrl(mediaRef) {
 
 function insertMediaTokenIntoNode(node, mediaRef, kind = "video", cardEl = null) {
   if (!node || !mediaRef) return;
-  const tokenKind = kind === "audio" ? "audio" : "video";
+  const tokenKind = kind === "audio" ? "audio" : kind === "image" ? "image" : "video";
+  const tokenRef = tokenKind === "image" ? buildLocalMediaUrl(mediaRef) : mediaRef;
   const currentContent = getNodeContent(node) || "";
   const separator = currentContent && !currentContent.endsWith("\n") ? "\n" : "";
-  setNodeContent(node, `${currentContent}${separator}![${tokenKind}](${mediaRef})\n`);
+  setNodeContent(node, `${currentContent}${separator}![${tokenKind}](${tokenRef})\n`);
   if ((node.w || MIN_CARD_WIDTH) < 336) {
     node.w = 336;
   }
@@ -6100,7 +6112,7 @@ function embedMediaAttachmentIntoBoard(att) {
   const board = activeBoard();
   if (!user || !board || !att?.file) return;
   const mediaRef = `${user.id}/${att.file}`;
-  const kind = isAudioAttachment(att) ? "audio" : "video";
+  const kind = isAudioAttachment(att) ? "audio" : isImageAttachment(att) ? "image" : "video";
 
   const selected = selectedNodeId
     ? board.nodes.find(n => n.id === selectedNodeId && !n.isRoot && n.type !== "image")
@@ -6112,8 +6124,9 @@ function embedMediaAttachmentIntoBoard(att) {
     return;
   }
 
-  const defaultHeight = kind === "audio" ? 144 : 288;
-  const id = createCanvasCardAtPopup(`![${kind}](${mediaRef})\n`, 360, defaultHeight);
+  const tokenRef = kind === "image" ? buildLocalMediaUrl(mediaRef) : mediaRef;
+  const defaultHeight = kind === "audio" ? 144 : kind === "image" ? 260 : 288;
+  const id = createCanvasCardAtPopup(`![${kind}](${tokenRef})\n`, 360, defaultHeight);
   if (id) {
     setTimeout(() => {
       const cardEl = nodesLayer.querySelector(`.task-card[data-id="${id}"]`);
@@ -9547,11 +9560,15 @@ function openAttachmentRowMenu(anchorBtn, row, nameEl, att) {
   menu.className = "attachments-row-menu";
   menu.setAttribute("role", "menu");
 
-  if (isVideoAttachment(att) || isAudioAttachment(att)) {
+  if (isVideoAttachment(att) || isAudioAttachment(att) || isImageAttachment(att)) {
     const embedItem = document.createElement("button");
     embedItem.type = "button";
     embedItem.className = "attachments-row-menu-item";
-    const mediaIcon = isAudioAttachment(att) ? icons.audio : icons.video;
+    const mediaIcon = isAudioAttachment(att)
+      ? icons.audio
+      : isImageAttachment(att)
+        ? icons.image
+        : icons.video;
     embedItem.innerHTML = `${mediaIcon}<span>Colocar no card</span>`;
     embedItem.addEventListener("click", event => {
       event.stopPropagation();
