@@ -112,6 +112,44 @@ const CARD_COLOR_PRESETS = [
   { id: "slate", label: "Cinza", hex: "#94a3b8" }
 ];
 
+function normalizeCardColor(raw) {
+  const key = String(raw || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const aliasMap = {
+    default: "default",
+    padrao: "default",
+    nenhuma: "default",
+    none: "default",
+    limpar: "default",
+    transparent: "default",
+    blue: "blue",
+    azul: "blue",
+    emerald: "emerald",
+    green: "emerald",
+    verde: "emerald",
+    amber: "amber",
+    yellow: "amber",
+    amarelo: "amber",
+    orange: "orange",
+    laranja: "orange",
+    rose: "rose",
+    red: "rose",
+    vermelho: "rose",
+    rosa: "rose",
+    violet: "violet",
+    purple: "violet",
+    roxo: "violet",
+    slate: "slate",
+    gray: "slate",
+    grey: "slate",
+    cinza: "slate"
+  };
+  return aliasMap[key] || null;
+}
+
 let activeCardColorPopover = null;
 function closeCardColorPopover() {
   if (activeCardColorPopover) {
@@ -402,6 +440,7 @@ async function init() {
       stopScreenRecording();
     }
   });
+  document.getElementById("closeAttachmentsSidebarBtn")?.addEventListener("click", closeAttachmentsPopup);
   canvasAttachButton.addEventListener("pointerdown", () => preserveAttachmentReferenceTarget());
   canvasAttachButton.addEventListener("click", handleAttachButtonClick);
   canvasAttachInput.addEventListener("change", handleAttachInputChange);
@@ -497,7 +536,6 @@ async function init() {
     if (!userCreateForm.hidden && !userCreateForm.contains(event.target) && !addBoardButton.contains(event.target)) closeUserCreatePopup();
     const tep = document.querySelector("#taskEditPopup");
     if (!tep.hidden && !tep.contains(event.target) && !event.target.closest(".user-task-info")) closeTaskEditPopup();
-    if (!attachmentsPopup.hidden && !attachmentsPopup.contains(event.target) && !canvasAttachButton.contains(event.target) && !event.target.closest(".attachments-row-menu")) closeAttachmentsPopup();
     if (!event.target.closest(".attachments-row-menu") && !event.target.closest(".attachments-more-btn")) closeAllAttachmentRowMenus();
     if (!attachmentReferencePopup.hidden && !attachmentReferencePopup.contains(event.target) && !attachmentReferenceState?.editor?.contains(event.target)) {
       closeAttachmentReferencePicker();
@@ -6111,14 +6149,43 @@ function embedMediaAttachmentIntoBoard(att) {
   const user = activeUser();
   const board = activeBoard();
   if (!user || !board || !att?.file) return;
-  const mediaRef = `${user.id}/${att.file}`;
-  const kind = isAudioAttachment(att) ? "audio" : isImageAttachment(att) ? "image" : "video";
 
+  const isVideo = isVideoAttachment(att);
+  const isAudio = isAudioAttachment(att);
+  const isImage = isImageAttachment(att);
   const selected = selectedNodeId
     ? board.nodes.find(n => n.id === selectedNodeId && !n.isRoot && n.type !== "image")
     : null;
 
-  closeAttachmentsPopup();
+  if (!isVideo && !isAudio && !isImage) {
+    const label = String(att.name || att.file || "document").replace(/[\]\r\n]+/g, " ").trim() || "document";
+    const token = `@[${label}](attachment:${att.id})`;
+    if (selected) {
+      const currentContent = getNodeContent(selected) || "";
+      const separator = currentContent && !currentContent.endsWith("\n") ? "\n" : "";
+      setNodeContent(selected, `${currentContent}${separator}${token}\n`);
+      saveState();
+      renderNodes();
+      renderLinks();
+      setTimeout(() => {
+        const cardEl = nodesLayer.querySelector(`.task-card[data-id="${selected.id}"]`);
+        if (cardEl) scheduleNodeHeightSync(selected.id, cardEl);
+      }, 60);
+      return;
+    }
+    const id = createCanvasCardAtPopup(`${token}\n`, 280, 120);
+    if (id) {
+      setTimeout(() => {
+        const cardEl = nodesLayer.querySelector(`.task-card[data-id="${id}"]`);
+        if (cardEl) scheduleNodeHeightSync(id, cardEl);
+      }, 120);
+    }
+    return;
+  }
+
+  const mediaRef = `${user.id}/${att.file}`;
+  const kind = isAudio ? "audio" : isImage ? "image" : "video";
+
   if (selected) {
     insertMediaTokenIntoNode(selected, mediaRef, kind);
     return;
@@ -9560,7 +9627,7 @@ function openAttachmentRowMenu(anchorBtn, row, nameEl, att) {
   menu.className = "attachments-row-menu";
   menu.setAttribute("role", "menu");
 
-  if (isVideoAttachment(att) || isAudioAttachment(att) || isImageAttachment(att)) {
+  {
     const embedItem = document.createElement("button");
     embedItem.type = "button";
     embedItem.className = "attachments-row-menu-item";
@@ -9568,7 +9635,9 @@ function openAttachmentRowMenu(anchorBtn, row, nameEl, att) {
       ? icons.audio
       : isImageAttachment(att)
         ? icons.image
-        : icons.video;
+        : isVideoAttachment(att)
+          ? icons.video
+          : icons.file;
     embedItem.innerHTML = `${mediaIcon}<span>Colocar no card</span>`;
     embedItem.addEventListener("click", event => {
       event.stopPropagation();
@@ -9705,18 +9774,30 @@ async function handleAttachButtonClick() {
 }
 
 function openAttachmentsPopup() {
+  if (!document.body.classList.contains("translator-floating-mode")) {
+    window.toggleAiTranslatorPanel?.(false);
+  }
   renderAttachmentsPopup();
   canvasAttachButton?.classList.add("active");
   attachmentsPopup.hidden = false;
-  requestAnimationFrame(() => attachmentsPopup.classList.add("visible"));
+  requestAnimationFrame(() => {
+    attachmentsPopup.classList.add("visible");
+    applyViewport();
+    renderLinks();
+  });
   syncActiveTaskAttachmentsWithDisk();
 }
 
 function closeAttachmentsPopup() {
+  if (attachmentsPopup.hidden) return;
   closeAllAttachmentRowMenus();
   canvasAttachButton?.classList.remove("active");
   attachmentsPopup.classList.remove("visible");
   attachmentsPopup.hidden = true;
+  requestAnimationFrame(() => {
+    applyViewport();
+    renderLinks();
+  });
 }
 
 const transcribingAttachments = new Map();
@@ -10660,12 +10741,12 @@ function initAiTranslatorPanel() {
   const topbarGrokCanvas = document.getElementById("topbarGrokDodecahedron");
   const topbarGrokLoader = topbarGrokCanvas
     ? new GrokDodecahedronRenderer(topbarGrokCanvas, {
-        size: 30,
-        speed: 1,
-        intensity: 0.85,
-        autonomousMoods: true,
-        getAmbientMood: evaluateCanvasCompanionMood
-      })
+      size: 30,
+      speed: 1,
+      intensity: 0.85,
+      autonomousMoods: true,
+      getAmbientMood: evaluateCanvasCompanionMood
+    })
     : null;
   topbarGrokLoader?.start();
   let chatGrokLoader = null;
@@ -11163,6 +11244,7 @@ function initAiTranslatorPanel() {
     syncTopbarActiveButtons();
 
     if (!panel.hidden) {
+      closeAttachmentsPopup();
       requestAnimationFrame(() => {
         if (currentMode === "chat") {
           renderSessionsList();
@@ -13846,6 +13928,8 @@ async function runSingleAiAppAction(action, ctx) {
         w: cardW,
         h: cardH
       };
+      const tableColor = normalizeCardColor(action.color);
+      if (tableColor && tableColor !== "default") newNode.color = tableColor;
       if (parentId) {
         board.nodes.splice(getReplyInsertionIndex(board, parentId), 0, newNode);
         const link = { id: makeId("link"), from: parentId, to: id, fromPort: "out", toPort: "in" };
@@ -13943,6 +14027,8 @@ async function runSingleAiAppAction(action, ctx) {
         w: cardW,
         h: cardH
       };
+      const cardColor = normalizeCardColor(action.color);
+      if (cardColor && cardColor !== "default") newNode.color = cardColor;
       if (parentId) {
         board.nodes.splice(getReplyInsertionIndex(board, parentId), 0, newNode);
         const parentNode = board.nodes.find(n => n.id === parentId);
@@ -13985,6 +14071,11 @@ async function runSingleAiAppAction(action, ctx) {
       }
       if (action.status) node.status = normalizeStatus(action.status);
       if (action.criticality !== undefined) node.criticality = clamp(Number(action.criticality), 0, 2);
+      if (action.color !== undefined) {
+        const nextColor = normalizeCardColor(action.color);
+        if (nextColor === "default") delete node.color;
+        else if (nextColor) node.color = nextColor;
+      }
       if (node.type !== "table" && (action.body !== undefined || action.appendBody)) {
         const est = estimateActionCardSize(getNodeContent(node));
         node.w = Math.max(node.w || MIN_CARD_WIDTH, est.w);
@@ -14169,6 +14260,54 @@ async function runSingleAiAppAction(action, ctx) {
       return { message: "Tradutor aberto" };
     }
 
+    case "open_attachments": {
+      if (action.open === false) {
+        closeAttachmentsPopup();
+        return { message: "Barra lateral de anexos fechada" };
+      }
+      openAttachmentsPopup();
+      return { message: "Barra lateral de anexos aberta" };
+    }
+
+    case "set_task_reminder": {
+      const found = findTaskByAction(action, ctx);
+      if (!found) throw new Error("Task não encontrada para definir alarme/lembrete");
+      const { task } = found;
+      let dt = String(action.dateTime || "").trim();
+      if (!dt && action.inMinutes !== undefined) {
+        const mins = Math.max(1, Number(action.inMinutes) || 15);
+        dt = formatLocalDateTimeInput(new Date(Date.now() + mins * 60 * 1000));
+      }
+      if (!dt) {
+        dt = formatLocalDateTimeInput(new Date(Date.now() + 15 * 60 * 1000));
+      }
+      const mode = action.mode === "notification" || action.mode === "reminder" ? "reminder" : "alarm";
+      const nextReminder = normalizeReminder({
+        enabled: true,
+        mode,
+        dateTime: dt,
+        repeat: action.repeat || "none",
+        intervalMinutes: Number(action.intervalMinutes || 30),
+        note: String(action.note || "").trim(),
+        lastTriggeredFor: null
+      });
+      if (!nextReminder) throw new Error("Data/hora inválida para o alarme/lembrete");
+      task.reminder = nextReminder;
+      saveState();
+      renderUserTasks();
+      return { message: `${mode === "alarm" ? "Alarme" : "Lembrete"} definido em "${task.title}" (${dt})` };
+    }
+
+    case "remove_task_reminder": {
+      const found = findTaskByAction(action, ctx);
+      if (!found) throw new Error("Task não encontrada");
+      const { task } = found;
+      delete task.reminder;
+      saveState();
+      renderUserTasks();
+      return { message: `Alarme/lembrete removido de "${task.title}"` };
+    }
+
     case "open_settings": {
       document.getElementById("openSettingsButton")?.click();
       return { message: "Configurações abertas" };
@@ -14197,6 +14336,23 @@ async function runSingleAiAppAction(action, ctx) {
       if (action.translatorMode === "auto" || action.translatorMode === "manual") {
         localStorage.setItem("todocompanion.settings.translatorMode", action.translatorMode);
         window.dispatchEvent(new CustomEvent("app:translator-mode-changed"));
+      }
+      if (action.aiIconStyle === "dodecahedron" || action.aiIconStyle === "flat-eyes") {
+        localStorage.setItem("todocompanion.settings.aiIconStyle", action.aiIconStyle);
+        window.dispatchEvent(new CustomEvent("app:ai-icon-style-changed", { detail: { style: action.aiIconStyle } }));
+      }
+      if (action.aiIconColor && /^#[0-9a-f]{6}$/i.test(String(action.aiIconColor))) {
+        localStorage.setItem("todocompanion.settings.aiIconColor", String(action.aiIconColor));
+        window.dispatchEvent(new CustomEvent("app:ai-icon-style-changed", { detail: { color: String(action.aiIconColor) } }));
+      }
+      if (action.alarmSound) {
+        localStorage.setItem("todocompanion.settings.alarmSound", String(action.alarmSound));
+      }
+      if (typeof action.screenShareProtection === "boolean") {
+        localStorage.setItem("todocompanion.settings.hideFromScreenShare", String(action.screenShareProtection));
+        if (typeof invoke === "function") {
+          invoke("set_screen_share_protection", { enabled: action.screenShareProtection }).catch(() => {});
+        }
       }
       return { message: "Configurações atualizadas" };
     }

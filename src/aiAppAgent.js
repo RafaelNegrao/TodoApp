@@ -301,6 +301,15 @@ export function describeAiAction(action) {
       return `Filtrar tasks por status: "${action.filter || "all"}"`;
     case "open_translator":
       return action.floating ? "Abrir tradutor em janela flutuante" : "Abrir painel do tradutor";
+    case "open_attachments":
+      return action.open === false ? "Fechar barra lateral de anexos" : "Abrir barra lateral de anexos";
+    case "set_task_reminder": {
+      const kind = action.mode === "notification" ? "lembrete" : "alarme";
+      const when = action.dateTime || (action.inMinutes ? `em ${action.inMinutes} min` : "");
+      return `Definir ${kind}${when ? ` (${when})` : ""}${action.taskTitle ? ` em "${action.taskTitle}"` : ""}`;
+    }
+    case "remove_task_reminder":
+      return `Remover alarme/lembrete${action.taskTitle ? ` de "${action.taskTitle}"` : ""}`;
     case "open_settings":
       return "Abrir configurações (Settings)";
     case "update_settings":
@@ -520,6 +529,14 @@ export function buildAppContextSnapshot(state, extras = {}) {
           criticality: t.criticality ?? 0,
           startDate: t.startDate || undefined,
           endDate: t.endDate || undefined,
+          reminder: t.reminder?.enabled
+            ? {
+              mode: t.reminder.mode || "alarm",
+              dateTime: t.reminder.dateTime || "",
+              repeat: t.reminder.repeat || "none",
+              note: t.reminder.note || undefined
+            }
+            : undefined,
           isActive: isTaskActive,
           nodes: slicedNodes.map((n, idx) => {
             const rawBody = String(n.body ?? n.title ?? "");
@@ -531,6 +548,7 @@ export function buildAppContextSnapshot(state, extras = {}) {
               isRoot: idx === 0 || undefined,
               type: n.type && n.type !== "action" ? n.type : undefined,
               status: n.status && n.status !== "ongoing" ? n.status : undefined,
+              color: n.color && n.color !== "default" ? n.color : undefined,
               body: rawBody.replace(/\[\[table:[A-Za-z0-9_-]+\]\]/g, "[tabela]").slice(0, maxChars)
             };
             if (tableMatch) {

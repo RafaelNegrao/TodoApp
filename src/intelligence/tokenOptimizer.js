@@ -3,6 +3,7 @@
 
 export const MODULE_IDS = Object.freeze({
   CORE: "core",
+  APP_GUIDE: "app_guide",
   TASKS: "tasks",
   CANVAS: "canvas",
   FLOWCHARTS: "flowcharts",
@@ -55,12 +56,22 @@ export class PromptModuleRegistry {
         "- `operatorProfile` is the user chatting; `users[]` are task clients/contexts. Work strictly within the active task unless cross-task action is requested."
       ].join("\n"),
 
+      [MODULE_IDS.APP_GUIDE]: [
+        "TODOCOMPANION FULL APP KNOWLEDGE (100%):",
+        "- Hierarchy: Users/Projects (left rail) -> Tasks (tasks sidebar: status, priority, criticality, start/end dates, Alarms & Reminders with custom sounds + Windows topmost overlay) -> Infinite 2D Canvas.",
+        "- Canvas Cards: rich text, checklists ('[ ]'/'[x]'), 8 card colors (default/blue/emerald/amber/orange/rose/violet/slate), 2D flowcharts with ports & arrows, Excel-formula tables, inline video/audio/image/document attachments with per-attachment AI Q&A (Video or Audio-Only extraction).",
+        "- Right Sidebars: AI Chat, Instant Translator (both detachable into floating always-on-top mini-windows), and Attachments sidebar ('Colocar no card' for any file/video/audio/image + Screen+Audio or Audio-Only recording).",
+        "- System & Settings: themes (claude-dark/light-claude/dracula), card font size, link styles/arrows, AI icon style (dodecahedron/flat-eyes + ring color, moods, 256 thinking eye animations), alarm sound, Windows autostart, screen-share protection (WDA_EXCLUDEFROMCAPTURE), and animated AI icon in Windows system tray when closed (×)."
+      ].join("\n"),
+
       [MODULE_IDS.TASKS]: [
-        "TASKS & USERS:",
-        "- Hierarchy: Users -> Tasks (status: ongoing|stopped|complete, priority: low|normal|high|urgent, criticality: 0|1|2, startDate, endDate).",
+        "TASKS, USERS & ALARMS/REMINDERS:",
+        "- Hierarchy: Users -> Tasks (status: ongoing|stopped|complete, priority: low|normal|high|urgent, criticality: 0|1|2, startDate, endDate, reminder).",
         "- Schemas:",
         "  * {\"type\":\"create_task\",\"title\":\"...\",\"priority\":\"low|normal|high|urgent\",\"startDate\":\"YYYY-MM-DD\",\"endDate\":\"YYYY-MM-DD\"}",
         "  * {\"type\":\"update_task\",\"taskId\":\"...\",\"title\":\"...\",\"status\":\"ongoing|stopped|complete\",\"priority\":\"low|normal|high|urgent\",\"criticality\":0|1|2}",
+        "  * {\"type\":\"set_task_reminder\",\"taskId\":\"opt\",\"mode\":\"alarm|notification\",\"dateTime\":\"YYYY-MM-DDTHH:MM\",\"inMinutes\":15,\"repeat\":\"none|daily|weekdays|weekly|interval\",\"intervalMinutes\":30,\"note\":\"...\"}",
+        "  * {\"type\":\"remove_task_reminder\",\"taskId\":\"opt\"}",
         "  * {\"type\":\"select_task\",\"taskId\":\"...\",\"taskTitle\":\"...\"} | {\"type\":\"delete_task\",\"taskId\":\"...\"} | {\"type\":\"duplicate_task\",\"taskId\":\"...\"}",
         "  * {\"type\":\"create_user\",\"name\":\"...\"} | {\"type\":\"rename_user\",\"userId\":\"...\",\"newName\":\"...\"} | {\"type\":\"select_user\",\"userName\":\"...\"} | {\"type\":\"delete_user\",\"userId\":\"...\"}"
       ].join("\n"),
@@ -68,10 +79,11 @@ export class PromptModuleRegistry {
       [MODULE_IDS.CANVAS]: [
         "CANVAS CARDS:",
         "- Never use HTML tags (<br>, <p>, <div>); use '\\n' and '[ ]'/'[x]' for checklists. Omitting `taskId` targets the active task.",
+        "- Card colors (`color`): `default|blue|emerald|amber|orange|rose|violet|slate` (Padrão, Azul, Verde, Amarelo, Laranja, Vermelho, Roxo, Cinza).",
         "- If asked to put previous chat info in a card, pass the full text in `create_card.body`. For 'indique/mostre/foque no canva', use `focus_card` with real `nodes[].id` (`\"$LAST_CARD\"` only after `create_card` in same batch).",
         "- Schemas:",
-        "  * {\"type\":\"create_card\",\"refId\":\"opt\",\"body\":\"...\",\"gridCol\":0,\"gridRow\":0,\"connectParent\":false,\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2,\"parentCardId\":\"id|refId|$LAST_CARD\",\"fromPort\":\"out|in|top|bottom\",\"toPort\":\"in|out|top|bottom\"}",
-        "  * {\"type\":\"update_card\",\"cardId\":\"id\",\"body\":\"...\",\"appendBody\":\"...\",\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2}",
+        "  * {\"type\":\"create_card\",\"refId\":\"opt\",\"body\":\"...\",\"color\":\"default|blue|emerald|amber|orange|rose|violet|slate\",\"gridCol\":0,\"gridRow\":0,\"connectParent\":false,\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2,\"parentCardId\":\"id|refId|$LAST_CARD\",\"fromPort\":\"out|in|top|bottom\",\"toPort\":\"in|out|top|bottom\"}",
+        "  * {\"type\":\"update_card\",\"cardId\":\"id\",\"body\":\"...\",\"appendBody\":\"...\",\"color\":\"default|blue|emerald|amber|orange|rose|violet|slate\",\"status\":\"ongoing|stopped|complete\",\"criticality\":0|1|2}",
         "  * {\"type\":\"focus_card\",\"cardId\":\"id\"} | {\"type\":\"delete_card\",\"cardId\":\"id\"} | {\"type\":\"duplicate_card\",\"cardId\":\"id\"}",
         "  * {\"type\":\"copy_card_to_task\",\"sourceCardId\":\"id\",\"targetTaskTitle\":\"...\"} | {\"type\":\"move_card_to_task\",\"sourceCardId\":\"id\",\"targetTaskTitle\":\"...\"}",
         "  * {\"type\":\"organize_canvas\"} | {\"type\":\"center_canvas\"} | {\"type\":\"copy_text\",\"text\":\"...\"}"
@@ -109,8 +121,8 @@ export class PromptModuleRegistry {
 
       [MODULE_IDS.SETTINGS]: [
         "SETTINGS & TOOLS:",
-        "  * {\"type\":\"set_status_filter\",\"filter\":\"all|ongoing|stopped|complete\"} | {\"type\":\"open_translator\",\"floating\":true|false} | {\"type\":\"open_settings\"}",
-        "  * {\"type\":\"update_settings\",\"theme\":\"claude-dark|light-claude|dracula\",\"cardFontSize\":14,\"linkStyle\":\"orthogonal|bezier\",\"linkArrows\":true|false,\"translatorMode\":\"auto|manual\"}"
+        "  * {\"type\":\"set_status_filter\",\"filter\":\"all|ongoing|stopped|complete\"} | {\"type\":\"open_translator\",\"floating\":true|false} | {\"type\":\"open_attachments\",\"open\":true|false} | {\"type\":\"open_settings\"}",
+        "  * {\"type\":\"update_settings\",\"theme\":\"claude-dark|light-claude|dracula\",\"cardFontSize\":14,\"linkStyle\":\"orthogonal|bezier\",\"linkArrows\":true|false,\"translatorMode\":\"auto|manual\",\"aiIconStyle\":\"dodecahedron|flat-eyes\",\"aiIconColor\":\"#6366f1\",\"alarmSound\":\"crystal|chime|pulse|bell\",\"screenShareProtection\":true|false}"
       ].join("\n"),
 
       [MODULE_IDS.QUESTIONS]: [
@@ -142,6 +154,12 @@ export class PromptModuleRegistry {
     const active = new Set([MODULE_IDS.CORE]);
 
     if (
+      /\b(app|aplicativo|todocompanion|recurso|recursos|funcionalidade|funcionalidades|consegue fazer|pode fazer|sabe fazer|como funciona|como usar|ajuda|help|o que voc[eê] faz|bandeja|tray|gravar|grava[cç][aã]o|flutuante|compartilha|streaming)\b/i.test(lower)
+    ) {
+      active.add(MODULE_IDS.APP_GUIDE);
+    }
+
+    if (
       hasAttachments ||
       hasAppAttachments ||
       willCaptureScreen ||
@@ -158,13 +176,13 @@ export class PromptModuleRegistry {
     }
 
     if (
-      /\b(task|tasks|tarefa|tarefas|projeto|projetos|user|users|usu[aá]rio|usu[aá]rios|cliente|clientes|prioridade|prazo|start\s*date|end\s*date|data final|data inicial)\b/i.test(lower)
+      /\b(task|tasks|tarefa|tarefas|projeto|projetos|user|users|usu[aá]rio|usu[aá]rios|cliente|clientes|prioridade|prazo|start\s*date|end\s*date|data final|data inicial|alarme|alarmes|lembrete|lembretes|despertador|notifica[cç][aã]o|hor[aá]rio|me avis[ae]|avis[ae]r?)\b/i.test(lower)
     ) {
       active.add(MODULE_IDS.TASKS);
     }
 
     if (
-      /\b(card|cards|bloco|blocos|nota|checklist|todo|canva|canvas|quadro|foqu[ea]|indiqu[ea]|mostr[ea]|navegu[ea]|organiz[ea]|centraliz[ea]|copi[ae]|mov[ae]|dupliqu[ae]|exclu[ia]|delet[ea]|apag[ue]|adicion[ea]|cri[ea]|insir[ao]|coloc[ao]|edit[ea]|atualiz[ea])\b/i.test(lower)
+      /\b(card|cards|bloco|blocos|nota|checklist|todo|canva|canvas|quadro|foqu[ea]|indiqu[ea]|mostr[ea]|navegu[ea]|organiz[ea]|centraliz[ea]|copi[ae]|mov[ae]|dupliqu[ae]|exclu[ia]|delet[ea]|apag[ue]|adicion[ea]|cri[ea]|insir[ao]|coloc[ao]|edit[ea]|atualiz[ea]|pint[ae]|cor|cores|colori\w*|azul|verde|amarelo|laranja|vermelho|roxo|cinza)\b/i.test(lower)
     ) {
       active.add(MODULE_IDS.CANVAS);
     }
@@ -192,7 +210,7 @@ export class PromptModuleRegistry {
     }
 
     if (
-      /\b(configura[cç][aã]o|configura[cç][oõ]es|settings|tema|dark|light|dracula|fonte|font\s*size|tradutor|translator|filtro|bezier|orthogonal)\b/i.test(lower)
+      /\b(configura[cç][aã]o|configura[cç][oõ]es|settings|tema|dark|light|dracula|fonte|font\s*size|tradutor|translator|filtro|bezier|orthogonal|[ií]cone|dodecaedro|olhos|som do alarme|compartilha|streaming|bandeja|tray|anexos)\b/i.test(lower)
     ) {
       active.add(MODULE_IDS.SETTINGS);
     }
@@ -223,6 +241,7 @@ export class PromptModuleRegistry {
 
     let needsActionsEnvelope = false;
     for (const modId of [
+      MODULE_IDS.APP_GUIDE,
       MODULE_IDS.ATTACHMENTS,
       MODULE_IDS.INTERNET,
       MODULE_IDS.TASKS,
@@ -490,9 +509,9 @@ export class TokenBudgetManager {
               body: String(n.body || "").slice(0, n.id === contextObj.selectedNodeId ? 320 : 85),
               table: n.table
                 ? {
-                    hasCheckboxes: n.table.hasCheckboxes,
-                    rows: (n.table.rows || []).slice(0, 5)
-                  }
+                  hasCheckboxes: n.table.hasCheckboxes,
+                  rows: (n.table.rows || []).slice(0, 5)
+                }
                 : undefined
             }));
           }

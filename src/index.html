@@ -279,14 +279,6 @@
               </span>
             </button>
           </div>
-          <div class="attachments-popup" id="attachmentsPopup" hidden>
-            <div class="attachments-list" id="attachmentsList"></div>
-            <div class="attachments-footer">
-              <button class="attachments-add" id="attachmentsAdd" type="button">+ Add attachment</button>
-              <button class="attachments-folder" id="attachmentsOpenFolder" type="button"
-                aria-label="Open attachments folder" title="Open attachments folder"></button>
-            </div>
-          </div>
           <div class="attachment-reference-popup" id="attachmentReferencePopup" role="dialog" aria-label="Attachments"
             hidden>
             <div class="attachment-reference-list" id="attachmentReferenceList"></div>
@@ -307,6 +299,24 @@
             <span class="ai-chat-thinking-indicator" id="aiChatThinkingIndicator" aria-hidden="true"></span>
           </button>
         </main>
+
+        <aside class="attachments-popup attachments-sidebar" id="attachmentsPopup" aria-label="Anexos" hidden>
+          <div class="attachments-sidebar-head">
+            <strong class="attachments-sidebar-title">Anexos</strong>
+            <button class="ai-head-icon-btn ai-panel-close" id="closeAttachmentsSidebarBtn" type="button"
+              aria-label="Fechar" title="Fechar (Esc)">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div class="attachments-list" id="attachmentsList"></div>
+          <div class="attachments-footer">
+            <button class="attachments-add" id="attachmentsAdd" type="button">+ Add attachment</button>
+            <button class="attachments-folder" id="attachmentsOpenFolder" type="button"
+              aria-label="Open attachments folder" title="Open attachments folder"></button>
+          </div>
+        </aside>
 
         <aside class="ai-translator-panel" id="aiTranslatorPanel" aria-label="AI Translator and Chat" hidden>
           <div class="ai-panel-resizer" id="aiPanelResizer" title="Drag to resize width (double click to reset)">

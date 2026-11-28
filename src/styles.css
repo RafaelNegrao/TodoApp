@@ -1672,38 +1672,50 @@ button {
 }
 
 .attachments-popup {
-  position: absolute;
-  right: 14px;
-  top: 46px;
-  bottom: auto;
-  z-index: 15;
-  width: 430px;
-  max-width: calc(100vw - 28px);
-  max-height: 360px;
+  position: relative;
+  z-index: 12;
+  flex: 0 0 auto;
+  width: 340px;
+  min-width: 260px;
+  max-width: 440px;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-left: 1px solid var(--line);
+  background: var(--elevated);
+  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+  box-sizing: border-box;
+  animation: ai-panel-in 180ms var(--ease-out);
+}
+
+.attachments-popup[hidden],
+body.translator-floating-mode .attachments-popup {
+  display: none !important;
+}
+
+.attachments-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 10px;
-  border: 1px solid rgba(var(--hi-rgb), 0.13);
-  border-radius: 10px;
-  background: var(--overlay);
-  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.46);
-  opacity: 0;
-  transform: translateY(-6px) scale(0.97);
-  transform-origin: top right;
-  transition: opacity var(--t-fast) var(--ease-out), transform var(--t-mid) var(--ease-spring);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
 }
 
-.attachments-popup[hidden] {
-  display: none;
-}
-
-.attachments-popup.visible {
-  opacity: 1;
-  transform: translateY(0) scale(1);
+.attachments-sidebar-title {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-strong);
+  letter-spacing: -0.01em;
 }
 
 .attachments-list {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
