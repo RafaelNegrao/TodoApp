@@ -364,7 +364,10 @@ async function init() {
   minimizeAppButton?.addEventListener("click", minimizeWindow);
   document.querySelector("#closeAppButton")?.addEventListener("click", () => {
     const iconColor = getSelectedAiIconColor?.() || null;
-    invoke?.("hide_window", { iconColor }).catch(err => console.warn("Could not hide window", err));
+    const iconStyle = getSelectedAiIconStyle?.() || null;
+    invoke?.("hide_window", { iconColor, iconStyle }).catch(err =>
+      console.warn("Could not hide window", err)
+    );
   });
   openSearchButton?.addEventListener("click", openSearchModal);
   searchCloseIcon?.addEventListener("click", closeSearchModal);
@@ -8255,12 +8258,7 @@ function openFloatingMediaAskBar(anchorBtn, node, mediaInfo) {
   if (prevAnchor === anchorBtn) return;
 
   const isVideo = mediaInfo.kind === "video";
-  const placeholder =
-    mediaInfo.kind === "image"
-      ? "Pergunte à IA sobre esta imagem..."
-      : mediaInfo.kind === "audio"
-        ? "Pergunte à IA sobre este áudio..."
-        : "Pergunte à IA sobre este vídeo ou áudio...";
+  const placeholder = "Chat com IA";
 
   const form = document.createElement("form");
   form.className = "card-media-ask-bar floating-media-ask-bar";
@@ -8297,7 +8295,9 @@ function openFloatingMediaAskBar(anchorBtn, node, mediaInfo) {
   const autoResizeInput = () => {
     if (!inputEl) return;
     inputEl.style.height = "auto";
-    inputEl.style.height = `${Math.min(120, Math.max(28, inputEl.scrollHeight))}px`;
+    const nextH = Math.min(120, Math.max(28, inputEl.scrollHeight));
+    inputEl.style.height = `${nextH}px`;
+    inputEl.style.overflowY = inputEl.scrollHeight > 120 ? "auto" : "hidden";
     positionBar();
   };
 
@@ -8311,12 +8311,7 @@ function openFloatingMediaAskBar(anchorBtn, node, mediaInfo) {
     modeBtn.title = nextAudioOnly
       ? "Modo atual: Apenas áudio (~9x menos tokens · clique para incluir vídeo)"
       : "Modo atual: Vídeo + áudio (clique para analisar apenas o áudio e economizar ~9x tokens)";
-    if (inputEl) {
-      inputEl.placeholder = nextAudioOnly
-        ? "Pergunte à IA sobre o áudio deste vídeo..."
-        : "Pergunte à IA sobre este vídeo ou áudio...";
-      inputEl.focus();
-    }
+    inputEl?.focus();
   });
 
   inputEl?.addEventListener("input", () => {
@@ -11146,7 +11141,8 @@ function initAiTranslatorPanel() {
     if (!invoke) return;
     if (isTranslatorFloating) {
       const iconColor = getSelectedAiIconColor?.() || null;
-      invoke("hide_window", { iconColor }).catch(err =>
+      const iconStyle = getSelectedAiIconStyle?.() || null;
+      invoke("hide_window", { iconColor, iconStyle }).catch(err =>
         console.warn("Could not hide floating chat to tray", err)
       );
       return;

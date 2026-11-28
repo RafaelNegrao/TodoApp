@@ -66,6 +66,7 @@ struct DesktopAiFabInfo {
     pre_minimize_bounds: Option<SavedMainWindowBounds>,
     minimized_to_ai: bool,
     icon_color: Option<String>,
+    icon_style: Option<String>,
     anim_gen: u64,
 }
 
@@ -147,7 +148,7 @@ fn set_translator_floating_mode(
     } else {
         let _ = window.set_always_on_top(false);
         let _ = window.set_skip_taskbar(false);
-        set_ai_tray_mode(&app, false, None);
+        set_ai_tray_mode(&app, false, None, None);
         let _ = window.set_min_size(Some(tauri::LogicalSize::new(
             MAIN_WINDOW_MIN_WIDTH,
             MAIN_WINDOW_MIN_HEIGHT,
@@ -208,7 +209,6 @@ struct AiTrayAnimFrame {
     blink: f32,
     happy: bool,
     curious: bool,
-    ring_pulse: f32,
     ring_rgb: (u8, u8, u8),
 }
 
@@ -224,23 +224,13 @@ fn compute_ai_tray_frame(t: f32, base_rgb: (u8, u8, u8)) -> AiTrayAnimFrame {
     };
 
     // Smooth look-around gaze
-    let gaze_x = (t * 0.65).sin() * 1.45 + (t * 0.27).cos() * 0.55;
-    let gaze_y = (t * 0.42).sin() * 0.85;
+    let gaze_x = (t * 0.65).sin() * 1.75 + (t * 0.27).cos() * 0.65;
+    let gaze_y = (t * 0.42).sin() * 1.15;
 
-    // Occasional expressive moods (happy or curious for ~2.6s every ~15s)
+    // Occasional expressive eye moods (color stays fixed to base_rgb)
     let mood_cycle = t % 30.0;
     let happy = mood_cycle > 12.0 && mood_cycle < 14.6;
     let curious = mood_cycle > 26.5 && mood_cycle < 29.0;
-
-    let ring_rgb = if happy {
-        (34, 197, 94)
-    } else if curious {
-        (6, 182, 212)
-    } else {
-        base_rgb
-    };
-
-    let ring_pulse = (t * 2.2).sin() * 0.22;
 
     AiTrayAnimFrame {
         gaze_x,
@@ -248,8 +238,7 @@ fn compute_ai_tray_frame(t: f32, base_rgb: (u8, u8, u8)) -> AiTrayAnimFrame {
         blink,
         happy,
         curious,
-        ring_pulse,
-        ring_rgb,
+        ring_rgb: base_rgb,
     }
 }
 
@@ -258,8 +247,12 @@ fn build_ai_tray_icon_frame(frame: AiTrayAnimFrame) -> tauri::image::Image<'stat
     let (rr, rg, rb) = frame.ring_rgb;
     let mut rgba = vec![0u8; (size * size * 4) as usize];
     let center = (size as f32) / 2.0;
-    let outer_r = (15.5_f32 + frame.ring_pulse).min(15.85);
-    let inner_r = 11.3_f32;
+    let outer_r = 15.6_f32;
+    let inner_r = 11.4_f32;
+    let visor_cx = center + frame.gaze_x * 1.05;
+    let visor_cy = center + frame.gaze_y * 1.05;
+    let eye_base_x = visor_cx + frame.gaze_x * 0.35;
+    let eye_base_y = visor_cy + frame.gaze_y * 0.35;
     let eye_scale_y = (1.0 - frame.blink * 0.84).max(0.16);
 
     for y in 0..size {
@@ -275,41 +268,45 @@ fn build_ai_tray_icon_frame(frame: AiTrayAnimFrame) -> tauri::image::Image<'stat
                 continue;
             }
 
-            let inner_t = (inner_r + 0.6 - dist).clamp(0.0, 1.0);
-            let mut r = (rr as f32) * (1.0 - inner_t) + 10.0 * inner_t;
-            let mut g = (rg as f32) * (1.0 - inner_t) + 12.0 * inner_t;
-            let mut b = (rb as f32) * (1.0 - inner_t) + 16.0 * inner_t;
+            let vdx = px - visor_cx;
+            let vdy = py - visor_cy;
+            let visor_dist = (vdx * vdx + vdy * vdy).sqrt();
+            let inner_t = (inner_r + 0.6 - visor_dist).clamp(0.0, 1.0);
+            let mut r = (rr as f32) * (1.0 - inner_t) + 9.0 * inner_t;
+            let mut g = (rg as f32) * (1.0 - inner_t) + 9.0 * inner_t;
+            let mut b = (rb as f32) * (1.0 - inner_t) + 11.0 * inner_t;
 
             let mut eye_alpha = 0.0_f32;
-            let base_y = center + frame.gaze_y;
-            for (idx_eye, offset_x) in [-3.7_f32, 3.7_f32].iter().enumerate() {
-                let eye_cx = center + offset_x + frame.gaze_x;
-                if frame.happy {
-                    // Upward smiling arc eye
-                    let ex = px - eye_cx;
-                    let ey = py - (base_y + 0.7);
-                    let arc_r = 2.4_f32;
-                    let arc_dist = (ex * ex + ey * ey).sqrt();
-                    if ey <= 0.4 {
-                        let ring_d = (arc_dist - arc_r).abs();
-                        let a = (1.25 - ring_d).clamp(0.0, 1.0);
+            if inner_t > 0.1 {
+                for (idx_eye, offset_x) in [-3.6_f32, 3.6_f32].iter().enumerate() {
+                    let eye_cx = eye_base_x + offset_x;
+                    if frame.happy {
+                        let ex = px - eye_cx;
+                        let ey = py - (eye_base_y + 0.7);
+                        let arc_r = 2.3_f32;
+                        let arc_dist = (ex * ex + ey * ey).sqrt();
+                        if ey <= 0.4 {
+                            let ring_d = (arc_dist - arc_r).abs();
+                            let a = (1.25 - ring_d).clamp(0.0, 1.0);
+                            if a > eye_alpha {
+                                eye_alpha = a;
+                            }
+                        }
+                    } else {
+                        let curious_boost = if frame.curious && idx_eye == 1 { 1.18 } else { 1.0 };
+                        let eye_r = 1.85_f32 * curious_boost;
+                        let eye_half_h = (3.65_f32 * curious_boost * eye_scale_y).max(eye_r * 0.45);
+                        let ex = (px - eye_cx).abs();
+                        let ey = (py - eye_base_y).abs();
+                        let clamped_y = (ey - (eye_half_h - eye_r).max(0.0)).max(0.0);
+                        let eye_dist = (ex * ex + clamped_y * clamped_y).sqrt();
+                        let a = (eye_r + 0.55 - eye_dist).clamp(0.0, 1.0);
                         if a > eye_alpha {
                             eye_alpha = a;
                         }
                     }
-                } else {
-                    let curious_boost = if frame.curious && idx_eye == 1 { 1.18 } else { 1.0 };
-                    let eye_r = 1.9_f32 * curious_boost;
-                    let eye_half_h = (3.75_f32 * curious_boost * eye_scale_y).max(eye_r * 0.45);
-                    let ex = (px - eye_cx).abs();
-                    let ey = (py - base_y).abs();
-                    let clamped_y = (ey - (eye_half_h - eye_r).max(0.0)).max(0.0);
-                    let eye_dist = (ex * ex + clamped_y * clamped_y).sqrt();
-                    let a = (eye_r + 0.55 - eye_dist).clamp(0.0, 1.0);
-                    if a > eye_alpha {
-                        eye_alpha = a;
-                    }
                 }
+                eye_alpha *= inner_t;
             }
 
             if eye_alpha > 0.0 {
@@ -329,24 +326,113 @@ fn build_ai_tray_icon_frame(frame: AiTrayAnimFrame) -> tauri::image::Image<'stat
     tauri::image::Image::new_owned(rgba, size, size)
 }
 
-fn set_ai_tray_mode(app: &tauri::AppHandle, ai_mode: bool, hex_color: Option<&str>) {
-    let (generation, effective_color) = {
+fn build_dodecahedron_tray_icon_frame(t: f32) -> tauri::image::Image<'static> {
+    let size: u32 = 32;
+    let mut rgba = vec![0u8; (size * size * 4) as usize];
+    let center = (size as f32) / 2.0;
+
+    // 20 vertices of a regular dodecahedron normalized to unit radius
+    const PHI: f32 = 1.618_034;
+    const INV_PHI: f32 = 0.618_034;
+    const NORM: f32 = 1.732_050_8; // sqrt(3)
+    let raw_verts: [(f32, f32, f32); 20] = [
+        (1.0, 1.0, 1.0), (1.0, 1.0, -1.0), (1.0, -1.0, 1.0), (1.0, -1.0, -1.0),
+        (-1.0, 1.0, 1.0), (-1.0, 1.0, -1.0), (-1.0, -1.0, 1.0), (-1.0, -1.0, -1.0),
+        (0.0, INV_PHI, PHI), (0.0, INV_PHI, -PHI), (0.0, -INV_PHI, PHI), (0.0, -INV_PHI, -PHI),
+        (INV_PHI, PHI, 0.0), (INV_PHI, -PHI, 0.0), (-INV_PHI, PHI, 0.0), (-INV_PHI, -PHI, 0.0),
+        (PHI, 0.0, INV_PHI), (PHI, 0.0, -INV_PHI), (-PHI, 0.0, INV_PHI), (-PHI, 0.0, -INV_PHI),
+    ];
+
+    let ry = t * 1.15;
+    let rx = t * 0.72 + 0.45;
+    let (sy, cy) = ry.sin_cos();
+    let (sx, cx) = rx.sin_cos();
+
+    let mut projected: [(f32, f32, f32); 20] = [(0.0, 0.0, 0.0); 20];
+    for (i, (vx, vy, vz)) in raw_verts.iter().enumerate() {
+        let nx = vx / NORM;
+        let ny = vy / NORM;
+        let nz = vz / NORM;
+        let x1 = nx * cy + nz * sy;
+        let z1 = -nx * sy + nz * cy;
+        let y2 = ny * cx - z1 * sx;
+        let z2 = ny * sx + z1 * cx;
+        let depth = (z2 + 1.0) * 0.5; // 0..1 (back..front)
+        let persp = 1.0 / (2.6 - z2 * 0.65);
+        let sx_px = center + x1 * persp * 26.5;
+        let sy_px = center + y2 * persp * 26.5;
+        projected[i] = (sx_px, sy_px, depth);
+    }
+
+    projected.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+
+    for (dot_x, dot_y, depth) in projected {
+        let dot_r = 1.45 + depth * 1.35;
+        let brightness = (0.34 + depth * 0.66).clamp(0.0, 1.0);
+        let min_x = ((dot_x - dot_r - 1.0).floor() as i32).max(0) as u32;
+        let max_x = ((dot_x + dot_r + 1.0).ceil() as i32).min((size - 1) as i32) as u32;
+        let min_y = ((dot_y - dot_r - 1.0).floor() as i32).max(0) as u32;
+        let max_y = ((dot_y + dot_r + 1.0).ceil() as i32).min((size - 1) as i32) as u32;
+
+        for y in min_y..=max_y {
+            for x in min_x..=max_x {
+                let px = x as f32 + 0.5;
+                let py = y as f32 + 0.5;
+                let d = ((px - dot_x).powi(2) + (py - dot_y).powi(2)).sqrt();
+                let a = (dot_r + 0.6 - d).clamp(0.0, 1.0) * brightness;
+                if a <= 0.01 {
+                    continue;
+                }
+                let idx = ((y * size + x) * 4) as usize;
+                let dst_a = rgba[idx + 3] as f32 / 255.0;
+                let out_a = a + dst_a * (1.0 - a);
+                rgba[idx] = 255;
+                rgba[idx + 1] = 255;
+                rgba[idx + 2] = 255;
+                rgba[idx + 3] = (out_a * 255.0).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+
+    tauri::image::Image::new_owned(rgba, size, size)
+}
+
+fn render_ai_tray_icon(style: Option<&str>, hex_color: Option<&str>, t: f32) -> tauri::image::Image<'static> {
+    if style == Some("flat-eyes") {
+        let base_rgb = parse_hex_rgb(hex_color);
+        build_ai_tray_icon_frame(compute_ai_tray_frame(t, base_rgb))
+    } else {
+        build_dodecahedron_tray_icon_frame(t)
+    }
+}
+
+fn set_ai_tray_mode(
+    app: &tauri::AppHandle,
+    ai_mode: bool,
+    hex_color: Option<&str>,
+    icon_style: Option<&str>,
+) {
+    let (generation, effective_color, effective_style) = {
         let state = app.state::<DesktopAiFabState>();
         let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(c) = hex_color {
             guard.icon_color = Some(c.to_string());
         }
+        if let Some(s) = icon_style {
+            guard.icon_style = Some(s.to_string());
+        }
         guard.minimized_to_ai = ai_mode;
         guard.anim_gen = guard.anim_gen.wrapping_add(1);
-        (guard.anim_gen, guard.icon_color.clone())
+        (guard.anim_gen, guard.icon_color.clone(), guard.icon_style.clone())
     };
 
     if let Some(tray) = app.tray_by_id(MAIN_TRAY_ID) {
         if ai_mode {
-            let base_rgb = parse_hex_rgb(effective_color.as_deref());
-            let _ = tray.set_icon(Some(build_ai_tray_icon_frame(compute_ai_tray_frame(
-                0.0, base_rgb,
-            ))));
+            let _ = tray.set_icon(Some(render_ai_tray_icon(
+                effective_style.as_deref(),
+                effective_color.as_deref(),
+                0.0,
+            )));
             let _ = tray.set_tooltip(Some("TODOCompanion · Chat da IA"));
 
             let app_clone = app.clone();
@@ -358,16 +444,25 @@ fn set_ai_tray_mode(app: &tauri::AppHandle, ai_mode: bool, hex_color: Option<&st
                         .state::<DesktopAiFabState>()
                         .0
                         .lock()
-                        .map(|g| (g.minimized_to_ai, g.anim_gen, g.icon_color.clone()))
-                        .unwrap_or((false, 0, None));
+                        .map(|g| {
+                            (
+                                g.minimized_to_ai,
+                                g.anim_gen,
+                                g.icon_color.clone(),
+                                g.icon_style.clone(),
+                            )
+                        })
+                        .unwrap_or((false, 0, None, None));
                     if !active_gen.0 || active_gen.1 != generation {
                         break;
                     }
-                    let rgb = parse_hex_rgb(active_gen.2.as_deref());
                     let t = start.elapsed().as_secs_f32();
-                    let frame = compute_ai_tray_frame(t, rgb);
                     if let Some(t_icon) = app_clone.tray_by_id(MAIN_TRAY_ID) {
-                        let _ = t_icon.set_icon(Some(build_ai_tray_icon_frame(frame)));
+                        let _ = t_icon.set_icon(Some(render_ai_tray_icon(
+                            active_gen.3.as_deref(),
+                            active_gen.2.as_deref(),
+                            t,
+                        )));
                     } else {
                         break;
                     }
@@ -6585,6 +6680,7 @@ fn hide_window(
     fab_state: State<'_, DesktopAiFabState>,
     floating_state: State<'_, FloatingTranslatorState>,
     icon_color: Option<String>,
+    icon_style: Option<String>,
 ) {
     if let Some(window) = app.get_webview_window("main") {
         let is_floating = floating_state
@@ -6601,7 +6697,7 @@ fn hide_window(
             });
         }
         let _ = window.hide();
-        set_ai_tray_mode(&app, true, icon_color.as_deref());
+        set_ai_tray_mode(&app, true, icon_color.as_deref(), icon_style.as_deref());
     }
 }
 
@@ -7122,7 +7218,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "tray_show" => {
-                set_ai_tray_mode(app, false, None);
+                set_ai_tray_mode(app, false, None, None);
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_skip_taskbar(false);
                     let _ = window.unminimize();
@@ -7145,7 +7241,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                         });
                     }
                     let _ = window.hide();
-                    set_ai_tray_mode(app, true, None);
+                    set_ai_tray_mode(app, true, None, None);
                 }
             }
             "tray_quit" => {
@@ -7178,7 +7274,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                         }
                     }
                 } else {
-                    set_ai_tray_mode(app, false, None);
+                    set_ai_tray_mode(app, false, None, None);
                     if let Some(window) = app.get_webview_window("main") {
                         let _ = window.set_skip_taskbar(false);
                         let _ = window.unminimize();
@@ -7474,7 +7570,7 @@ fn main() {
                                 });
                             }
                             let _ = w.hide();
-                            set_ai_tray_mode(&app_handle, true, None);
+                            set_ai_tray_mode(&app_handle, true, None, None);
                         }
                     }
                     _ => {}
