@@ -8125,7 +8125,7 @@ function syncRecordingIndicatorAiIcon(mood = "listening") {
       mood
     });
   } else {
-    recordingIndicatorAiLoader.setSpeed(mood === "thinking" ? 1.6 : 1);
+    recordingIndicatorAiLoader.setState({ speed: mood === "thinking" ? 1.6 : 1 });
     recordingIndicatorAiLoader.setMood(mood);
   }
   recordingIndicatorAiLoader.start();
